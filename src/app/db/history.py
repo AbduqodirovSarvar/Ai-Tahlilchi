@@ -18,6 +18,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import batched
+from operator import itemgetter
 from typing import Final
 
 from sqlalchemy import Table, TextClause, and_, bindparam, distinct, func, select, text, update
@@ -56,8 +57,12 @@ from app.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Keeps every statement far below SQLite's bound-parameter limit (32766).
+# IN-clause lookups: keeps every statement far below SQLite's bound-parameter limit (32766).
 CHUNK_SIZE: Final = 500
+# executemany writes bind one row at a time, so the limit does not apply; large batches
+# matter because every async execute costs a thread round trip (aiosqlite), which
+# dominated import time with small batches (10k rows: ~23 s -> see ADR 0002).
+WRITE_BATCH_SIZE: Final = 20_000
 _MOMENT_ODDS_IDENTITY: Final = ("fixture_id", "bookmaker", "market", "selection", "line", "kind")
 _SERIES_ODDS_IDENTITY: Final = (*_MOMENT_ODDS_IDENTITY, "taken_at")
 
@@ -344,7 +349,7 @@ async def _upsert(
         index_where=plan.index_where,
         set_=assignments,
     )
-    for chunk in batched(rows, CHUNK_SIZE, strict=False):
+    for chunk in batched(rows, WRITE_BATCH_SIZE, strict=False):
         await session.execute(statement, list(chunk))
 
 
@@ -353,7 +358,8 @@ def _unique_by(rows: Sequence[RowValues], key: Sequence[str]) -> list[RowValues]
 
     One multi-row upsert statement may not touch the same row twice (PostgreSQL rejects it).
     """
-    unique = {tuple(row[name] for name in key): row for row in rows}
+    key_of = itemgetter(*key)  # C-level key extraction: this runs once per price row
+    unique = {key_of(row): row for row in rows}
     return list(unique.values())
 
 
