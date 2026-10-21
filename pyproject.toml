@@ -160,7 +160,6 @@ known_first_party = ["app"]
 # `tzdata` stays: it is loaded implicitly by `zoneinfo`, never imported.
 DEP002 = [
     "aiosqlite",
-    "alembic",
     "apscheduler",
     "google-genai",
     "httpx",
@@ -170,7 +169,6 @@ DEP002 = [
     "rapidfuzz",
     "scikit-learn",
     "scipy",
-    "sqlalchemy",
     "tenacity",
     "tzdata",
 ]
