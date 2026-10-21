@@ -12,10 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import history
+from app.db._sql import dialect_insert, table_of
 from app.db.history import (
     SeasonCoverage,
-    _dialect_insert,
-    _table_of,
     season_coverage,
     upsert_batch,
 )
@@ -189,13 +188,13 @@ def fake_session(dialect: str) -> AsyncSession:
 
 
 def test_postgresql_gets_its_own_upsert_statement() -> None:
-    insert = _dialect_insert(fake_session("postgresql"), _table_of(OddsSnapshotRow))
+    insert = dialect_insert(fake_session("postgresql"), table_of(OddsSnapshotRow))
     assert isinstance(insert, postgresql.Insert)
 
 
 def test_unsupported_dialect_is_refused() -> None:
     with pytest.raises(DataError, match="mysql"):
-        _dialect_insert(fake_session("mysql"), _table_of(OddsSnapshotRow))
+        dialect_insert(fake_session("mysql"), table_of(OddsSnapshotRow))
 
 
 async def test_rows_that_cannot_be_read_back_are_reported(

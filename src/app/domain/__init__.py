@@ -28,6 +28,7 @@ from app.domain.markets import (
     normalize_line,
 )
 from app.domain.odds import (
+    BOOKMAKER_1XBET,
     BOOKMAKER_BET365,
     BOOKMAKER_MARKET_AVERAGE,
     BOOKMAKER_MARKET_MAXIMUM,
@@ -39,6 +40,7 @@ from app.domain.odds import (
 from app.domain.sport import Sport
 
 __all__ = [
+    "BOOKMAKER_1XBET",
     "BOOKMAKER_BET365",
     "BOOKMAKER_MARKET_AVERAGE",
     "BOOKMAKER_MARKET_MAXIMUM",

@@ -323,6 +323,7 @@ class SignalRow(TimestampMixin, Base):
         Index(None, "status", "created_at"),
         Index(None, "user_id", "created_at"),
         Index(None, "fixture_id"),
+        Index(None, "user_id", "recommended_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -340,6 +341,15 @@ class SignalRow(TimestampMixin, Base):
     llm_note: Mapped[str | None] = mapped_column(Text)
     source: Mapped[SignalSource] = mapped_column(enum_column(SignalSource))
     status: Mapped[SignalStatus] = mapped_column(enum_column(SignalStatus))
+    # Set once, when the selection first passed a query's thresholds; never changed
+    # afterwards (service contract v1.1). NULL = not (yet) a recommendation.
+    recommended_at: Mapped[datetime | None]
+    # Thresholds in force when the signal was created/recommended; recalc verdicts use
+    # these, not the user's current settings. NULL only for rows written before 0003.
+    min_prob: Mapped[float | None]
+    min_ev: Mapped[float | None]
+    odds_min: Mapped[float | None]
+    odds_max: Mapped[float | None]
 
     fixture: Mapped[FixtureRow] = relationship(lazy="raise")
 

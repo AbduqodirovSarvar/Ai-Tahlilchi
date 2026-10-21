@@ -1,0 +1,218 @@
+{
+  "get": "fixtures",
+  "parameters": {
+    "ids": "1208021-1208023-1208024"
+  },
+  "errors": [],
+  "results": 3,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "fixture": {
+        "id": 1208021,
+        "referee": null,
+        "timezone": "UTC",
+        "date": "2024-08-16T19:00:00+00:00",
+        "timestamp": 0,
+        "periods": {
+          "first": null,
+          "second": null
+        },
+        "venue": {
+          "id": null,
+          "name": null,
+          "city": null
+        },
+        "status": {
+          "long": "Match Finished",
+          "short": "FT",
+          "elapsed": null
+        }
+      },
+      "league": {
+        "id": 39,
+        "name": "Premier League",
+        "country": "England",
+        "logo": "https://media.api-sports.io/football/leagues/39.png",
+        "flag": "https://media.api-sports.io/flags/gb-eng.svg",
+        "season": 2024,
+        "round": "Regular Season - 1"
+      },
+      "teams": {
+        "home": {
+          "id": 33,
+          "name": "Manchester United",
+          "logo": "https://media.api-sports.io/football/teams/33.png",
+          "winner": null
+        },
+        "away": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png",
+          "winner": null
+        }
+      },
+      "goals": {
+        "home": 1,
+        "away": 0
+      },
+      "score": {
+        "halftime": {
+          "home": 0,
+          "away": 0
+        },
+        "fulltime": {
+          "home": 1,
+          "away": 0
+        },
+        "extratime": {
+          "home": null,
+          "away": null
+        },
+        "penalty": {
+          "home": null,
+          "away": null
+        }
+      }
+    },
+    {
+      "fixture": {
+        "id": 1208023,
+        "referee": null,
+        "timezone": "UTC",
+        "date": "2024-08-17T14:00:00+00:00",
+        "timestamp": 0,
+        "periods": {
+          "first": null,
+          "second": null
+        },
+        "venue": {
+          "id": null,
+          "name": null,
+          "city": null
+        },
+        "status": {
+          "long": "Match Finished",
+          "short": "FT",
+          "elapsed": null
+        }
+      },
+      "league": {
+        "id": 39,
+        "name": "Premier League",
+        "country": "England",
+        "logo": "https://media.api-sports.io/football/leagues/39.png",
+        "flag": "https://media.api-sports.io/flags/gb-eng.svg",
+        "season": 2024,
+        "round": "Regular Season - 1"
+      },
+      "teams": {
+        "home": {
+          "id": 42,
+          "name": "Arsenal",
+          "logo": "https://media.api-sports.io/football/teams/42.png",
+          "winner": null
+        },
+        "away": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png",
+          "winner": null
+        }
+      },
+      "goals": {
+        "home": 2,
+        "away": 0
+      },
+      "score": {
+        "halftime": {
+          "home": 1,
+          "away": 0
+        },
+        "fulltime": {
+          "home": 2,
+          "away": 0
+        },
+        "extratime": {
+          "home": null,
+          "away": null
+        },
+        "penalty": {
+          "home": null,
+          "away": null
+        }
+      }
+    },
+    {
+      "fixture": {
+        "id": 1208024,
+        "referee": null,
+        "timezone": "UTC",
+        "date": "2024-08-17T14:00:00+00:00",
+        "timestamp": 0,
+        "periods": {
+          "first": null,
+          "second": null
+        },
+        "venue": {
+          "id": null,
+          "name": null,
+          "city": null
+        },
+        "status": {
+          "long": "Match Postponed",
+          "short": "PST",
+          "elapsed": null
+        }
+      },
+      "league": {
+        "id": 39,
+        "name": "Premier League",
+        "country": "England",
+        "logo": "https://media.api-sports.io/football/leagues/39.png",
+        "flag": "https://media.api-sports.io/flags/gb-eng.svg",
+        "season": 2024,
+        "round": "Regular Season - 1"
+      },
+      "teams": {
+        "home": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png",
+          "winner": null
+        },
+        "away": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png",
+          "winner": null
+        }
+      },
+      "goals": {
+        "home": null,
+        "away": null
+      },
+      "score": {
+        "halftime": {
+          "home": null,
+          "away": null
+        },
+        "fulltime": {
+          "home": null,
+          "away": null
+        },
+        "extratime": {
+          "home": null,
+          "away": null
+        },
+        "penalty": {
+          "home": null,
+          "away": null
+        }
+      }
+    }
+  ]
+}

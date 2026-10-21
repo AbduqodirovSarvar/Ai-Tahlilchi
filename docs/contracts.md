@@ -9,7 +9,7 @@
 |---|---|---|---|---|---|
 | 1 | Domen modellari | `src/app/domain/*.py` | data-engineer | hamma | qotirilgan (v1) |
 | 2 | Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant | qotirilgan (v1) |
-| 3 | Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) | qotirilgan (v1) |
+| 3 | Baza sxemasi va repository | `src/app/db/schema.py`, `src/app/db/repo/` | data-engineer | pipeline (bot/servislar DTO orqali) | qotirilgan (v1), v1.2 qo'shimchalari (T3) |
 | 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | frozen v1 (orkestr tasdiqlagan, 2026-10-21) |
@@ -46,7 +46,7 @@ Barcha turlar **o'zgarmas** (`@dataclass(frozen=True, slots=True)`), I/O yo'q. I
 | `normalize_line(x) -> float` | funksiya | | 0.25 setkasiga tekshirish va yaxlitlash; `-0.0` → `0.0` |
 | `OddsKind` | `StrEnum` | `opening`, `morning`, `recalc`, `prematch`, `closing` | |
 | `OddsSnapshot` | dataclass (kw) | `fixture: ExternalRef`, `bookmaker: str`, `market: Market`, `selection: Selection`, `odds: float`, `taken_at: datetime`, `kind: OddsKind`; xossa `line` | `odds` chekli va **> 1.0** (`MIN_DECIMAL_ODDS_EXCLUSIVE`); `selection` bozorga tegishli; `taken_at` tz-aware → UTC; `bookmaker` slug |
-| `BOOKMAKER_PINNACLE`, `BOOKMAKER_BET365`, `BOOKMAKER_MARKET_AVERAGE` (`market_avg`), `BOOKMAKER_MARKET_MAXIMUM` (`market_max`) | konstantalar | | o'rtacha/maksimal — bukmekerlar bo'yicha agregat (football-data.co.uk), "psevdo-bukmeker" sifatida saqlanadi |
+| `BOOKMAKER_PINNACLE`, `BOOKMAKER_BET365`, `BOOKMAKER_1XBET` (`1xbet`, T3 qo'shimcha), `BOOKMAKER_MARKET_AVERAGE` (`market_avg`), `BOOKMAKER_MARKET_MAXIMUM` (`market_max`) | konstantalar | | o'rtacha/maksimal — bukmekerlar bo'yicha agregat (football-data.co.uk), "psevdo-bukmeker" sifatida saqlanadi |
 | `HistoryBatch` | dataclass (kw) | `fixtures`, `results`, `odds` (tuple); xossalar `leagues`, `teams` (birinchi uchrash tartibida, takrorsiz) | adapter/importer → baza o'rtasidagi paket |
 
 **Identifikatsiya:** tizim ichida obyektlar baza `id` si bilan emas, `ExternalRef` bilan aniqlanadi; baza `(source, external_id)` bo'yicha unique.
@@ -76,7 +76,7 @@ class SportAdapter(Protocol):
 - Takroriy chaqiruv xavfsiz: natija qiymatlar, saqlash idempotent (upsert).
 
 ## 3. Baza sxemasi — `src/app/db/schema.py`
-**Holat:** qotirilgan (frozen v1, qo'shimchalar bilan) · **Versiya:** 1.1 (Alembic `0002`) · **Egasi:** data-engineer · Qarorlar: [ADR 0002](adr/0002-domain-and-schema.md)
+**Holat:** qotirilgan (frozen v1, qo'shimchalar bilan) · **Versiya:** 1.2 (Alembic `0003`) · **Egasi:** data-engineer · Qarorlar: [ADR 0002](adr/0002-domain-and-schema.md), [ADR 0007](adr/0007-api-client-and-repositories.md)
 
 Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevosita import qilmaydi, DTO orqali oladi.
 
@@ -90,7 +90,7 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 | `user_settings` (`UserSettingsRow`) | user_id (PK), sports/leagues/markets (JSON), max_signals, min_prob, min_ev, odds_min, odds_max, risk_profile, send_time, prematch_minutes, quiet_hours_start/end, daily_loss_limit, weekly_loss_limit (Money, NULL = limit yo'q; `0002`) | 0 ≤ min_prob ≤ 1; 1 < odds_min < odds_max; max_signals ≥ 1 | |
 | `watchlist` (`WatchlistRow`) | user_id, kind (team/league), sport, entity_id, notify_flags (JSON) | `(user_id, kind, entity_id)` | |
 | `saved_queries` (`SavedQueryRow`) | user_id, name, date_mode, days, date_from, date_to, sports, min_prob, min_ev, scope, scope_ids, markets, max_signals, sort, schedule_cron | `(user_id, name)`; date_to ≥ date_from | |
-| `signals` (`SignalRow`) | user_id, fixture_id, market, selection, line, odds, p_model, ev, confidence, stake_units, llm_verdict, llm_note, source, status | `(user_id, fixture_id, market, selection, line)`; odds > 1; 0 ≤ p_model ≤ 1 | `(status, created_at)`; `(user_id, created_at)`; fixture_id |
+| `signals` (`SignalRow`) | user_id, fixture_id, market, selection, line, odds, p_model, ev, confidence, stake_units, llm_verdict, llm_note, source (`analysis`/`daily`/`custom`/`watchlist`/`retro`), status, recommended_at (UTC, NULL = tavsiya emas; bir marta yoziladi), min_prob, min_ev, odds_min, odds_max (yaratilish/tavsiya paytidagi chegaralar; `0003`) | `(user_id, fixture_id, market, selection, line)`; odds > 1; 0 ≤ p_model ≤ 1 | `(status, created_at)`; `(user_id, created_at)`; fixture_id; `(user_id, recommended_at)` (`0003`) |
 | `signal_versions` (`SignalVersionRow`) | signal_id, version, odds, p_model, ev, reason | `(signal_id, version)`; version ≥ 1 | |
 | `results` (`SignalResultRow`) | signal_id, outcome, source, profit_units, closing_odds, clv, user_note, settled_at | signal_id (bitta natija) | |
 | `scheduled_recalcs` (`ScheduledRecalcRow`) | signal_id, run_at, kind, done, done_at | `(signal_id, kind)` | `(done, run_at)` |
@@ -99,7 +99,7 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 | `lessons` (`LessonRow`) | text, tags (JSON), confirmations, status, first_seen, last_seen | confirmations ≥ 0 | status |
 | `segment_stats` (`SegmentStatRow`) | sport, league_id, market, odds_bucket, n, roi, clv, calib_bias, ev_threshold, enabled | `(sport, league_id, market, odds_bucket)` | |
 | `calibration_versions` (`CalibrationVersionRow`) | version, method, params (JSON), n_samples, brier_before, brier_after, active | version | active |
-| `api_usage` (`ApiUsageRow`) | usage_date, provider, sport (`''` = sportga bog'liq emas), requests_used, reserved_manual | `(usage_date, provider, sport)`; hisoblagichlar ≥ 0 | |
+| `api_usage` (`ApiUsageRow`) | usage_date (UTC kuni), provider, sport (`''` = sportga bog'liq emas), requests_used (kunning barcha so'rovlari), reserved_manual (ulardan qo'lda qilinganlari; zaxira hajmi saqlanmaydi, ADR 0007) | `(usage_date, provider, sport)`; hisoblagichlar ≥ 0 | |
 
 **Umumiy qoidalar:**
 - Vaqtlar `UTCDateTime` (Python'da doim tz-aware UTC; naive vaqt yozilmaydi). Pul va unit (`bank`, `unit`, `stake`, `profit`, `stake_units`, `profit_units`) `Money` → `Decimal` (4 xona). Koeffitsient va ehtimollik `float`.
@@ -110,6 +110,27 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 - Idempotent yozish: `app.db.history.upsert_batch(session, HistoryBatch) -> UpsertSummary` (chaqiruvchining tranzaksiyasida); qamrov: `season_coverage(session, source=None) -> list[SeasonCoverage]`.
 - O'yin holati/hisobi: `app.db.fixture_state.merge_outcome(stored, status, result) -> FixtureOutcome` — barcha yozish yo'llari uchun yagona qoida (natija hal qiluvchi; `finished` faqat hisob bilan; `scheduled`/`postponed`/`cancelled` hisobni tozalaydi; xG birlashtiriladi). `mappers.fixture_values(..., outcome=...)` (oldingi `result=` parametri o'rniga).
 - Migratsiya: `uv run alembic upgrade head` (yo'l: `DB_PATH` yoki `-x db_path=...`).
+
+### 3.1 Repository API — `from app.db.repo import ...` (v1.2, T3, faqat qo'shimcha)
+Barcha funksiyalar `async`, birinchi argument `AsyncSession`, **chaqiruvchining tranzaksiyasida** ishlaydi (flush qiladi, commit qilmaydi). Domen obyektlari yoki `frozen` DTO (`app.db.repo.records`) qaytaradi, ORM qator hech qachon. Vaqt oralig'i — UTC, yarim ochiq `[start, end)`. Egalik: `user_id` WHERE ga kiradi, boshqa foydalanuvchining qatori "yo'q" kabi.
+
+| Guruh | Funksiyalar | Izoh |
+|---|---|---|
+| O'yinlar | `list_fixtures(start, end, *, sport, leagues, teams, statuses, offset, limit) -> Page[FixtureRecord]`; `get_fixtures(refs) -> dict[ExternalRef, FixtureRecord]`; `get_fixture_by_id(id)`; `finished_fixtures(*, leagues, start, end, preferred_sources=()) -> list[FixtureRecord]`; `upsert_live(*, fixtures, results, odds) -> UpsertSummary` | liga YOKI jamoa (birlashma), kickoff bo'yicha; `FixtureRecord(id, fixture, result, home_xg, away_xg)`; model uchun tarix: faqat hisobli `finished`, `(liga, mavsum, uy, mehmon)` bo'yicha manbalar orasida takrorsiz; yozish `upsert_batch` + `merge_outcome` orqali |
+| Koeffitsient | `latest_odds(fixtures, *, kinds=DEFAULT_KIND_PRIORITY, bookmakers=()) -> dict[ExternalRef, list[OddsSnapshot]]`; `odds_history(fixture, *, kinds, bookmakers) -> list[OddsSnapshot]` | (o'yin, bukmeker, bozor, chiziq, tanlov) uchun bitta narx: `kinds` dagi birinchi mavjud tur, tur ichida eng so'nggi `taken_at`; standart ustuvorlik closing → prematch → recalc → morning → opening |
+| Signallar | `upsert_signal(draft: SignalDraft, *, reason) -> SignalRecord`; `get_signal(id, *, user_id=None)`; `list_user_signals(user_id, *, start, end, include_hidden=False, include_retro=False)`; `report_signals(user_id, *, start=None, end=None)`; `signals_for_fixtures(fixture_ids, *, statuses=(ACTIVE,))`; `unsettled_signals(*, kicked_off_before)`; `set_signal_status(id, status, *, user_id=None) -> bool`; `signal_versions(id)` | dedupe kaliti foydalanuvchi + o'yin + bozor + chiziq + tanlov; har chaqiruv yangi versiya (yangi signal — 1, `initial`); `recommended_at` va o'sha paytdagi `Thresholds` bir marta yoziladi; retro qoralama retro bo'lmagan signalni o'zgartirmaydi; **`report_signals`: `recommended_at` bor, `source != retro`, yashirilganlari kiradi** (hisobot, kalibratsiya, kun yakuni, eksport, `pending_results` uchun bir xil); `SignalRecord.retro`, `.version`, `.result` |
+| Natija | `settle_signal(SignalResultRecord) -> SignalResultRecord`; `set_result_note(signal_id, note) -> bool` | signal uchun bitta; qo'lda (`manual`) natijani `api` almashtirmaydi |
+| Foydalanuvchi | `ensure_user(id, *, timezone, is_admin=False)`; `get_user`; `update_user(id, *, timezone, bank, unit)`; `get_user_settings(id) -> UserSettingsRecord \| None`; `upsert_user_settings(UserSettingsRecord)` | sozlamalar to'liq almashtiriladi (zarar limitlari bilan); `None` → servis standartlarini qo'llaydi |
+| Sevimlilar | `list_watchlist(user_id)`; `add_watch(user_id, *, kind, sport, entity_id, notify_flags=())` (idempotent); `remove_watch(...) -> bool`; `set_watch_notifications(...) -> WatchRecord \| None` | `entity_id` = `teams.id`/`leagues.id` |
+| Shablonlar | `save_query(SavedQueryDraft) -> SavedQueryRecord` (bir xil nom — almashtiradi); `list_saved_queries(user_id)`; `get_saved_query(user_id, id)`; `delete_saved_query(user_id, id) -> bool` | |
+| Qayta hisob navbati | `enqueue_recalc(signal_id, *, kind, run_at) -> RecalcTask`; `claim_due_recalcs(*, now, limit=50, lease=15 daq) -> list[RecalcTask]`; `complete_recalc(id, *, now) -> bool`; `release_recalc(id) -> bool`; `cancel_recalcs(signal_id, *, now) -> int` | lease asosida: egallash `done_at` ga yoziladi (`RecalcTask.claimed_at`), bitta shartli `UPDATE ... RETURNING`; muddati o'tgan egallash qayta olinadi; bir xil vaqt bilan qayta qo'shish — o'zgarishsiz, yangi vaqt — vazifa qayta ochiladi |
+| Stavkalar | `create_bet(*, user_id, signal_id, odds_taken, stake, placed_at)`; `list_bets(user_id, *, open_only=False, limit=20)`; `bets_placed_between(user_id, *, start, end)`; `bets_for_signal(signal_id)`; `settle_bet(id, *, outcome, profit, settled_at)` | pul yig'indisi Python'da (ADR 0002) |
+| API sarfi | `app.db.api_usage.SqlUsageStore(session_factory)` (`app.clients.quota.UsageStore`); `usage_on(session, day) -> list[ApiUsageRecord]` | har o'zgarish o'z tranzaksiyasida commit qilinadi |
+| Qidiruv | `app.db.search.search_teams(session, text, *, sport=None, limit=10) -> list[TeamHit]`; sof: `to_latin`, `to_cyrillic`, `search_key`, `rank` | kirill/lotin, katta-kichik harf, diakritika va apostrofga sezgir emas; nom/so'z boshi ustun; `TeamHit(team_id, ref, sport, name, league, score)` |
+
+### 3.2 API klient va futbol adapteri (T3, shartnoma emas, ma'lumot uchun)
+- `app.clients.api_football.create_api_football_client(api_key, store, *, daily_limit=100, manual_reserve_share=0.30) -> (ApiFootballClient, httpx.AsyncClient)`; kvota holati `client.api.quota.status() -> QuotaStatus(remaining, automatic_available, reserve_remaining)`; `QuotaExceededError(provider, purpose, needed, available)` (`ExternalServiceError`); `app.clients.cost.estimate_requests(FetchPlan) -> int`.
+- `app.sports.football.FootballAdapter(client, *, catalog, identity, purpose, clock)` — `SportAdapter` + `with_expected_goals(results)`, `fetch_injuries(fixture)`, `fetch_lineups(fixture)`, `for_purpose(MANUAL)`, `with_identity(IdentityMap)`. Jamoa moslash: `app.sports.team_matching.match_teams(...) -> TeamMatchReport`, `IdentityMap.from_report(report, LeagueCatalog())`.
 
 ## 4. Servis shartnomasi — `src/app/services/interfaces.py`
 **Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
@@ -322,4 +343,5 @@ Barcha funksiyalar **sinxron va sof** (I/O yo'q, faqat `app.domain`/`app.errors`
 | 2026-10-21 | 3. Baza sxemasi | v1.1 (qo'shimcha): Alembic `0002` — `user_settings.daily_loss_limit`/`weekly_loss_limit`, `ix_user_bets_signal_id`, opening/closing uchun qisman unique indeks; football-data o'yin `external_id` = `liga/mavsum/uy/mehmon` (sanasiz) | data-engineer | orkestr (T2 fix round) |
 | 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1 taklif yozildi (T2): DTO lar, 10 ta protokol, `Services` to'plami, xatolar ierarxiyasi, deterministik fake, qayta ishlatiladigan shartnoma testlari ([ADR 0004](adr/0004-service-contract.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1.1 (T3, faqat qo'shish): `SignalSource`, `SignalView.source`/`recommended_at`, `SportOption` + `CatalogService.list_sports`, `DateWindow.utc_bounds`/`contains`, `horizon_end`, `ReportRequest.recent`/`all_time`/`resolve`/`recent_days`, `MAX_ENTITY_ID_BYTES`/`is_valid_entity_id`; tavsiya, retro, yashirish, sevimlilar, `scope=all` va horizon semantikasi aniqlashtirildi | pipeline-engineer | orkestr (sharh tuzatishlari) |
+| 2026-10-21 | 1. Domen, 3. Baza sxemasi | v1.2 (T3, faqat qo'shimcha): `BOOKMAKER_1XBET`; Alembic `0003` — `signals.recommended_at`, `min_prob`, `min_ev`, `odds_min`, `odds_max`, `(user_id, recommended_at)` indeksi; `SignalSource` + `analysis`, `retro`; `api_usage.reserved_manual` ma'nosi aniqlandi; §3.1 repository API, §3.2 klient va adapter ([ADR 0007](adr/0007-api-client-and-repositories.md)) | data-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 6. Model API | v1 taklif yozildi (T3): domen adapterlari, `predict_markets`, bozor modeli (`fair_markets`), ansambl, `assess_confidence`, `asian_fair_odds`, `settle_selection`; backtest kutubxonasi ([ADR 0005](adr/0005-backtest-methodology.md)) | quant-modeler | orkestr (tasdiqlangan) |

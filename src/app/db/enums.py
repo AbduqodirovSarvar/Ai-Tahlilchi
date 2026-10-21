@@ -9,11 +9,17 @@ from enum import StrEnum
 
 
 class SignalSource(StrEnum):
-    """Which flow produced a signal."""
+    """Which flow produced a signal (values match ``app.services.interfaces.SignalSource``).
+
+    ``retro`` signals describe fixtures that had already kicked off when analysed: they are
+    never recommendations and are excluded from every report.
+    """
 
     DAILY = "daily"
     CUSTOM = "custom"
     WATCHLIST = "watchlist"
+    ANALYSIS = "analysis"
+    RETRO = "retro"
 
 
 class SignalStatus(StrEnum):

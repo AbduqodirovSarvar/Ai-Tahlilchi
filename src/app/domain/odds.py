@@ -17,6 +17,7 @@ MIN_DECIMAL_ODDS_EXCLUSIVE: Final = 1.0
 # published by football-data.co.uk), stored as pseudo-bookmakers.
 BOOKMAKER_PINNACLE: Final = "pinnacle"
 BOOKMAKER_BET365: Final = "bet365"
+BOOKMAKER_1XBET: Final = "1xbet"
 BOOKMAKER_MARKET_AVERAGE: Final = "market_avg"
 BOOKMAKER_MARKET_MAXIMUM: Final = "market_max"
 

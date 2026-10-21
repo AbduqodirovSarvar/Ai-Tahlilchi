@@ -15,7 +15,7 @@
 - [~] F0.4 *(ixtiyoriy)* The Odds API kaliti (foydalanuvchi)
 - [x] F0.5 GitHub repozitoriy (`origin` sozlangan)
 - [x] F0.6 Lokal muhit: Python 3.13, `uv`, Git, Docker Desktop
-- [~] F0.7 `scripts/probe_api.py` tekshiruv skripti (data-engineer; kalit kerak)
+- [~] F0.7 `scripts/probe_api.py` tekshiruv skripti: **kod tayyor va testlangan** (T3, data-engineer); kalitsiz aniq xabar bilan chiqadi (kod 2), hech narsa so'ramaydi. Haqiqiy ishga tushirish kalit qo'shilgach: `docs/api_probe_report.md` + `tests/fixtures/api_football/recorded/`
 - [ ] F0.8 Ligalar ro'yxatini kelishish
 - [~] F0.9 Tarixiy ma'lumot: football-data.co.uk CSV: import tayyor, yuklab olish korporativ tarmoqda bloklangan (F2.7 ga qarang)
 
@@ -38,11 +38,11 @@
 
 ## T3 — Asosiy qurilish
 - [x] Servis shartnomasi sharh tuzatishlari, v1.1 (faqat qo'shish): tavsiya/retro/yashirish qoidalari, `scope=all` → `settings.league_ids`, sevimlilar kesimdan tashqarida, `list_sports`, `utc_bounds`, horizon, `ReportRequest.recent`, ID ≤ 40 bayt, fake tuzatishlari, fake uchun `import-linter` qoidasi (pipeline-engineer)
-- [ ] F2.2 Repository qatlami
-- [ ] F2.3 Bazaviy API klient (rate limit, retry, limit himoyasi, kesh)
-- [ ] F2.5 Futbol adapteri
-- [ ] F2.6 Jamoa nomlarini normallashtirish va qidiruv
-- [ ] F2.8 Ma'lumotlar qatlami testlari
+- [x] F2.2 Repository qatlami: `app.db.repo` (o'yinlar, koeffitsientlar, signallar + versiyalar, natijalar, sozlamalar, sevimlilar, shablonlar, lease asosidagi qayta hisob navbati, stavkalar), `SqlUsageStore`; Alembic `0003` (`signals.recommended_at` + chegaralar, servis v1.1); [ADR 0007](adr/0007-api-client-and-repositories.md) (data-engineer)
+- [x] F2.3 Bazaviy API klient: token bucket, `tenacity` retry (`Retry-After`), TTL kesh (10 daq / 6 soat), kunlik kvota + 30% qo'lda zaxira, sarlavhalar bilan moslash, `estimate_requests` (data-engineer)
+- [~] F2.5 Futbol adapteri: `FootballAdapter` (`SportAdapter`), xaritalash, 10 liga ID si, jamoa moslash (alias + rapidfuzz). Kod va sintetik javoblardagi testlar tayyor; haqiqiy API bilan tekshiruv (AH yozilishi, liga ID lari) F0.7 ga bog'liq (data-engineer)
+- [x] F2.6 Jamoa qidiruvi: `app.db.search` (o'zbek lotin/kirill transliteratsiya, rapidfuzz, prefiks ustunligi, hypothesis testlari) (data-engineer)
+- [x] F2.8 Ma'lumotlar qatlami testlari: respx (har bir endpoint, sahifalash, retry, 429 + Retry-After, kvota zaxirasi, kesh TTL), xaritalash chegaraviy holatlari, adapter mosligi, repository (vaqtinchalik SQLite). Javoblar sintetik — F0 da qayta yoziladi (data-engineer)
 - [x] F3.1 De-vig (proporsional, Shin, power): `models/devig.py` (T2, quant-modeler; [ADR 0003](adr/0003-dixon-coles-and-devig.md))
 - [x] F3.2 Dixon-Coles modeli va bozorlar: `models/poisson.py`, `models/score_markets.py`, `models/asian.py` (T2); domen adapterlari `models/adapters.py`, `models/outcomes.py` (T3)
 - [x] F3.3 Bozor modeli: `models/market.py` (Pinnacle de-vig, `market_avg` zaxira + noaniqlik bayrog'i, Osiyo butun/chorak chiziqlari, DC 1X2 dan) (T3; [ADR 0005](adr/0005-backtest-methodology.md))

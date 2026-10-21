@@ -172,7 +172,6 @@ DEP002 = [
     "apscheduler",
     "google-genai",
     "pandas",
-    "rapidfuzz",
     "scikit-learn",
     "tzdata",
 ]
