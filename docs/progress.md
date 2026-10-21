@@ -37,6 +37,7 @@
 - [ ] Shartnomalarni qotirish (`docs/contracts.md` v1) (orkestr)
 
 ## T3 — Asosiy qurilish
+- [x] Servis shartnomasi sharh tuzatishlari, v1.1 (faqat qo'shish): tavsiya/retro/yashirish qoidalari, `scope=all` → `settings.league_ids`, sevimlilar kesimdan tashqarida, `list_sports`, `utc_bounds`, horizon, `ReportRequest.recent`, ID ≤ 40 bayt, fake tuzatishlari, fake uchun `import-linter` qoidasi (pipeline-engineer)
 - [ ] F2.2 Repository qatlami
 - [ ] F2.3 Bazaviy API klient (rate limit, retry, limit himoyasi, kesh)
 - [ ] F2.5 Futbol adapteri

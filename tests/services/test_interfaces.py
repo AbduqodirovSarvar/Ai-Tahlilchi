@@ -14,6 +14,7 @@ from app.services.errors import ValidationFailedError
 from app.services.interfaces import (
     BALANCED_PRESET,
     CONSERVATIVE_PRESET,
+    MAX_ENTITY_ID_BYTES,
     MAX_FUTURE_DAYS,
     MAX_WINDOW_DAYS,
     MIN_PROBABILITY_LOWER,
@@ -32,6 +33,7 @@ from app.services.interfaces import (
     DateWindow,
     FixtureListRequest,
     FixtureOption,
+    LeagueOption,
     MarketQuote,
     OddsMove,
     QuietHours,
@@ -43,13 +45,18 @@ from app.services.interfaces import (
     RiskProfile,
     ScopeKind,
     SignalNumbers,
+    SignalSource,
     SignalView,
+    SportOption,
+    TeamOption,
     TemplateDraft,
     TemplateSchedule,
     UserSettingsView,
     WatchKind,
     WatchTarget,
+    horizon_end,
     infer_risk_profile,
+    is_valid_entity_id,
 )
 
 TODAY = date(2026, 10, 21)  # a Wednesday
@@ -108,11 +115,36 @@ class TestDateWindow:
         with pytest.raises(ValidationFailedError):
             DateWindow(TODAY, TODAY + timedelta(days=MAX_WINDOW_DAYS))
 
-    def test_horizon_allows_fourteen_days_ahead_only(self) -> None:
-        DateWindow(TODAY, TODAY + timedelta(days=MAX_FUTURE_DAYS)).ensure_within_horizon(TODAY)
-        too_far = DateWindow(TODAY, TODAY + timedelta(days=MAX_FUTURE_DAYS + 1))
+    def test_horizon_is_fourteen_days_counting_today(self) -> None:
+        assert horizon_end(TODAY) == TODAY + timedelta(days=13)
+        DateWindow(TODAY, horizon_end(TODAY)).ensure_within_horizon(TODAY)
+        too_far = DateWindow(TODAY, TODAY + timedelta(days=MAX_FUTURE_DAYS))
         with pytest.raises(ValidationFailedError):
             too_far.ensure_within_horizon(TODAY)
+
+    def test_next_days_and_between_share_one_horizon(self) -> None:
+        widest = DateSpec.next_days(MAX_FUTURE_DAYS).resolve(TODAY)
+        assert widest.date_to == horizon_end(TODAY)
+        widest.ensure_within_horizon(TODAY)
+        DateSpec.between(TODAY, horizon_end(TODAY)).resolve(TODAY).ensure_within_horizon(TODAY)
+        beyond = DateSpec.between(TODAY, horizon_end(TODAY) + timedelta(days=1)).resolve(TODAY)
+        with pytest.raises(ValidationFailedError):
+            beyond.ensure_within_horizon(TODAY)
+
+    def test_utc_bounds_follow_the_zone(self) -> None:
+        start, end = DateWindow(TODAY, TODAY).utc_bounds(ZoneInfo("Asia/Tashkent"))
+        assert start == datetime(2026, 10, 20, 19, 0, tzinfo=UTC)
+        assert end - start == timedelta(hours=24)
+        assert DateWindow(TODAY, TODAY).contains(start, ZoneInfo("Asia/Tashkent"))
+        assert not DateWindow(TODAY, TODAY).contains(end, ZoneInfo("Asia/Tashkent"))
+
+    def test_utc_bounds_are_dst_safe(self) -> None:
+        london = ZoneInfo("Europe/London")
+        autumn = DateWindow(date(2026, 10, 25), date(2026, 10, 25)).utc_bounds(london)
+        spring = DateWindow(date(2026, 3, 29), date(2026, 3, 29)).utc_bounds(london)
+        assert autumn[1] - autumn[0] == timedelta(hours=25)
+        assert spring[1] - spring[0] == timedelta(hours=23)
+        assert all(bound.tzinfo is UTC for bound in (*autumn, *spring))
 
     def test_past_windows_are_retro_and_allowed(self) -> None:
         past = DateWindow(TODAY - timedelta(days=30), TODAY - timedelta(days=1))
@@ -476,3 +508,87 @@ class TestInputs:
             ReportRequest(date_from=TODAY, date_to=TODAY - timedelta(days=1))
         with pytest.raises(ValidationFailedError):
             ReportRequest.last_days(0, TODAY)
+
+    def test_relative_report_periods_are_resolved_by_the_service(self) -> None:
+        assert ReportRequest.recent(7).resolve(TODAY) == (date(2026, 10, 15), TODAY)
+        assert ReportRequest.all_time().resolve(TODAY) == (None, TODAY)
+        assert ReportRequest.last_days(7, TODAY).resolve(date(2030, 1, 1)) == (
+            date(2026, 10, 15),
+            TODAY,
+        )
+        for bad in ({"recent_days": 0}, {"recent_days": 7, "date_to": TODAY}):
+            with pytest.raises(ValidationFailedError) as excinfo:
+                ReportRequest(**bad)  # type: ignore[arg-type]
+            assert field_of(excinfo) == "recent_days"
+
+
+class TestEntityIds:
+    @pytest.mark.parametrize(
+        ("value", "valid"),
+        [
+            ("af:l39", True),
+            ("x" * MAX_ENTITY_ID_BYTES, True),
+            ("x" * 41, False),
+            ("", False),
+            (" ", False),
+            ("ü" * 21, False),
+        ],
+    )
+    def test_byte_budget(self, value: str, *, valid: bool) -> None:
+        assert is_valid_entity_id(value) is valid
+
+    def test_inputs_and_outputs_validate_ids(self) -> None:
+        long_id = "x" * (MAX_ENTITY_ID_BYTES + 1)
+        builders = [
+            lambda: AnalysisQuery(
+                dates=DateSpec.today(), scope=ScopeKind.TEAMS, scope_ids=frozenset({long_id})
+            ),
+            lambda: FixtureListRequest(dates=DateSpec.today(), team_ids=frozenset({long_id})),
+            lambda: FixtureListRequest(dates=DateSpec.today(), league_ids=frozenset({long_id})),
+            lambda: UserSettingsView(league_ids=frozenset({long_id})),
+            lambda: WatchTarget(WatchKind.LEAGUE, long_id),
+            lambda: make_signal(fixture_id=long_id),
+            lambda: LeagueOption(league_id=long_id, sport=Sport.FOOTBALL, name="L"),
+            lambda: TeamOption(team_id=long_id, sport=Sport.FOOTBALL, name="T", league="L"),
+            lambda: FixtureOption(
+                fixture_id=long_id,
+                sport=Sport.FOOTBALL,
+                league="L",
+                home_team="A",
+                away_team="B",
+                kickoff=KICKOFF,
+            ),
+        ]
+        for build in builders:
+            with pytest.raises(ValidationFailedError):
+                build()
+
+
+class TestRecommendationFields:
+    def test_defaults(self) -> None:
+        signal = make_signal()
+        assert signal.source is SignalSource.ANALYSIS
+        assert not signal.retro
+        assert not signal.recommended
+
+    def test_recommended_signals_have_value(self) -> None:
+        at = datetime(2026, 10, 21, 9, 0, tzinfo=UTC)
+        assert make_signal(recommended_at=at).recommended
+        with pytest.raises(ValidationFailedError):
+            make_signal(recommended_at=at, no_value=True)
+        with pytest.raises(ValidationFailedError):
+            make_signal(recommended_at=datetime(2026, 10, 21, 9, 0))  # noqa: DTZ001
+
+    def test_retro_signals_are_never_recommended(self) -> None:
+        assert make_signal(source=SignalSource.RETRO).retro
+        with pytest.raises(ValidationFailedError):
+            make_signal(
+                source=SignalSource.RETRO,
+                recommended_at=datetime(2026, 10, 21, 9, 0, tzinfo=UTC),
+            )
+
+    def test_sport_option(self) -> None:
+        option = SportOption(
+            sport=Sport.TENNIS, available=False, experimental=False, supported_markets=frozenset()
+        )
+        assert not option.available
