@@ -3,7 +3,7 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** T2 da yozilmoqda: 1–3 (domen, `SportAdapter`, baza sxemasi) frozen v1 sifatida taklif qilingan, orkestr tasdig'i kutilmoqda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–7 keyingi to'lqinlarda.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|

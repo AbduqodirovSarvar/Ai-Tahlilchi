@@ -6,3 +6,4 @@
 |---|---|---|---|---|---|---|
 | 1 | 2026-10-21 | 🟡 | `restart: on-failure:5` server qayta yuklanganda konteynerni ishonchli ko'tarmasligi mumkin; F9 mezoni "reboot'dan keyin o'zi tiklanadi". Prod uchun `unless-stopped` + healthcheck yoki systemd unit, exit 2 halqasini alohida cheklash | T1 / infra-engineer | F9 da hal qilinadi | — |
 | 2 | 2026-10-21 | 🟡 | Jonli Telegram `/start`, `TelegramUnauthorizedError` va GitHub Actions/pip-audit jonli tekshiruvi kalitlar va CI ishga tushgandan keyin | T1 / test-engineer | F0 bilan kechiktirilgan | — |
+| 3 | 2026-10-21 | 🟡 | Dockerfile `alembic/` va `alembic.ini` ni image'ga ko'chirmaydi; deployda `alembic upgrade head` uchun kerak | T2 / data-engineer | F9.3 da hal qilinadi | — |

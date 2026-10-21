@@ -136,6 +136,8 @@ addopts = [
 [tool.coverage.run]
 source = ["app"]
 branch = true
+# Measure code running inside async SQLAlchemy greenlets too.
+concurrency = ["thread", "greenlet"]
 
 [tool.coverage.report]
 # Overall gate; stricter per-package gates live in scripts/ops/coverage_gate.py.

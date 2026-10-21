@@ -2,3 +2,5 @@
 *.png binary
 *.jpg binary
 *.db binary
+# Keep test fixtures byte-for-byte (CSV line endings are part of parser tests)
+tests/fixtures/** -text
