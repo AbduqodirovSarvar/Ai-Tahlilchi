@@ -1,13 +1,14 @@
 """Behaviour specific to the fake (budget, cache, sample data), beyond the shared contract."""
 
+import asyncio
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
 from app.domain import Market, MarketType, Selection, Sport
-from app.services._fake_metrics import profit_units
+from app.services._fake_metrics import SignalOutcome, build_report, profit_units
 from app.services._fake_world import FakeQuote, settle, unit_interval
 from app.services.errors import BudgetExceededError
 from app.services.fake import (
@@ -20,7 +21,9 @@ from app.services.fake import (
 from app.services.interfaces import (
     PRELIMINARY_AFTER,
     RECALC_COOLDOWN,
+    AnalysisProgress,
     AnalysisQuery,
+    AnalysisStage,
     BetDraft,
     ConfidenceLevel,
     DateSpec,
@@ -28,10 +31,19 @@ from app.services.interfaces import (
     ReportRequest,
     ResultMark,
     ResultMarkRequest,
+    RiskProfile,
     Services,
     SignalView,
+    WatchKind,
+    WatchTarget,
 )
-from tests.services.contract_suite import MutableClock, analyze_week, retro_signals
+from tests.services.contract_suite import (
+    SETTLE_DELAY,
+    MutableClock,
+    analyze_week,
+    retro_signals,
+    settled_recommendations,
+)
 
 USER = 7
 
@@ -158,31 +170,60 @@ async def test_detail_of_finished_reported_fixture_has_a_score(services: Service
     assert detail.away_score is not None
 
 
-async def test_loss_limit_and_bank_history(services: Services) -> None:
+async def test_progress_callback_errors_are_logged_and_ignored(services: Services) -> None:
+    calls: list[AnalysisProgress] = []
+
+    async def flaky(progress: AnalysisProgress) -> None:
+        calls.append(progress)
+        raise RuntimeError("telegram flood")
+
+    result = await services.analysis.analyze(
+        USER, AnalysisQuery(dates=DateSpec.next_days(2)), progress=flaky
+    )
+    assert calls[-1].stage is AnalysisStage.FINISHED
+    assert result.signals
+
+
+async def test_progress_cancellation_propagates(services: Services) -> None:
+    async def cancel(progress: AnalysisProgress) -> None:
+        raise asyncio.CancelledError(progress.stage)
+
+    with pytest.raises(asyncio.CancelledError):
+        await services.analysis.analyze(
+            USER, AnalysisQuery(dates=DateSpec.next_days(2)), progress=cancel
+        )
+
+
+async def test_loss_limit_and_bank_history(services: Services, clock: MutableClock) -> None:
     settings = await services.settings.get_settings(USER)
     await services.settings.update_settings(
         USER,
         replace(settings, bank=Decimal(100), unit=Decimal(1), daily_loss_limit=Decimal(1)),
     )
-    signals = await retro_signals(services, USER)
-    lost = next(s for s in signals if s.result is ResultMark.LOST)
-    won = next(s for s in signals if s.result is ResultMark.WON)
-    for signal in (lost, won):
+    signals = (await analyze_week(services, USER, dates=DateSpec.next_days(3))).signals
+    for signal in signals:
         await services.bets.place_bet(
             USER, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(5))
         )
+    clock.advance(SETTLE_DELAY)
 
     bank = await services.bets.bank_summary(USER)
+    bets = await services.bets.list_bets(USER, limit=100)
 
-    assert bank.balance == Decimal(100)
+    settled_profit = sum((bet.profit for bet in bets if bet.profit is not None), Decimal(0))
+    assert bank.balance == Decimal(100) + settled_profit
     assert bank.history
-    assert bank.open_bets == 0
+    assert bank.history[-1].balance == bank.balance
+    assert bank.open_bets == sum(bet.outcome is None for bet in bets)
     assert bank.loss_today == 0
-    assert bank.month_profit == 0
 
 
-async def test_cashout_bet_profit_scales_with_stake(services: Services) -> None:
-    signal = next(s for s in await analyze_week_past(services) if s.stake_units > 0)
+async def test_cashout_bet_profit_scales_with_stake(
+    services: Services, clock: MutableClock
+) -> None:
+    signal = (await analyze_week(services, USER, dates=DateSpec.next_days(3))).signals[0]
+    await services.bets.place_bet(USER, BetDraft(signal_id=signal.signal_id, stake=Decimal(20)))
+    clock.advance(SETTLE_DELAY)
     await services.results.mark_result(
         USER,
         ResultMarkRequest(
@@ -191,32 +232,111 @@ async def test_cashout_bet_profit_scales_with_stake(services: Services) -> None:
             cashout_profit_units=signal.stake_units,
         ),
     )
-    bet = await services.bets.place_bet(
-        USER, BetDraft(signal_id=signal.signal_id, stake=Decimal(20))
-    )
+    (bet,) = await services.bets.list_bets(USER)
     assert bet.outcome is ResultMark.CASHOUT
     assert bet.profit == Decimal(20)
 
 
-async def analyze_week_past(services: Services) -> tuple[SignalView, ...]:
-    result = await services.analysis.analyze(
-        USER,
-        AnalysisQuery(
-            dates=DateSpec.between(date(2026, 10, 14), date(2026, 10, 20)),
-            min_ev=0.0,
-            markets=frozenset(MarketType),
-        ),
-    )
-    return result.signals
-
-
 async def test_report_by_every_group(services: Services, clock: MutableClock) -> None:
-    await analyze_week_past(services)
+    await settled_recommendations(services, USER, clock)
     for group in ReportGroup:
-        report = await services.reports.report(
-            USER, ReportRequest.last_days(14, clock().date(), group_by=group)
-        )
+        report = await services.reports.report(USER, ReportRequest.recent(14, group_by=group))
+        assert report.settled > 0
         assert sum(segment.signals for segment in report.segments) == report.settled
+
+
+async def test_roi_uses_all_bets_not_only_the_last_hundred(
+    services: Services, clock: MutableClock
+) -> None:
+    signals = (await analyze_week(services, USER, dates=DateSpec.next_days(3))).signals
+    for index in range(120):
+        signal = signals[index % len(signals)]
+        await services.bets.place_bet(
+            USER, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(1 + index))
+        )
+    clock.advance(SETTLE_DELAY)
+
+    report = await services.reports.report(USER, ReportRequest.recent(14))
+
+    bets = await services.bets.list_bets(USER, limit=100)
+    assert len(bets) == 100
+    assert report.roi is not None
+    profit = Decimal(0)
+    stake = Decimal(0)
+    for index in range(120):
+        signal = await services.signals.get_signal(USER, signals[index % len(signals)].signal_id)
+        if signal.result is not None:
+            outcome = replace(signal, odds=2.0, stake_units=Decimal(1 + index))
+            profit += profit_units(outcome, None) or Decimal(0)
+            stake += Decimal(1 + index)
+    assert report.roi == pytest.approx(float(profit / stake))
+
+
+async def test_world_follows_the_clock(services: Services, clock: MutableClock) -> None:
+    signal = (await analyze_week(services, USER, dates=DateSpec.next_days(2))).signals[0]
+    clock.advance(timedelta(days=30))
+
+    later = await analyze_week(services, USER, dates=DateSpec.next_days(7))
+    detail = await services.analysis.fixture_detail(signal.fixture_id)
+
+    assert later.signals
+    assert all(s.kickoff > clock() for s in later.signals)
+    assert detail.fixture_id == signal.fixture_id  # fixtures seen earlier stay resolvable
+
+
+async def test_watched_league_outside_settings_leagues_is_included(services: Services) -> None:
+    leagues = await services.catalog.list_leagues(Sport.FOOTBALL)
+    followed, other = leagues[0], leagues[1]
+    settings = await services.settings.get_settings(USER)
+    await services.settings.update_settings(
+        USER, replace(settings, league_ids=frozenset({followed.league_id}))
+    )
+    await services.watchlist.add_watch(USER, WatchTarget(WatchKind.LEAGUE, other.league_id))
+
+    result = await analyze_week(services, USER)
+
+    assert {s.league for s in result.signals} == {followed.name, other.name}
+    assert all(s.watchlist for s in result.signals if s.league == other.name)
+
+
+def test_void_is_left_out_of_staked_units_everywhere() -> None:
+    rows = [
+        _outcome(1, ResultMark.WON, odds=2.0),
+        _outcome(2, ResultMark.VOID, odds=2.0),
+    ]
+    report = build_report(
+        (None, date(2026, 10, 21)), ReportGroup.LEAGUE, rows, (Decimal(0), Decimal(0))
+    )
+    (segment,) = report.segments
+    assert report.yield_rate == pytest.approx(1.0)
+    assert segment.yield_rate == report.yield_rate
+
+
+def _outcome(signal_id: int, result: ResultMark, *, odds: float) -> SignalOutcome:
+    view = SignalView(
+        signal_id=signal_id,
+        fixture_id=f"f{signal_id}",
+        sport=Sport.FOOTBALL,
+        league="L",
+        home_team="A",
+        away_team="B",
+        kickoff=datetime(2026, 10, 1, tzinfo=UTC),
+        market=Market.btts(),
+        selection=Selection.YES,
+        odds=odds,
+        bookmaker="pinnacle",
+        probability=0.6,
+        ev=0.2,
+        confidence=ConfidenceLevel.HIGH,
+        stake_units=Decimal(1),
+        result=result,
+    )
+    return SignalOutcome(
+        view=view,
+        profit_units=profit_units(view, None),
+        clv=None,
+        risk_profile=RiskProfile.BALANCED,
+    )
 
 
 async def test_refresh_time(services: Services, clock: MutableClock) -> None:

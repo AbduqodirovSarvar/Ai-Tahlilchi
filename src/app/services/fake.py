@@ -1,9 +1,9 @@
 """Deterministic in-memory implementation of every service protocol (contract #5).
 
 Lets the bot be built and tested before the pipeline exists. Behaviour follows the contract
-(``docs/contracts.md`` §4): same filters, cooldown, API budget, idempotent re-analysis,
-progress callbacks and errors, over a hash-generated sample world (``_fake_world``) around
-the clock's current date. No I/O, no randomness, no real ``sleep``.
+(``docs/contracts.md`` §4): same filters, recommendation and retro rules, cooldown, API
+budget, idempotent re-analysis, progress callbacks and errors, over a hash-generated sample
+world (``_fake_world``) that follows the injected clock. No I/O, no randomness, no ``sleep``.
 
 Usage::
 
@@ -19,15 +19,18 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from difflib import SequenceMatcher
-from typing import Final
+from typing import Final, Self
 from zoneinfo import ZoneInfo
 
 from app.domain import Sport, normalize_name
+from app.logging import get_logger
 from app.services._fake_metrics import SignalOutcome, build_report, day_summary, profit_units
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
+    SPORT_MARKETS,
     FakeFixture,
     FakeQuote,
+    World,
     build_detail,
     build_world,
     drifted_odds,
@@ -85,9 +88,11 @@ from app.services.interfaces import (
     Services,
     SignalId,
     SignalNumbers,
+    SignalSource,
     SignalState,
     SignalView,
     SortKey,
+    SportOption,
     SystemStatus,
     TeamOption,
     TemplateDraft,
@@ -120,6 +125,9 @@ _FUZZY_THRESHOLD: Final = 0.6
 _MAX_BET_LIST: Final = 100
 _CLV_FLOOR: Final = -0.03
 _CLV_SPAN: Final = 0.09
+_NEVER: Final = datetime.min.replace(tzinfo=UTC)
+
+_log = get_logger(__name__)
 
 
 def system_clock() -> datetime:
@@ -130,8 +138,40 @@ def system_clock() -> datetime:
 async def _report(
     progress: ProgressCallback | None, stage: AnalysisStage, done: int, total: int
 ) -> None:
-    if progress is not None:
+    """Call the progress callback; its failures are logged and never abort the job."""
+    if progress is None:
+        return
+    try:
         await progress(AnalysisProgress(stage=stage, done=done, total=total))
+    except Exception as error:
+        _log.warning("progress_callback_failed", stage=stage, error=repr(error))
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _Thresholds:
+    """The value thresholds a signal was judged against when it was created/recommended."""
+
+    min_probability: float
+    min_ev: float
+    odds_min: float
+    odds_max: float
+
+    @classmethod
+    def of(cls, query: AnalysisQuery, settings: UserSettingsView) -> Self:
+        return cls(
+            min_probability=query.min_probability,
+            min_ev=query.min_ev,
+            odds_min=settings.odds_min,
+            odds_max=settings.odds_max,
+        )
+
+    def passes(self, quote: FakeQuote) -> bool:
+        """Probability and EV thresholds plus the odds range."""
+        return (
+            quote.probability >= self.min_probability
+            and quote.ev >= self.min_ev
+            and self.odds_min <= quote.odds <= self.odds_max
+        )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -143,9 +183,12 @@ class _StoredSignal:
     fixture: FakeFixture
     quote: FakeQuote
     odds: float
+    source: SignalSource
+    thresholds: _Thresholds
+    risk_profile: RiskProfile
     no_value: bool
     watchlist: bool
-    risk_profile: RiskProfile
+    recommended_at: datetime | None = None
     version: int = 1
     state: SignalState = SignalState.ACTIVE
     data_as_of: datetime | None = None
@@ -163,6 +206,16 @@ class _StoredSignal:
         """Stable hash key of the selection."""
         return f"{self.fixture.fixture_id}|{self.quote.market}|{self.quote.selection}"
 
+    @property
+    def retro(self) -> bool:
+        """True for a look-back at a match that had kicked off."""
+        return self.source is SignalSource.RETRO
+
+    @property
+    def counts(self) -> bool:
+        """Recommended and not retro: the signal belongs in reports (hidden or not)."""
+        return self.recommended_at is not None and not self.retro
+
 
 @dataclass(slots=True, kw_only=True)
 class _StoredBet:
@@ -178,22 +231,23 @@ class _StoredBet:
 class _Pick:
     fixture: FakeFixture
     quote: FakeQuote
-    no_value: bool
-    watchlist: bool
+    passes: bool
+    watchlist: bool = False
 
 
 class FakeState:
     """Shared in-memory store of all fake services (one per :func:`create_fake_services`)."""
 
     def __init__(self, clock: Clock) -> None:
-        """Generate the sample world around the clock's current local date."""
+        """The sample world is generated around the clock's local date and follows it."""
         self.clock = clock
-        zone = ZoneInfo(DEFAULT_TIMEZONE)
-        self.world = build_world(clock().astimezone(zone).date(), zone)
-        self.fixtures = {fixture.fixture_id: fixture for fixture in self.world.fixtures}
+        self._zone = ZoneInfo(DEFAULT_TIMEZONE)
+        self._anchor: date | None = None
+        self._world: World | None = None
+        self.fixtures: dict[EntityId, FakeFixture] = {}
         self.settings: dict[int, UserSettingsView] = {}
         self.signals: dict[SignalId, _StoredSignal] = {}
-        self.signal_ids: dict[tuple[int, str], SignalId] = {}
+        self.signal_ids: dict[tuple[int, bool, str], SignalId] = {}
         self.queries: dict[EntityId, tuple[int, tuple[SignalId, ...]]] = {}
         self.recalc_at: dict[EntityId, datetime] = {}
         self.fetched_at: dict[str, datetime] = {}
@@ -207,6 +261,20 @@ class FakeState:
         """Current UTC instant."""
         return self.clock()
 
+    @property
+    def world(self) -> World:
+        """Sample world around the clock's current date; regenerated when the day changes.
+
+        Fixtures seen earlier stay resolvable (``self.fixtures``), so stored signals and
+        detail cards keep working in long manual sessions.
+        """
+        today = self.now().astimezone(self._zone).date()
+        if self._world is None or today != self._anchor:
+            self._world = build_world(today, self._zone)
+            self._anchor = today
+            self.fixtures.update({fixture.fixture_id: fixture for fixture in self._world.fixtures})
+        return self._world
+
     def settings_for(self, user_id: int) -> UserSettingsView:
         """Stored settings or the defaults."""
         return self.settings.get(user_id, UserSettingsView())
@@ -217,12 +285,14 @@ class FakeState:
 
     def resolve(self, dates: DateSpec, settings: UserSettingsView) -> DateWindow:
         """Concrete window in the user's zone, checked against the horizon."""
-        window = dates.resolve(self.local_today(settings.zone))
-        window.ensure_within_horizon(self.local_today(settings.zone))
+        today = self.local_today(settings.zone)
+        window = dates.resolve(today)
+        window.ensure_within_horizon(today)
         return window
 
     def fixture(self, fixture_id: EntityId) -> FakeFixture:
         """Fixture by id."""
+        _ = self.world
         try:
             return self.fixtures[fixture_id]
         except KeyError:
@@ -235,6 +305,12 @@ class FakeState:
             raise NotFoundError("signal", signal_id)
         return stored
 
+    def user_signals(self, user_id: int) -> list[_StoredSignal]:
+        """All signals of the user, by kickoff."""
+        rows = [stored for stored in self.signals.values() if stored.user_id == user_id]
+        rows.sort(key=lambda stored: (stored.fixture.kickoff, stored.signal_id))
+        return rows
+
     def fixtures_in(
         self, window: DateWindow, zone: ZoneInfo, sports: frozenset[Sport]
     ) -> list[FakeFixture]:
@@ -244,30 +320,33 @@ class FakeState:
             fixture
             for fixture in self.world.fixtures
             if fixture.sport in sports
-            and window.date_from <= fixture.kickoff.astimezone(zone).date() <= window.date_to
+            and window.contains(fixture.kickoff, zone)
             and not fixture.in_play(now)
         ]
+
+    def watched(self, user_id: int, fixture: FakeFixture) -> bool:
+        """True when a team or the league of ``fixture`` is on the user's watchlist."""
+        targets = self.watchlist.get(user_id, {})
+        candidates = (
+            WatchTarget(WatchKind.TEAM, fixture.home.team_id),
+            WatchTarget(WatchKind.TEAM, fixture.away.team_id),
+            WatchTarget(WatchKind.LEAGUE, fixture.league.league_id),
+        )
+        return any(target in targets for target in candidates)
 
     # ------------------------------------------------------------------ API budget
     def budget_remaining(self) -> int:
         """Manual API requests left today."""
-        today = self.local_today(ZoneInfo(DEFAULT_TIMEZONE))
-        return FAKE_MANUAL_RESERVE - self.manual_used.get(today, 0)
+        return FAKE_MANUAL_RESERVE - self.manual_used.get(self.local_today(self._zone), 0)
 
     def uncached(self, keys: Iterable[str]) -> list[str]:
         """Provider resources not fetched within :data:`CACHE_TTL`."""
         now = self.now()
-        return sorted(
-            {
-                key
-                for key in keys
-                if now - self.fetched_at.get(key, datetime.min.replace(tzinfo=UTC)) >= CACHE_TTL
-            }
-        )
+        return sorted({key for key in keys if now - self.fetched_at.get(key, _NEVER) >= CACHE_TTL})
 
     def spend(self, requests: int, keys: Iterable[str] = ()) -> None:
         """Count ``requests`` against today's manual reserve and cache ``keys``."""
-        today = self.local_today(ZoneInfo(DEFAULT_TIMEZONE))
+        today = self.local_today(self._zone)
         self.manual_used[today] = self.manual_used.get(today, 0) + requests
         now = self.now()
         for key in keys:
@@ -275,34 +354,52 @@ class FakeState:
 
     def refreshed_at(self) -> datetime:
         """Last morning refresh (08:30 local), the "data as of" time of cached numbers."""
-        zone = ZoneInfo(DEFAULT_TIMEZONE)
         now = self.now()
-        refresh = datetime.combine(now.astimezone(zone).date(), REFRESH_TIME, tzinfo=zone)
+        refresh = datetime.combine(now.astimezone(self._zone).date(), REFRESH_TIME, self._zone)
         if refresh > now:
             refresh -= timedelta(days=1)
         return refresh.astimezone(UTC)
 
     # ------------------------------------------------------------------ signals
-    def store(self, user_id: int, pick: _Pick, risk_profile: RiskProfile) -> _StoredSignal:
-        """Insert or update the user's signal for this selection (stable id)."""
-        key = (user_id, f"{pick.fixture.fixture_id}|{pick.quote.market}|{pick.quote.selection}")
-        existing = self.signal_ids.get(key)
-        if existing is not None:
+    def store(self, user_id: int, pick: _Pick, query: AnalysisQuery) -> _StoredSignal:
+        """Insert or update the user's signal for this selection (stable id).
+
+        Recommendation is sticky: once recommended a signal stays recommended; a no-value
+        signal that passes a later query is recommended *at that later time*.
+        """
+        retro = pick.fixture.started(self.now())
+        selection_key = f"{pick.fixture.fixture_id}|{pick.quote.market}|{pick.quote.selection}"
+        existing = self.signal_ids.get((user_id, retro, selection_key))
+        settings = self.settings_for(user_id)
+        if existing is None:
+            stored = self._create(user_id, pick, query, retro=retro)
+            self.signal_ids[(user_id, retro, selection_key)] = stored.signal_id
+        else:
             stored = self.signals[existing]
-            stored.no_value, stored.watchlist = pick.no_value, pick.watchlist
-            return stored
+            stored.watchlist = stored.watchlist or pick.watchlist
+        if pick.passes and not retro and stored.recommended_at is None:
+            stored.recommended_at = self.now()
+            stored.no_value = False
+            stored.thresholds = _Thresholds.of(query, settings)
+        return stored
+
+    def _create(
+        self, user_id: int, pick: _Pick, query: AnalysisQuery, *, retro: bool
+    ) -> _StoredSignal:
+        settings = self.settings_for(user_id)
         stored = _StoredSignal(
             signal_id=next(self.next_id),
             user_id=user_id,
             fixture=pick.fixture,
             quote=pick.quote,
             odds=pick.quote.odds,
-            no_value=pick.no_value,
+            source=_source(query, pick, retro=retro),
+            thresholds=_Thresholds.of(query, settings),
+            risk_profile=settings.risk_profile,
+            no_value=not pick.passes,
             watchlist=pick.watchlist,
-            risk_profile=risk_profile,
         )
         self.signals[stored.signal_id] = stored
-        self.signal_ids[key] = stored.signal_id
         return stored
 
     def result_of(self, stored: _StoredSignal) -> ResultMark | None:
@@ -346,13 +443,15 @@ class FakeState:
             result=self.result_of(stored),
             version=stored.version,
             data_as_of=stored.data_as_of,
+            source=stored.source,
+            recommended_at=stored.recommended_at,
         )
 
     def outcomes(self, user_id: int) -> list[SignalOutcome]:
-        """Visible recommended signals of the user with their profit and CLV."""
+        """Recommended, non-retro signals (hidden included) with their profit and CLV."""
         rows = []
-        for stored in self.signals.values():
-            if stored.user_id != user_id or stored.state is SignalState.HIDDEN or stored.no_value:
+        for stored in self.user_signals(user_id):
+            if not stored.counts:
                 continue
             view = self.view(stored)
             rows.append(
@@ -364,6 +463,14 @@ class FakeState:
                 )
             )
         return rows
+
+
+def _source(query: AnalysisQuery, pick: _Pick, *, retro: bool) -> SignalSource:
+    if retro:
+        return SignalSource.RETRO
+    if query.include_no_value:
+        return SignalSource.CUSTOM
+    return SignalSource.WATCHLIST if pick.watchlist else SignalSource.ANALYSIS
 
 
 def _confidence(key: str, *, preliminary: bool) -> ConfidenceLevel:
@@ -385,9 +492,8 @@ def _verdict(stored: _StoredSignal) -> Verdict | None:
     """Only value signals are reviewed by the LLM."""
     if stored.no_value:
         return None
-    return (
-        Verdict.CAUTION if unit_interval(stored.key, "verdict") < CAUTION_SHARE else Verdict.CONFIRM
-    )
+    caution = unit_interval(stored.key, "verdict") < CAUTION_SHARE
+    return Verdict.CAUTION if caution else Verdict.CONFIRM
 
 
 def _clv(key: str) -> float:
@@ -402,30 +508,6 @@ def _numbers(view: SignalView) -> SignalNumbers:
         stake_units=view.stake_units,
         confidence=view.confidence,
     )
-
-
-def _passes(
-    quote: FakeQuote, min_probability: float, min_ev: float, settings: UserSettingsView
-) -> bool:
-    """Probability and EV thresholds plus the user's odds range."""
-    return (
-        quote.probability >= min_probability
-        and quote.ev >= min_ev
-        and settings.odds_min <= quote.odds <= settings.odds_max
-    )
-
-
-def _in_scope(fixture: FakeFixture, query: AnalysisQuery) -> bool:
-    ids = query.scope_ids
-    match query.scope:
-        case ScopeKind.ALL:
-            return True
-        case ScopeKind.LEAGUES:
-            return fixture.league.league_id in ids
-        case ScopeKind.TEAMS:
-            return fixture.home.team_id in ids or fixture.away.team_id in ids
-        case ScopeKind.FIXTURES:
-            return fixture.fixture_id in ids
 
 
 def _sort_key(sort: SortKey) -> Callable[[_Pick], tuple[object, ...]]:
@@ -475,6 +557,13 @@ def _resource_keys(
     return sorted(keys)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _Plan:
+    window: DateWindow
+    fixtures: list[FakeFixture]
+    keys: list[str]
+
+
 class FakeAnalysisService:
     """Fake :class:`~app.services.interfaces.AnalysisService`."""
 
@@ -482,26 +571,38 @@ class FakeAnalysisService:
         """Share ``state`` with the other fake services."""
         self._state = state
 
-    def _plan(
-        self, user_id: int, query: AnalysisQuery
-    ) -> tuple[DateWindow, list[FakeFixture], list[str]]:
+    def _in_scope(self, user_id: int, fixture: FakeFixture, query: AnalysisQuery) -> bool:
+        ids = query.scope_ids
+        match query.scope:
+            case ScopeKind.ALL:
+                leagues = self._state.settings_for(user_id).league_ids
+                in_leagues = not leagues or fixture.league.league_id in leagues
+                return in_leagues or self._state.watched(user_id, fixture)
+            case ScopeKind.LEAGUES:
+                return fixture.league.league_id in ids
+            case ScopeKind.TEAMS:
+                return fixture.home.team_id in ids or fixture.away.team_id in ids
+            case ScopeKind.FIXTURES:
+                return fixture.fixture_id in ids
+
+    def _plan(self, user_id: int, query: AnalysisQuery) -> _Plan:
         settings = self._state.settings_for(user_id)
         window = self._state.resolve(query.dates, settings)
         fixtures = [
             fixture
             for fixture in self._state.fixtures_in(window, settings.zone, query.sports)
-            if _in_scope(fixture, query)
+            if self._in_scope(user_id, fixture, query)
         ]
         keys = self._state.uncached(_resource_keys(fixtures, query, self._state.now()))
-        return window, fixtures, keys
+        return _Plan(window=window, fixtures=fixtures, keys=keys)
 
     async def estimate_cost(self, user_id: int, query: AnalysisQuery) -> CostEstimate:
         """See :meth:`AnalysisService.estimate_cost`."""
-        window, fixtures, keys = self._plan(user_id, query)
+        plan = self._plan(user_id, query)
         return CostEstimate(
-            window=window,
-            fixtures_found=len(fixtures),
-            api_requests=len(keys),
+            window=plan.window,
+            fixtures_found=len(plan.fixtures),
+            api_requests=len(plan.keys),
             budget_remaining=self._state.budget_remaining(),
         )
 
@@ -509,74 +610,67 @@ class FakeAnalysisService:
         self, user_id: int, query: AnalysisQuery, *, progress: ProgressCallback | None = None
     ) -> AnalysisResult:
         """See :meth:`AnalysisService.analyze`."""
-        window, fixtures, keys = self._plan(user_id, query)
+        plan = self._plan(user_id, query)
         available = self._state.budget_remaining()
-        if len(keys) > available:
-            raise BudgetExceededError(needed=len(keys), available=available)
-        self._state.spend(len(keys), keys)
-        total = len(fixtures)
+        if len(plan.keys) > available:
+            raise BudgetExceededError(needed=len(plan.keys), available=available)
+        self._state.spend(len(plan.keys), plan.keys)
+        total = len(plan.fixtures)
         await _report(progress, AnalysisStage.COLLECTING, 0, total)
-        picks: list[_Pick] = []
-        for done, fixture in enumerate(fixtures, start=1):
-            picks.extend(self._picks(user_id, fixture, query))
+        regular: list[_Pick] = []
+        watched: list[_Pick] = []
+        for done, fixture in enumerate(plan.fixtures, start=1):
+            picks = self._picks(user_id, fixture, query)
+            is_watched = query.scope is ScopeKind.ALL and any(pick.watchlist for pick in picks)
+            (watched if is_watched else regular).extend(picks)
             await _report(progress, AnalysisStage.ANALYSING, done, total)
         await _report(progress, AnalysisStage.REVIEWING, total, total)
-        picks.sort(key=_sort_key(query.sort))
-        settings = self._state.settings_for(user_id)
-        kept = _cap(picks, query, settings.zone)
-        stored = [self._state.store(user_id, pick, settings.risk_profile) for pick in kept]
+        sort_key = _sort_key(query.sort)
+        regular.sort(key=sort_key)
+        zone = self._state.settings_for(user_id).zone
+        kept = sorted([*_cap(regular, query, zone), *watched], key=sort_key)
+        stored = [self._state.store(user_id, pick, query) for pick in kept]
         query_id = f"q{next(self._state.next_id)}"
         self._state.queries[query_id] = (user_id, tuple(item.signal_id for item in stored))
         await _report(progress, AnalysisStage.FINISHED, total, total)
         return AnalysisResult(
             query_id=query_id,
-            window=window,
+            window=plan.window,
             signals=tuple(self._state.view(item) for item in stored),
             fixtures_analyzed=total,
-            matched=len(picks),
+            matched=len(regular),
             requested=query.max_signals,
-            api_requests_used=len(keys),
-            retro=window.is_retro(self._state.local_today(settings.zone)),
+            api_requests_used=len(plan.keys),
+            retro=plan.window.is_retro(self._state.local_today(zone)),
         )
 
     def _picks(self, user_id: int, fixture: FakeFixture, query: AnalysisQuery) -> list[_Pick]:
-        """Best passing selection per fixture; every selection for custom analyses."""
-        settings = self._state.settings_for(user_id)
-        watched = self._watched(user_id, fixture)
+        """Best passing selection per fixture; every selection for custom analyses.
+
+        A watched fixture (scope ``all``) without a passing selection still yields its
+        best-EV selection, flagged no-value.
+        """
+        thresholds = _Thresholds.of(query, self._state.settings_for(user_id))
+        watched = query.scope is ScopeKind.ALL and self._state.watched(user_id, fixture)
         picks = [
-            _Pick(
-                fixture=fixture,
-                quote=quote,
-                no_value=not _passes(quote, query.min_probability, query.min_ev, settings),
-                watchlist=watched,
-            )
+            _Pick(fixture=fixture, quote=quote, passes=thresholds.passes(quote), watchlist=watched)
             for quote in fixture.quotes
             if quote.market.type in query.markets
         ]
         if query.include_no_value:
             return picks
-        passing = [pick for pick in picks if not pick.no_value]
+        passing = [pick for pick in picks if pick.passes]
         if passing:
             return [min(passing, key=_sort_key(query.sort))]
-        if watched and query.scope is ScopeKind.ALL and picks:
+        if watched and picks:
             return [max(picks, key=lambda pick: pick.quote.ev)]
         return []
-
-    def _watched(self, user_id: int, fixture: FakeFixture) -> bool:
-        targets = self._state.watchlist.get(user_id, {})
-        return any(
-            WatchTarget(kind, entity_id) in targets
-            for kind, entity_id in (
-                (WatchKind.TEAM, fixture.home.team_id),
-                (WatchKind.TEAM, fixture.away.team_id),
-                (WatchKind.LEAGUE, fixture.league.league_id),
-            )
-        )
 
     async def recalc_signal(self, user_id: int, signal_id: SignalId) -> RecalcDiff:
         """See :meth:`AnalysisService.recalc_signal`."""
         stored = self._state.signal(user_id, signal_id)
-        self._ensure_not_started(stored)
+        if stored.fixture.started(self._state.now()):
+            raise ValidationFailedError("signal_id", "the match has already started")
         self._claim(stored.fixture.fixture_id)
         return self._recalc(stored)
 
@@ -608,10 +702,6 @@ class FakeAnalysisService:
             skipped_started=tuple(started),
         )
 
-    def _ensure_not_started(self, stored: _StoredSignal) -> None:
-        if stored.fixture.started(self._state.now()):
-            raise ValidationFailedError("signal_id", "the match has already started")
-
     def _claim(self, fixture_id: EntityId) -> None:
         """Start the cooldown for ``fixture_id`` or report how long is left."""
         now = self._state.now()
@@ -628,7 +718,10 @@ class FakeAnalysisService:
         return True
 
     def _recalc(self, stored: _StoredSignal) -> RecalcDiff:
-        """New odds (or cached numbers when the reserve is spent) and the verdict."""
+        """New odds (or cached numbers when the reserve is spent) and the verdict.
+
+        The verdict uses the thresholds the signal was created/recommended with.
+        """
         before = self._state.view(stored)
         if self._state.budget_remaining() >= RECALC_REQUESTS:
             self._state.spend(RECALC_REQUESTS)
@@ -638,9 +731,7 @@ class FakeAnalysisService:
         else:
             stored.data_as_of = self._state.refreshed_at()
         after = self._state.view(stored)
-        settings = self._state.settings_for(stored.user_id)
-        current = replace(stored.quote, odds=stored.odds)
-        valid = _passes(current, settings.min_probability, settings.min_ev, settings)
+        valid = stored.thresholds.passes(replace(stored.quote, odds=stored.odds))
         return RecalcDiff(
             signal=after,
             before=_numbers(before),
@@ -671,15 +762,13 @@ class FakeSignalService:
         """See :meth:`SignalService.list_signals`."""
         zone = self._state.settings_for(user_id).zone
         window = dates.resolve(self._state.local_today(zone))
-        selected = [
-            stored
-            for stored in self._state.signals.values()
-            if stored.user_id == user_id
+        return tuple(
+            self._state.view(stored)
+            for stored in self._state.user_signals(user_id)
+            if not stored.retro
             and (include_hidden or stored.state is not SignalState.HIDDEN)
-            and window.date_from <= stored.fixture.kickoff.astimezone(zone).date() <= window.date_to
-        ]
-        selected.sort(key=lambda stored: (stored.fixture.kickoff, stored.signal_id))
-        return tuple(self._state.view(stored) for stored in selected)
+            and window.contains(stored.fixture.kickoff, zone)
+        )
 
     async def hide_signal(self, user_id: int, signal_id: SignalId) -> SignalView:
         """See :meth:`SignalService.hide_signal`."""
@@ -712,6 +801,18 @@ class FakeCatalogService:
     def __init__(self, state: FakeState) -> None:
         """Share ``state`` with the other fake services."""
         self._state = state
+
+    async def list_sports(self) -> tuple[SportOption, ...]:
+        """See :meth:`CatalogService.list_sports`."""
+        return tuple(
+            SportOption(
+                sport=sport,
+                available=sport in SPORT_MARKETS,
+                experimental=sport in EXPERIMENTAL_SPORTS,
+                supported_markets=SPORT_MARKETS.get(sport, frozenset()),
+            )
+            for sport in Sport
+        )
 
     async def list_leagues(self, sport: Sport) -> tuple[LeagueOption, ...]:
         """See :meth:`CatalogService.list_leagues`."""
@@ -754,7 +855,7 @@ class FakeCatalogService:
         fixtures = [
             fixture.option()
             for fixture in self._state.fixtures_in(window, settings.zone, request.sports)
-            if _matches_filters(fixture, request)
+            if _matches_filters(fixture, request, settings.league_ids)
         ]
         page_count = -(-len(fixtures) // request.page_size)
         start = request.page * request.page_size
@@ -766,10 +867,12 @@ class FakeCatalogService:
         )
 
 
-def _matches_filters(fixture: FakeFixture, request: FixtureListRequest) -> bool:
-    """No filter = everything; leagues and teams combine as "either"."""
+def _matches_filters(
+    fixture: FakeFixture, request: FixtureListRequest, default_leagues: frozenset[EntityId]
+) -> bool:
+    """Leagues and teams combine as "either"; no filter = the user's default leagues."""
     if not request.league_ids and not request.team_ids:
-        return True
+        return not default_leagues or fixture.league.league_id in default_leagues
     teams = {fixture.home.team_id, fixture.away.team_id}
     return fixture.league.league_id in request.league_ids or bool(teams & request.team_ids)
 
@@ -892,6 +995,8 @@ class FakeBetService:
     async def place_bet(self, user_id: int, draft: BetDraft) -> BetView:
         """See :meth:`BetService.place_bet`."""
         stored = self._state.signal(user_id, draft.signal_id)
+        if stored.retro:
+            raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
         stake = draft.stake or self._default_stake(user_id, stored)
         bet = _StoredBet(
             bet_id=next(self._state.next_id),
@@ -902,7 +1007,7 @@ class FakeBetService:
             placed_at=self._state.now(),
         )
         self._state.bets[bet.bet_id] = bet
-        return self._view(bet)
+        return self.view(bet)
 
     def _default_stake(self, user_id: int, stored: _StoredSignal) -> Decimal:
         unit = self._state.settings_for(user_id).unit
@@ -911,7 +1016,8 @@ class FakeBetService:
             raise ValidationFailedError("stake", "enter the stake: no unit set or no stake advised")
         return unit * stake_units
 
-    def _view(self, bet: _StoredBet) -> BetView:
+    def view(self, bet: _StoredBet) -> BetView:
+        """Bet as of now, settled from its signal's result."""
         stored = self._state.signals[bet.signal_id]
         outcome = self._state.result_of(stored)
         return BetView(
@@ -937,10 +1043,11 @@ class FakeBetService:
         view = replace(self._state.view(stored), odds=bet.odds_taken, stake_units=bet.stake)
         return profit_units(view, None)
 
-    def _user_bets(self, user_id: int) -> list[BetView]:
+    def user_bets(self, user_id: int) -> list[BetView]:
+        """All bets of the user, most recent first."""
         bets = [bet for bet in self._state.bets.values() if bet.user_id == user_id]
         bets.sort(key=lambda bet: (bet.placed_at, bet.bet_id), reverse=True)
-        return [self._view(bet) for bet in bets]
+        return [self.view(bet) for bet in bets]
 
     async def list_bets(
         self, user_id: int, *, open_only: bool = False, limit: int = 20
@@ -948,7 +1055,7 @@ class FakeBetService:
         """See :meth:`BetService.list_bets`."""
         if not 1 <= limit <= _MAX_BET_LIST:
             raise ValidationFailedError("limit", f"must be within [1, {_MAX_BET_LIST}]")
-        bets = [bet for bet in self._user_bets(user_id) if not open_only or bet.outcome is None]
+        bets = [bet for bet in self.user_bets(user_id) if not open_only or bet.outcome is None]
         return tuple(bets[:limit])
 
     async def bank_summary(self, user_id: int) -> BankView:
@@ -968,7 +1075,7 @@ class FakeBetService:
                 (profit for day, profit in by_day.items() if (day.year, day.month) == month),
                 Decimal(0),
             ),
-            open_bets=sum(bet.outcome is None for bet in self._user_bets(user_id)),
+            open_bets=sum(bet.outcome is None for bet in self.user_bets(user_id)),
             history=_bank_history(settings.bank, by_day),
             loss_today=loss_today,
             loss_this_week=loss_week,
@@ -981,7 +1088,7 @@ class FakeBetService:
         for bet in self._state.bets.values():
             if bet.user_id != user_id:
                 continue
-            profit = self._view(bet).profit
+            profit = self.view(bet).profit
             if profit is not None:
                 day = self._state.signals[bet.signal_id].fixture.kickoff.astimezone(zone).date()
                 by_day[day] = by_day.get(day, Decimal(0)) + profit
@@ -1020,20 +1127,19 @@ class FakeResultService:
     async def pending_results(self, user_id: int) -> tuple[SignalView, ...]:
         """See :meth:`ResultService.pending_results`."""
         now = self._state.now()
-        pending = [
-            stored
-            for stored in self._state.signals.values()
-            if stored.user_id == user_id
-            and stored.state is not SignalState.HIDDEN
+        return tuple(
+            self._state.view(stored)
+            for stored in self._state.user_signals(user_id)
+            if stored.counts
             and stored.fixture.finished(now)
             and self._state.result_of(stored) is None
-        ]
-        pending.sort(key=lambda stored: (stored.fixture.kickoff, stored.signal_id))
-        return tuple(self._state.view(stored) for stored in pending)
+        )
 
     async def mark_result(self, user_id: int, request: ResultMarkRequest) -> SignalView:
         """See :meth:`ResultService.mark_result`."""
         stored = self._state.signal(user_id, request.signal_id)
+        if stored.retro:
+            raise ValidationFailedError("signal_id", "a retro signal has no result to mark")
         if not stored.fixture.started(self._state.now()):
             raise ValidationFailedError("signal_id", "the match has not started yet")
         stored.manual_mark = request.mark
@@ -1070,35 +1176,31 @@ class FakeReportService:
     async def report(self, user_id: int, request: ReportRequest) -> ReportView:
         """See :meth:`ReportService.report`."""
         zone = self._state.settings_for(user_id).zone
+        date_from, date_to = request.resolve(self._state.local_today(zone))
 
         def in_period(kickoff: datetime) -> bool:
             day = kickoff.astimezone(zone).date()
-            return (
-                request.date_from is None or day >= request.date_from
-            ) and day <= request.date_to
+            return (date_from is None or day >= date_from) and day <= date_to
 
         rows = [row for row in self._state.outcomes(user_id) if in_period(row.view.kickoff)]
         period_signals = {row.view.signal_id for row in rows}
         bets = [
             bet
-            for bet in await self._bets.list_bets(user_id, limit=_MAX_BET_LIST)
+            for bet in self._bets.user_bets(user_id)
             if bet.profit is not None and bet.signal_id in period_signals
         ]
         bet_totals = (
             sum((bet.profit or Decimal(0) for bet in bets), Decimal(0)),
             sum((bet.stake for bet in bets), Decimal(0)),
         )
-        return build_report(request, rows, bet_totals)
+        return build_report((date_from, date_to), request.group_by, rows, bet_totals)
 
     async def export(self, user_id: int) -> ExportFile:
         """See :meth:`ReportService.export`."""
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(_EXPORT_HEADER)
-        rows = sorted(
-            self._state.outcomes(user_id), key=lambda row: (row.view.kickoff, row.view.signal_id)
-        )
-        for row in rows:
+        for row in self._state.outcomes(user_id):
             writer.writerow(_export_row(row))
         return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
 
@@ -1118,6 +1220,8 @@ _EXPORT_HEADER: Final = (
     "ev",
     "confidence",
     "stake_units",
+    "recommended_at",
+    "hidden",
     "result",
     "profit_units",
 )
@@ -1140,6 +1244,8 @@ def _export_row(row: SignalOutcome) -> tuple[object, ...]:
         round(view.ev, 4),
         view.confidence.value,
         view.stake_units,
+        "" if view.recommended_at is None else view.recommended_at.isoformat(),
+        view.state is SignalState.HIDDEN,
         "" if view.result is None else view.result.value,
         "" if row.profit_units is None else row.profit_units,
     )
