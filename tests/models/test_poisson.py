@@ -330,6 +330,9 @@ def test_model_clamps_rho_for_unseen_extreme_pairings() -> None:
         n_matches=2,
         log_likelihood=-1.0,
         iterations=1,
+        converged=True,
+        termination="test",
+        projected_gradient=0.0,
     )
     rates = model.expected_goals("Strong", "Weak")
     assert rates.home == pytest.approx(math.exp(1.5))
@@ -384,10 +387,85 @@ def test_as_of_must_be_a_plain_date(league: list[MatchRecord]) -> None:
         fit_dixon_coles(league[:100], datetime(2030, 1, 1, tzinfo=UTC))
 
 
-def test_non_convergence_raises(league: list[MatchRecord], monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("params", [np.zeros(41), np.full(41, np.nan)])
+def test_non_convergence_raises(
+    league: list[MatchRecord], monkeypatch: pytest.MonkeyPatch, params: np.ndarray
+) -> None:
+    # Far from the optimum (zeros: projected gradient >> tolerance) or not finite at all.
     def failing_minimize(*_args: object, **_kwargs: object) -> OptimizeResult:
-        return OptimizeResult(success=False, x=np.zeros(41), nit=2000, message="ABNORMAL", fun=1.0)
+        return OptimizeResult(success=False, x=params, nit=2000, message="ABNORMAL", fun=1.0)
 
     monkeypatch.setattr(poisson_module, "minimize", failing_minimize)
     with pytest.raises(ModelFitError, match="did not converge"):
         fit_dixon_coles(league[:380], day_after(league[:380]))
+
+
+def test_iteration_limit_at_a_stationary_point_is_accepted(
+    league: list[MatchRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_minimize = poisson_module.minimize
+
+    def minimize_hitting_the_limit(*args: object, **kwargs: object) -> OptimizeResult:
+        result = real_minimize(*args, **kwargs)
+        result.success = False
+        result.message = "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT"
+        return result
+
+    sample = league[:380]
+    reference = fit_dixon_coles(sample, day_after(sample))
+    monkeypatch.setattr(poisson_module, "minimize", minimize_hitting_the_limit)
+    accepted = fit_dixon_coles(sample, day_after(sample))
+    assert reference.converged
+    assert not accepted.converged
+    assert "ITERATIONS" in accepted.termination
+    assert accepted.projected_gradient <= 1e-5
+    assert accepted == reference  # diagnostics are excluded from equality
+
+
+def promotion_league(seed: int, seasons: int, swaps: int = 3) -> list[MatchRecord]:
+    """20-team league drawn from a 32-team pool; ``swaps`` teams go down and up each season."""
+    rng = np.random.default_rng(seed)
+    pool = Truth(
+        attack=centred(rng.normal(0.0, 0.3, 32)), defence=centred(rng.normal(0.0, 0.3, 32))
+    )
+    current, outside = list(range(20)), list(range(20, 32))
+    matches = []
+    for season in range(seasons):
+        truth = Truth(attack=pool.attack[current], defence=pool.defence[current])
+        names = {f"Team {i:02d}": f"Club {pool_index:02d}" for i, pool_index in enumerate(current)}
+        played = START + timedelta(days=365 * season)
+        matches.extend(
+            MatchRecord(names[m.home_team], names[m.away_team], m.home_goals, m.away_goals, played)
+            for m in simulate_league(rng, truth, seasons=1, played=played)
+        )
+        rng.shuffle(current)
+        rng.shuffle(outside)
+        current, outside = current[swaps:] + outside[:swaps], outside[swaps:] + current[:swaps]
+    return matches
+
+
+@pytest.mark.parametrize(("seed", "seasons", "xi"), [(0, 6, 0.0065), (1, 12, 0.003)])
+def test_long_history_with_promotion_and_relegation_fits(
+    seed: int, seasons: int, xi: float
+) -> None:
+    # Regression (T2 review): teams relegated years ago have weights ~1e-6, which left
+    # near-flat directions and made L-BFGS-B stop on its iteration limit. Both seeds were
+    # checked to raise ModelFitError before the fix.
+    matches = promotion_league(seed=seed, seasons=seasons)
+    model = fit_dixon_coles(matches, day_after(matches), xi=xi)
+    assert model.projected_gradient <= 1e-5
+    current_season = {m.home_team for m in matches if m.match_date == matches[-1].match_date}
+    assert current_season <= set(model.teams)
+    assert all(np.isfinite(list(model.attack.values())))
+
+
+def test_stale_teams_are_dropped_and_unknown() -> None:
+    matches = promotion_league(seed=1, seasons=6)
+    all_teams = {m.home_team for m in matches}
+    model = fit_dixon_coles(matches, day_after(matches), xi=0.0065)
+    stale = all_teams - set(model.teams)
+    assert stale  # relegated in the first seasons, weight < 1e-3 of the heaviest team
+    assert model.n_matches < len(matches)
+    with pytest.raises(UnknownTeamError):
+        model.expected_goals(sorted(stale)[0], model.teams[0])
+    assert set(fit_dixon_coles(matches, day_after(matches), xi=0.0).teams) == all_teams

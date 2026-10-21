@@ -53,6 +53,18 @@ _MAX_ITERATIONS: Final = 2000
 # The objective is a per-unit-weight NLL (~3); these tolerances are far below its noise.
 _FTOL: Final = 1e-13
 _GTOL: Final = 1e-9
+# If L-BFGS-B stops on its iteration or line-search limit, the point is still accepted when
+# the projected gradient (sup norm, per unit weight) shows it is a stationary point. Near-flat
+# directions left by lightly weighted data make the strict _GTOL unreachable there. With a
+# curvature of ~0.05 per team (its weight share), 1e-5 bounds the parameter error at ~2e-4
+# on the log scale, far below a strength's standard error (~0.05).
+_ACCEPTABLE_PROJECTED_GRADIENT: Final = 1e-5
+# Stale data is dropped before fitting: a match whose time weight is below this share of the
+# newest match's, then every team whose total weight is below this share of the heaviest
+# team's (e.g. relegated long ago). Such teams carry no information and only create
+# near-flat directions; asking for them later raises UnknownTeamError, which is correct.
+_MIN_RELATIVE_MATCH_WEIGHT: Final = 1e-4
+_MIN_RELATIVE_TEAM_WEIGHT: Final = 1e-3
 # tau below this is treated as this (log barrier) during the line search; never at optimum.
 _TAU_FLOOR: Final = 1e-12
 # Relative distance kept from the boundary of the feasible rho interval at prediction time.
@@ -93,7 +105,12 @@ class ExpectedGoals:
 
 @dataclass(frozen=True, slots=True)
 class DixonColesModel:
-    """Fitted Dixon-Coles parameters (log scale), plus fit diagnostics."""
+    """Fitted Dixon-Coles parameters (log scale), plus fit diagnostics.
+
+    ``n_matches`` counts the matches actually used (stale ones are dropped). ``converged`` is
+    the optimiser's own strict criterion; when it is False the fit was still accepted because
+    ``projected_gradient`` was below the acceptance tolerance (see ADR 0003).
+    """
 
     attack: Mapping[str, float]
     defence: Mapping[str, float]
@@ -105,6 +122,9 @@ class DixonColesModel:
     n_matches: int
     log_likelihood: float
     iterations: int = field(compare=False)
+    converged: bool = field(compare=False)
+    termination: str = field(compare=False)
+    projected_gradient: float = field(compare=False)
 
     @property
     def teams(self) -> tuple[str, ...]:
@@ -196,17 +216,25 @@ def fit_dixon_coles(
         ModelFitError: the optimiser did not converge.
     """
     design = _build_design(matches, as_of, xi)
+    bounds = _bounds(design.n_teams)
     result = minimize(
         _objective,
         _initial_params(design),
         args=(design,),
         jac=True,
         method="L-BFGS-B",
-        bounds=_bounds(design.n_teams),
+        bounds=bounds,
         options={"maxiter": _MAX_ITERATIONS, "ftol": _FTOL, "gtol": _GTOL},
     )
-    if not result.success or not np.all(np.isfinite(result.x)):
-        msg = f"Dixon-Coles fit did not converge after {result.nit} iterations: {result.message}"
+    stationarity = _projected_gradient(result.x, design, bounds)
+    # NaN stationarity means non-finite parameters: never acceptable.
+    if not np.isfinite(stationarity) or (
+        not result.success and stationarity > _ACCEPTABLE_PROJECTED_GRADIENT
+    ):
+        msg = (
+            f"Dixon-Coles fit did not converge after {result.nit} iterations "
+            f"(projected gradient {stationarity:.2e}): {result.message}"
+        )
         raise ModelFitError(msg)
     intercept, home_advantage, rho, attack, defence = _unpack(result.x, design.n_teams)
     total_weight = float(design.weights.sum())
@@ -218,10 +246,27 @@ def fit_dixon_coles(
         rho=float(rho),
         xi=xi,
         as_of=as_of,
-        n_matches=len(matches),
+        n_matches=design.n_matches,
         log_likelihood=-float(result.fun) * total_weight - design.log_factorial_term,
         iterations=int(result.nit),
+        converged=bool(result.success),
+        termination=str(result.message),
+        projected_gradient=stationarity,
     )
+
+
+def _projected_gradient(
+    params: FloatArray, design: "_Design", bounds: list[tuple[float, float]]
+) -> float:
+    """Sup norm of the bound-projected gradient: 0 exactly at a constrained optimum.
+
+    NaN when the parameters are not finite.
+    """
+    if not np.all(np.isfinite(params)):
+        return float("nan")
+    gradient = _objective(params, design)[1]
+    lower, upper = np.array(bounds).T
+    return float(np.max(np.abs(np.clip(params - gradient, lower, upper) - params)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +285,10 @@ class _Design:
     def n_teams(self) -> int:
         return len(self.teams)
 
+    @property
+    def n_matches(self) -> int:
+        return len(self.weights)
+
 
 def _build_design(matches: Sequence[MatchRecord], as_of: date, xi: float) -> _Design:
     _check_plain_date(as_of, "as_of")
@@ -250,15 +299,12 @@ def _build_design(matches: Sequence[MatchRecord], as_of: date, xi: float) -> _De
     if leaked:
         msg = f"{len(leaked)} match(es) on or after as_of={as_of} (look-ahead), e.g. {leaked[0]}"
         raise ModelInputError(msg)
+    matches, weights = _drop_stale(matches, as_of, xi)
     teams = tuple(sorted({m.home_team for m in matches} | {m.away_team for m in matches}))
     _check_identifiable(matches, teams)
     index = {team: position for position, team in enumerate(teams)}
-    ages = np.array([(as_of - m.match_date).days for m in matches], dtype=np.float64)
     home_goals = np.array([m.home_goals for m in matches], dtype=np.float64)
     away_goals = np.array([m.away_goals for m in matches], dtype=np.float64)
-    # Relative to the newest match: the optimum is invariant to a common scale and this
-    # keeps the largest weight at 1 so old data can never underflow every weight to 0.
-    weights = np.exp(-xi * (ages - ages.min()))
     log_factorials = gammaln(home_goals + 1.0) + gammaln(away_goals + 1.0)
     return _Design(
         teams=teams,
@@ -269,6 +315,33 @@ def _build_design(matches: Sequence[MatchRecord], as_of: date, xi: float) -> _De
         weights=weights,
         log_factorial_term=float(np.dot(weights, log_factorials)),
     )
+
+
+def _drop_stale(
+    matches: Sequence[MatchRecord], as_of: date, xi: float
+) -> tuple[list[MatchRecord], FloatArray]:
+    """Time weights, without matches and teams whose weight is negligible (see constants)."""
+    if not matches:
+        return [], np.zeros(0)
+    ages = np.array([(as_of - m.match_date).days for m in matches], dtype=np.float64)
+    # Relative to the newest match: the optimum is invariant to a common scale and this
+    # keeps the largest weight at 1 so old data can never underflow every weight to 0.
+    weights = np.exp(-xi * (ages - ages.min()))
+    team_weight: dict[str, float] = {}
+    for match, weight in zip(matches, weights.tolist(), strict=True):
+        for team in (match.home_team, match.away_team):
+            team_weight[team] = team_weight.get(team, 0.0) + weight
+    min_team_weight = _MIN_RELATIVE_TEAM_WEIGHT * max(team_weight.values())
+    keep = np.array(
+        [
+            weight >= _MIN_RELATIVE_MATCH_WEIGHT
+            and min(team_weight[match.home_team], team_weight[match.away_team]) >= min_team_weight
+            for match, weight in zip(matches, weights.tolist(), strict=True)
+        ],
+        dtype=bool,
+    )
+    kept = [match for match, used in zip(matches, keep.tolist(), strict=True) if used]
+    return kept, weights[keep]
 
 
 def _check_identifiable(matches: Sequence[MatchRecord], teams: tuple[str, ...]) -> None:
