@@ -132,9 +132,12 @@ F9 (deploy) ni F6 dan keyin erta qilish ham mumkin, shunda bot serverda sinovdan
 | F3.9 | Unit testlar: ehtimolliklar yig'indisi = 1, ma'lum misollarda to'g'ri natija, EV formulasi |
 
 **Darvoza F3 (backtest qabul mezonlari):**
-- Kalibratsiya: har bir 10% li oraliqda og'ish ≤ 5 p.p.
-- Yopilish koeffitsientlarida, ≥ 500 tarixiy signalda: **ROI ≥ 0%**. EV ≥ 5% filtrida ROI musbat.
-- Natija bitta ligaga bog'liq emas: kamida 3 ta ligada musbat yoki nolga yaqin.
+Barcha mezonlar **faqat hold-out** (oxirgi **to'liq tugagan** mavsum, bir marta baholanadi) bo'yicha va statistik ishonch bilan tekshiriladi (qarorlar jurnali #11):
+- Kalibratsiya: har bir 10% li oraliqda (n ≥ 30) og'ish ≤ 5 p.p.
+- ≥ 500 signal; **CLV (yopilish de-vig narxiga nisbatan) o'rtachasi > 0 va 95% CI pastki chegarasi > 0** — asosiy mezon.
+- ROI: 95% CI pastki chegarasi ≥ −2% (nuqta bahosi ≥ 0%). Nuqta bahosi bajarilib, CI bajarilmasa — "ahamiyatsiz" deb alohida ko'rsatiladi, ✅ hisoblanmaydi.
+- Natija bitta ligaga bog'liq emas: n ≥ 100 signal bo'lgan kamida 3 ta ligada CLV > 0.
+- Ma'lumot: sof bozor (`w = 0`) bazaviy varianti bilan solishtiriladi; model undan yomon bo'lsa, bozor modeli rejimi tanlanadi.
 
 Mezonlar bajarilmasa, model yaxshilanadi (parametrlar, bozor modeli ulushi, ligalar ro'yxati) yoki faqat **bozor modeli** (Pinnacle vs boshqa bukmekerlar) bilan davom etiladi. Qaror birgalikda qabul qilinadi.
 
