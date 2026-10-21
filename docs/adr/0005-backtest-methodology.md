@@ -44,7 +44,9 @@ HIGH dan boshlanadi, har bir zaiflik bir pog'ona tushiradi (LOW gacha): kam ma'l
 ## 7. Sintetik samarali bozor (vositani tekshirish)
 Dixon-Coles jarayoni, kuchlar mavsumlar orasida drift qiladi; har o'yinda model hech qachon bila olmaydigan zarba (`match_shock_sd = 0.15`, log-tezlikda). Bozor shu o'yinning **haqiqiy** taqsimotini biladi; narxlar Shin uslubida marja bilan (Pinnacle opening 3%, closing 2.5%, o'rtacha 5.5%/5%), 2 xonagacha yaxlitlanadi; natijalar ham aynan shu taqsimotdan. Demak har bir stavkaning kutilgan daromadi manfiy.
 - **Asosiy sanity testi** (`test_backtest_finds_no_edge_on_an_efficient_market`): 4 liga × 10 jamoa × 3 mavsum, sof model (`w = 1`), istalgan musbat EV ga stavka (~700 stavka). Talab: yopilish taqsimotidagi kutilgan EV ≈ −marja oralig'ida, haqiqiy ROI CI uni o'z ichiga oladi, CI ning pastki chegarasi < 0, o'rtacha CLV < 0, yopilishni yutish ulushi < 5%. Seedlar 11/12/13 da ROI +6.3% / +3.6% / −11.1% (kutilgan ≈ −4.4%): uzoq koeffitsientlar tufayli tebranish katta, lekin CLV har doim ≈ −4.5% va CI kutilganni qamraydi — sizib chiqish belgisi yo'q.
-- Natija: [docs/backtest/2026-10-21-synthetic.md](../backtest/2026-10-21-synthetic.md).
+- Natijalar (qaror #11 darvozasi bilan):
+  - [2026-10-21-synthetic.md](../backtest/2026-10-21-synthetic.md) — standart protokol (grid `w = 0` bilan): validatsiya sof bozorni tanlaydi, hold-out da stavka yo'q, darvoza ❌. Samarali bozorda to'g'ri natija.
+  - [2026-10-21-synthetic-model-only.md](../backtest/2026-10-21-synthetic-model-only.md) — **diagnostika** (grid `w ∈ {0.25…1}`, sof bozor variantisiz): 89 stavka, ROI +7.48% [−15.1%; +29.3%] → **ahamiyatsiz** (eski darvoza buni ✅ deb hisoblardi), CLV −3.19% [−3.33%; −3.05%] → ❌, log-loss ansambl 0.7605 vs bozor 0.7595 → ❌.
 
 ## Oqibatlar
 - **Haqiqiy ma'lumotdagi F3 darvozasi kutilmoqda** (#7): serverda `scripts/import_history.py`, so'ng `scripts/backtest.py`. Bo'sh bazada skript `no history in DB - run scripts/import_history.py first` bilan 2-kod qaytaradi.
