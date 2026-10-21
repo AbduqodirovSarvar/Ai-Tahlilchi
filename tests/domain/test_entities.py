@@ -69,6 +69,12 @@ def test_external_ref_rejects_bad_id(external_id: str) -> None:
         ExternalRef("src", external_id)
 
 
+def test_country_is_optional() -> None:
+    league = League(ref=ExternalRef(SOURCE, "CL"), sport=Sport.FOOTBALL, name="Champions League")
+    assert league.country is None
+    assert make_team("Ajax").country is None
+
+
 def test_team_and_league_strip_names_and_reject_empty() -> None:
     team = Team(
         ref=ExternalRef(SOURCE, "1"), sport=Sport.FOOTBALL, name=" Arsenal ", country=" England "
