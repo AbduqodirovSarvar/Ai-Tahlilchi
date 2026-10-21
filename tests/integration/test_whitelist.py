@@ -34,8 +34,20 @@ def user(user_id: int) -> User:
 
 
 def callback_update(user_id: int) -> Update:
-    query = CallbackQuery(id="cb", from_user=user(user_id), chat_instance="ci", data="menu")
+    """A button press under a message the bot sent in the user's private chat."""
+    message = Message(message_id=5, date=NOW, chat=Chat(id=user_id, type="private"), text="Menyu")
+    query = CallbackQuery(
+        id="cb", from_user=user(user_id), chat_instance="ci", data="menu", message=message
+    )
     return Update(update_id=10, callback_query=query)
+
+
+def inline_mode_callback_update(user_id: int) -> Update:
+    """A button press under an inline-mode message: Telegram sends no chat at all."""
+    query = CallbackQuery(
+        id="cb2", from_user=user(user_id), chat_instance="ci", data="menu", inline_message_id="im"
+    )
+    return Update(update_id=16, callback_query=query)
 
 
 def edited_message_update(user_id: int) -> Update:
@@ -119,6 +131,8 @@ def dispatcher(seen: list[TelegramObject]) -> Dispatcher:
         channel_post_update,
         anonymous_group_admin_update,
         edited_channel_post_update,
+        lambda: inline_query_update(ADMIN_ID),
+        lambda: inline_mode_callback_update(ADMIN_ID),
     ],
     ids=[
         "stranger-message",
@@ -128,9 +142,11 @@ def dispatcher(seen: list[TelegramObject]) -> Dispatcher:
         "channel-post-no-user",
         "anonymous-group-admin",
         "edited-channel-post-no-user",
+        "admin-inline-query-no-chat",
+        "admin-inline-mode-callback-no-chat",
     ],
 )
-async def test_updates_not_from_a_whitelisted_user_reach_no_handler(
+async def test_updates_not_from_a_whitelisted_private_chat_reach_no_handler(
     dispatcher: Dispatcher,
     bot: Bot,
     session: RecordingSession,
@@ -148,10 +164,9 @@ async def test_updates_not_from_a_whitelisted_user_reach_no_handler(
     [
         lambda: callback_update(ADMIN_ID),
         lambda: edited_message_update(ADMIN_ID),
-        lambda: inline_query_update(ADMIN_ID),
         lambda: text_update(ADMIN_ID, "salom"),
     ],
-    ids=["admin-callback", "admin-edited", "admin-inline", "admin-message"],
+    ids=["admin-callback", "admin-edited", "admin-message"],
 )
 async def test_updates_from_a_whitelisted_user_reach_handlers(
     dispatcher: Dispatcher,
@@ -164,15 +179,17 @@ async def test_updates_from_a_whitelisted_user_reach_handlers(
     assert len(seen) == 1
 
 
-async def test_admin_start_in_a_group_is_answered_in_that_group(
-    bot: Bot, session: RecordingSession
+@pytest.mark.parametrize("chat_type", ["group", "supergroup"])
+async def test_admin_start_in_a_group_is_ignored(
+    bot: Bot, session: RecordingSession, chat_type: str
 ) -> None:
-    group = Chat(id=-100789, type="group", title="Guruh")
+    # Personal bot: signals and stakes must never be posted where others can read them.
+    group = Chat(id=-100789, type=chat_type, title="Guruh")
     message = Message(message_id=1, date=NOW, chat=group, from_user=user(ADMIN_ID), text="/start")
 
     await build_dispatcher(WHITELIST).feed_update(bot, Update(update_id=20, message=message))
 
-    assert [request.chat_id for request in session.requests] == [group.id]  # type: ignore[attr-defined]
+    assert session.requests == []
 
 
 async def test_stranger_in_a_group_with_the_admin_is_still_ignored(
