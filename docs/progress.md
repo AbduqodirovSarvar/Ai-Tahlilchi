@@ -30,9 +30,9 @@
 - [x] F1.8 Minimal bot `/start` → "Ishlayapti ✅" (whitelist + faqat shaxsiy chat): offline testlar bilan tasdiqlangan. Jonli Telegram sinovi token qo'shilgandan keyin (F0 kechiktirilgan)
 
 ## T2 — Shartnomalar
-- [x] F2.1 SQLAlchemy modellari (18 jadval) + Alembic `0001` (upgrade/downgrade testlangan), engine (WAL, busy_timeout, foreign_keys), domen ⇄ ORM mapperlar, idempotent upsert (data-engineer)
+- [x] F2.1 SQLAlchemy modellari (18 jadval) + Alembic `0001` (upgrade/downgrade testlangan), engine (WAL, busy_timeout, foreign_keys), domen ⇄ ORM mapperlar, idempotent upsert (data-engineer). Fix round: Alembic `0002` (opening/closing yagona, loss limitlar, `user_bets.signal_id` indeksi), `merge_outcome` holat/hisob qoidalari
 - [x] F2.4 `SportAdapter` protokoli va domen modellari: `docs/contracts.md` 1–3 frozen v1 (orkestr tasdig'i kutilmoqda) (data-engineer)
-- [~] F2.7 Tarixiy CSV importi: kod va testlar tayyor (`scripts/import_history.py`, offline/kesh, idempotent). Haqiqiy ma'lumot bilan ishga tushirish **bu mashinada bloklangan**: korporativ veb-filtr football-data.co.uk ni "Gambling" toifasida to'sadi. CSV'larni boshqa tarmoqdan `data/history/<mavsum>/<liga>.csv` ga qo'yib `--offline` bilan yoki serverda ishga tushirish kerak (data-engineer)
+- [~] F2.7 Tarixiy CSV importi: kod va testlar tayyor (`scripts/import_history.py`, offline/kesh, idempotent). Haqiqiy ma'lumot bilan ishga tushirish **bu mashinada bloklangan**: korporativ veb-filtr football-data.co.uk ni "Gambling" toifasida to'sadi. CSV'larni boshqa tarmoqdan `data/history/<mavsum>/<liga>.csv` ga qo'yib `--offline` bilan yoki serverda ishga tushirish kerak (data-engineer). Fix round: QA F-1..F-5 va sharh R1, R3–R6 tuzatildi, strict xfail lar olib tashlandi
 - [x] `services/interfaces.py` (DTO lar, 10 ta protokol, `Services`), `services/errors.py`, `services/fake.py` (deterministik fake) va qayta ishlatiladigan shartnoma testlari `tests/services/contract_suite.py`; `docs/contracts.md` §4–5 frozen v1 taklif, [ADR 0004](adr/0004-service-contract.md) (pipeline-engineer)
 - [ ] Shartnomalarni qotirish (`docs/contracts.md` v1) (orkestr)
 

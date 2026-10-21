@@ -9,7 +9,7 @@ import re
 import shutil
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -178,11 +178,6 @@ def test_reimport_after_score_and_price_correction_updates_in_place(
     assert {("home", -0.75, 1.99), ("home", -0.5, 1.9)} <= closing_handicap
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-1: a kick-off time correction re-keys every snapshot (taken_at) and "
-    "keeps the old ones, so the fixture ends up with two closing prices per selection",
-)
 def test_reimport_after_kickoff_time_correction_does_not_duplicate_odds(
     workspace: ImportWorkspace,
 ) -> None:
@@ -197,11 +192,6 @@ def test_reimport_after_kickoff_time_correction_does_not_duplicate_odds(
     assert workspace.counts()["odds_snapshots"] == ODDS_PER_FULL_ROW
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-2: the match date is part of the fixture external_id, so a date "
-    "correction stores the same match twice",
-)
 def test_reimport_after_match_date_correction_does_not_duplicate_the_fixture(
     workspace: ImportWorkspace,
 ) -> None:
@@ -258,23 +248,12 @@ def test_season_crossing_the_new_year_stays_one_season(workspace: ImportWorkspac
     assert workspace.run("E0", "2024") == 0
 
     assert workspace.grouped("SELECT season, count(*) FROM fixtures GROUP BY 1") == {2024: 4}
-    assert workspace.fixture("E0/2024/2024-12-31/Chelsea/Arsenal")[0] == (
-        "2024-12-31 20:00:00.000000"
-    )
-    assert workspace.fixture("E0/2024/2025-01-01/Arsenal/Chelsea")[0] == (
-        "2025-01-01 12:30:00.000000"
-    )
+    assert workspace.fixture("E0/2024/Chelsea/Arsenal")[0] == ("2024-12-31 20:00:00.000000")
+    assert workspace.fixture("E0/2024/Arsenal/Chelsea")[0] == ("2025-01-01 12:30:00.000000")
     # The reverse fixture of a pairing in the same season is another match (BST in May).
-    assert workspace.fixture("E0/2024/2025-05-25/Fulham/Man United")[0] == (
-        "2025-05-25 15:00:00.000000"
-    )
+    assert workspace.fixture("E0/2024/Fulham/Man United")[0] == ("2025-05-25 15:00:00.000000")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-3: two-digit years are always read as 20yy, so 1990s files "
-    "(dd/mm/yy) land in the 2090s",
-)
 def test_two_digit_years_of_a_1999_season_stay_in_the_1990s(workspace: ImportWorkspace) -> None:
     workspace.write_season("E0", 1999, [full_row("Arsenal", "Leicester", when="07/08/99 15:00")])
 
@@ -350,11 +329,6 @@ def test_non_finite_or_garbled_cells_drop_only_their_group(
     assert workspace.counts()["odds_snapshots"] == 2 * ODDS_PER_FULL_ROW - 3 - 4 * 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-5: a handicap group whose bookmaker is not quoted at all is counted as "
-    "'incomplete' whenever the shared line column (AHh/AHCh) is filled",
-)
 def test_unquoted_handicap_bookmakers_are_not_counted_as_incomplete() -> None:
     content = (
         b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,AHh,PAHH,PAHA\nE0,12/08/23,A,B,1,0,-0.5,1.9,2.0\n"
@@ -402,14 +376,16 @@ def test_empty_file_fails_alone_and_header_only_file_imports_nothing(
 
 
 def test_ten_thousand_rows_import_within_budget(workspace: ImportWorkspace) -> None:
-    # 200 match days x 50 matches; within a day every home team is different.
+    # 10k distinct home/away pairings of 101 teams (a pairing is one fixture per season),
+    # 50 matches a day from 1 Aug 2023 so every date lies inside the 2023/24 season.
+    pairings = [(home, away) for home in range(101) for away in range(101) if home != away]
     rows = [
         full_row(
-            f"Team {i % 100}",
-            f"Team {(7 * i + 1) % 100}",  # 6i + 1 is odd, so never equal to the home team
-            when=f"{1 + (i // 50) % 28:02d}/{1 + (i // 1400) % 12:02d}/2023 15:00",
+            f"Team {home}",
+            f"Team {away}",
+            when=(date(2023, 8, 1) + timedelta(days=i // 50)).strftime("%d/%m/%Y 15:00"),
         )
-        for i in range(10_000)
+        for i, (home, away) in enumerate(pairings[:10_000])
     ]
     workspace.write_season("E0", 2023, rows)
 
@@ -429,7 +405,8 @@ def test_ten_thousand_rows_import_within_budget(workspace: ImportWorkspace) -> N
 
 def test_offline_mode_never_opens_a_connection(workspace: ImportWorkspace) -> None:
     current = workspace.script.current_season(datetime.now(UTC).date())
-    stale = workspace.write_season("E0", current, [full_row("Arsenal", "Forest")])
+    row = full_row("Arsenal", "Forest", when=f"12/08/{current} 15:00")  # inside that season
+    stale = workspace.write_season("E0", current, [row])
     week_ago = time.time() - 7 * 24 * 3600
     os.utime(stale, (week_ago, week_ago))
 
@@ -483,11 +460,6 @@ def test_redirect_to_a_block_page_is_not_cached(workspace: ImportWorkspace) -> N
     assert list(workspace.cache_dir.rglob("*")) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-4: a plain-text block page with 'Date' and a comma passes "
-    "looks_like_csv, is cached, and a complete season is never downloaded again",
-)
 def test_plain_text_block_page_is_not_cached(workspace: ImportWorkspace) -> None:
     page = b"Access denied by policy (Gambling). Date: Tue, 21 Oct 2026 10:00:00 GMT\n"
     with respx.mock(assert_all_called=False) as router:

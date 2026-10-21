@@ -30,6 +30,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -67,6 +68,9 @@ SHORT_TEXT_LENGTH: Final = 64
 NO_LINE: Final = 0.0
 _LINE_MARKETS_SQL: Final = f"('{MarketType.TOTALS.value}', '{MarketType.ASIAN_HANDICAP.value}')"
 LINE_ONLY_FOR_LINE_MARKETS_SQL: Final = f"market IN {_LINE_MARKETS_SQL} OR line = 0"
+# Opening and closing are single moments: at most one price per selection and kind.
+SINGLE_MOMENT_KINDS: Final = frozenset({OddsKind.OPENING, OddsKind.CLOSING})
+SINGLE_MOMENT_ODDS_SQL: Final = f"kind IN ('{OddsKind.OPENING.value}', '{OddsKind.CLOSING.value}')"
 
 
 def utcnow() -> datetime:
@@ -184,6 +188,18 @@ class OddsSnapshotRow(Base):
         CheckConstraint("odds > 1", name="odds_above_one"),
         CheckConstraint(LINE_ONLY_FOR_LINE_MARKETS_SQL, name="line_only_for_line_markets"),
         Index(None, "taken_at"),
+        Index(
+            "uq_odds_snapshots_single_moment",
+            "fixture_id",
+            "bookmaker",
+            "market",
+            "selection",
+            "line",
+            "kind",
+            unique=True,
+            sqlite_where=text(SINGLE_MOMENT_ODDS_SQL),
+            postgresql_where=text(SINGLE_MOMENT_ODDS_SQL),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -242,6 +258,9 @@ class UserSettingsRow(Base):
     prematch_minutes: Mapped[int | None]
     quiet_hours_start: Mapped[time | None]
     quiet_hours_end: Mapped[time | None]
+    # Responsible-gambling stop (plan §6.9); NULL = no limit.
+    daily_loss_limit: Mapped[Decimal | None]
+    weekly_loss_limit: Mapped[Decimal | None]
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
 
@@ -385,6 +404,7 @@ class UserBetRow(Base):
     __table_args__ = (
         CheckConstraint("odds_taken > 1", name="odds_above_one"),
         Index(None, "user_id", "placed_at"),
+        Index(None, "signal_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

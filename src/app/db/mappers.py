@@ -5,13 +5,13 @@ rebuild validated domain objects (a corrupt row raises
 :class:`~app.domain.DomainValidationError` instead of leaking bad data upwards).
 """
 
+from app.db.fixture_state import FixtureOutcome
 from app.db.schema import NO_LINE, FixtureRow, LeagueRow, OddsSnapshotRow, TeamRow
 from app.domain import (
     LINE_MARKETS,
     ExternalRef,
     Fixture,
     FixtureResult,
-    FixtureStatus,
     League,
     Market,
     MarketType,
@@ -64,10 +64,10 @@ def fixture_values(
     league_id: int,
     home_team_id: int,
     away_team_id: int,
-    result: FixtureResult | None = None,
+    outcome: FixtureOutcome,
 ) -> RowValues:
-    """Columns of ``fixtures``; a result, when given, sets the status and scores."""
-    values: RowValues = {
+    """Columns of ``fixtures``; status and scores come from the merged ``outcome``."""
+    return {
         "sport": fixture.sport,
         "source": fixture.ref.source,
         "external_id": fixture.ref.external_id,
@@ -76,23 +76,7 @@ def fixture_values(
         "kickoff_at": fixture.kickoff,
         "home_team_id": home_team_id,
         "away_team_id": away_team_id,
-        "status": fixture.status,
-    }
-    values.update(result_values(result))
-    if result is not None:
-        values["status"] = FixtureStatus(result.status.value)
-    return values
-
-
-def result_values(result: FixtureResult | None) -> RowValues:
-    """Score columns of ``fixtures`` (all ``None`` when there is no result)."""
-    return {
-        "home_score": result.home_score if result else None,
-        "away_score": result.away_score if result else None,
-        "home_ht_score": result.home_ht_score if result else None,
-        "away_ht_score": result.away_ht_score if result else None,
-        "home_xg": result.home_xg if result else None,
-        "away_xg": result.away_xg if result else None,
+        **outcome.values(),
     }
 
 

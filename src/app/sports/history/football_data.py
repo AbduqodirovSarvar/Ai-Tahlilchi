@@ -46,8 +46,11 @@ DEFAULT_KICKOFF_TIME: Final = time(12, 0)
 # unrecorded moment; this lead only keeps them ordered before the closing price.
 EARLY_ODDS_LEAD: Final = timedelta(days=1)
 TOTALS_LINE: Final = 2.5
-TWO_DIGIT_YEAR_BASE: Final = 2000
 _TWO_DIGIT_YEAR_LENGTH: Final = 2
+_CENTURY: Final = 100
+# A season runs July..June; dates further than this outside that window are typos.
+SEASON_DATE_MARGIN: Final = timedelta(days=62)
+SEASON_FIRST_MONTH: Final = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,16 +326,16 @@ def _fixture(
     season: int,
     into: _Accumulator,
 ) -> Fixture:
-    match_date = parse_date(row.get(columns["date"], ""))
+    match_date = parse_date(row.get(columns["date"], ""), season=season)
     kickoff_time = parse_time(row.get(columns.get("time", ""), ""))
     if kickoff_time is None:
         into.missing_kickoff_time += 1
         kickoff_time = DEFAULT_KICKOFF_TIME
     home = _team(row.get(columns["home"], ""), league)
     away = _team(row.get(columns["away"], ""), league)
-    external_id = "/".join(
-        (league.ref.external_id, str(season), match_date.isoformat(), home.name, away.name)
-    )
+    # A pairing is played once per season and venue, so the date stays out of the id:
+    # the source may correct a date without creating a second fixture.
+    external_id = "/".join((league.ref.external_id, str(season), home.name, away.name))
     return Fixture(
         ref=ExternalRef(SOURCE, external_id),
         sport=Sport.FOOTBALL,
@@ -372,11 +375,9 @@ def _result(row: Mapping[str, str], columns: Mapping[str, str], ref: ExternalRef
 
 def _odds(row: Mapping[str, str], fixture: Fixture, into: _Accumulator) -> Iterator[OddsSnapshot]:
     for group in PRICE_GROUPS:
-        cells = [row.get(column, "") for _, column in group.prices]
-        if group.line_column is not None:
-            cells.append(row.get(group.line_column, ""))
-        if not any(cells):
-            continue  # this file does not quote the group at all
+        if not any(row.get(column, "") for _, column in group.prices):
+            # Bookmaker not quoted (the handicap line column is shared, so it does not count).
+            continue
         try:
             yield from _group_snapshots(row, group, fixture)
         except (RowError, DomainValidationError):
@@ -410,11 +411,14 @@ def _group_snapshots(
     ]
 
 
-def parse_date(text: str) -> date:
-    """Parse ``dd/mm/yy`` or ``dd/mm/yyyy``.
+def parse_date(text: str, *, season: int) -> date:
+    """Parse ``dd/mm/yy`` or ``dd/mm/yyyy`` of a row of ``season``.
+
+    Two-digit years take the century that puts them next to the season (``99`` in the
+    1999/2000 file is 1999, ``00`` is 2000).
 
     Raises:
-        RowError: the text is not such a date.
+        RowError: the text is not such a date, or the date is outside the season.
     """
     match = _DATE_PATTERN.fullmatch(text)
     if match is None:
@@ -422,12 +426,28 @@ def parse_date(text: str) -> date:
         raise RowError(msg)
     day, month, year = (int(part) for part in match.groups())
     if len(match.group(3)) == _TWO_DIGIT_YEAR_LENGTH:
-        year += TWO_DIGIT_YEAR_BASE
+        year = _expand_two_digit_year(year, season)
     try:
-        return date(year, month, day)
+        parsed = date(year, month, day)
     except ValueError as exc:
         msg = f"invalid date {text!r}"
         raise RowError(msg) from exc
+    first = date(season, SEASON_FIRST_MONTH, 1) - SEASON_DATE_MARGIN
+    last = date(season + 1, SEASON_FIRST_MONTH, 1) - timedelta(days=1) + SEASON_DATE_MARGIN
+    if not first <= parsed <= last:
+        msg = f"date {text!r} is outside season {season}/{season + 1}"
+        raise RowError(msg)
+    return parsed
+
+
+def _expand_two_digit_year(two_digits: int, season: int) -> int:
+    """The year ending in ``two_digits`` closest to ``season``."""
+    year = season - season % _CENTURY + two_digits
+    if year < season - _CENTURY // 2:
+        return year + _CENTURY
+    if year > season + _CENTURY // 2:
+        return year - _CENTURY
+    return year
 
 
 def parse_time(text: str) -> time | None:

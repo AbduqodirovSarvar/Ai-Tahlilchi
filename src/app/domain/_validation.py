@@ -3,6 +3,7 @@
 import math
 import re
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Final
 
 from app.domain.errors import DomainValidationError
@@ -14,6 +15,8 @@ _SLUG_PATTERN: Final = re.compile(r"[a-z0-9][a-z0-9_.-]*")
 
 def require_utc(value: datetime, field: str) -> datetime:
     """Return ``value`` converted to UTC; naive datetimes are rejected, never guessed."""
+    if value.tzinfo is UTC:  # fast path: bulk imports build many already-UTC values
+        return value
     if value.tzinfo is None or value.utcoffset() is None:
         msg = f"{field} must be timezone-aware (got naive datetime {value.isoformat()})"
         raise DomainValidationError(msg)
@@ -34,10 +37,16 @@ def require_text(value: str, field: str, *, max_length: int = MAX_NAME_LENGTH) -
 
 def require_slug(value: str, field: str) -> str:
     """Return a lower-case machine identifier such as ``pinnacle`` or ``football-data``."""
-    if len(value) > MAX_IDENTIFIER_LENGTH or not _SLUG_PATTERN.fullmatch(value):
+    if not _is_slug(value):
         msg = f"{field} must be a lower-case slug like 'football-data' (got {value!r})"
         raise DomainValidationError(msg)
     return value
+
+
+@lru_cache(maxsize=1024)
+def _is_slug(value: str) -> bool:
+    """Cached: a handful of sources and bookmakers are validated millions of times."""
+    return len(value) <= MAX_IDENTIFIER_LENGTH and _SLUG_PATTERN.fullmatch(value) is not None
 
 
 def require_finite(value: float, field: str) -> float:

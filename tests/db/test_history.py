@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import history
 from app.db.history import (
@@ -18,6 +19,7 @@ from app.db.history import (
     season_coverage,
     upsert_batch,
 )
+from app.db.mappers import result_from_row
 from app.db.schema import FixtureRow, LeagueRow, OddsSnapshotRow, TeamRow
 from app.domain import (
     ExternalRef,
@@ -205,3 +207,111 @@ async def test_rows_that_cannot_be_read_back_are_reported(
     monkeypatch.setattr(history, "_ids_by_ref", nothing_found)
     with pytest.raises(DataError, match="could not be read back"):
         await upsert_batch(db_session, sample_batch())
+
+
+async def stored_fixture(session: AsyncSession) -> FixtureRow:
+    session.expunge_all()
+    return (await session.execute(select(FixtureRow))).scalar_one()
+
+
+async def assert_every_row_is_readable(session: AsyncSession) -> None:
+    session.expunge_all()
+    rows = (await session.execute(select(FixtureRow).options(selectinload("*")))).scalars()
+    for row in rows:
+        result_from_row(row)  # raises DomainValidationError on an unreadable row
+
+
+async def test_finished_fixture_without_result_waits_for_its_result(
+    db_session: AsyncSession,
+) -> None:
+    fixture = make_fixture(status=FixtureStatus.FINISHED)
+    await upsert_batch(db_session, HistoryBatch(fixtures=(fixture,)))
+    row = await stored_fixture(db_session)
+    assert (row.status, row.home_score) == (FixtureStatus.SCHEDULED, None)
+    await assert_every_row_is_readable(db_session)
+
+    await upsert_batch(db_session, HistoryBatch(results=(finished(fixture.ref),)))
+    row = await stored_fixture(db_session)
+    assert (row.status, row.home_score, row.away_score) == (FixtureStatus.FINISHED, 2, 1)
+
+
+async def test_abandoned_then_postponed_clears_the_score(db_session: AsyncSession) -> None:
+    fixture = make_fixture(status=FixtureStatus.LIVE)
+    abandoned = FixtureResult(
+        fixture=fixture.ref, status=ResultStatus.ABANDONED, home_score=1, away_score=0
+    )
+    await upsert_batch(db_session, HistoryBatch(fixtures=(fixture,), results=(abandoned,)))
+    await upsert_batch(
+        db_session, HistoryBatch(fixtures=(replace(fixture, status=FixtureStatus.POSTPONED),))
+    )
+    row = await stored_fixture(db_session)
+    assert (row.status, row.home_score, row.away_score) == (FixtureStatus.POSTPONED, None, None)
+    await assert_every_row_is_readable(db_session)
+
+
+@pytest.mark.parametrize("fixture_in_batch", [True, False])
+async def test_xg_is_kept_when_a_later_result_has_none(
+    db_session: AsyncSession, fixture_in_batch: bool
+) -> None:
+    fixture = make_fixture()
+    with_xg = FixtureResult(
+        fixture=fixture.ref,
+        status=ResultStatus.FINISHED,
+        home_score=2,
+        away_score=1,
+        home_xg=1.7,
+        away_xg=0.9,
+    )
+    await upsert_batch(db_session, HistoryBatch(fixtures=(fixture,), results=(with_xg,)))
+    later = HistoryBatch(
+        fixtures=(fixture,) if fixture_in_batch else (), results=(finished(fixture.ref, 3, 1),)
+    )
+    await upsert_batch(db_session, later)
+    row = await stored_fixture(db_session)
+    assert (row.home_score, row.home_xg, row.away_xg) == (3, 1.7, 0.9)
+
+
+async def test_status_changes_never_leave_an_unreadable_row(db_session: AsyncSession) -> None:
+    fixture = make_fixture(status=FixtureStatus.SCHEDULED)
+    abandoned = FixtureResult(
+        fixture=fixture.ref, status=ResultStatus.ABANDONED, home_score=0, away_score=1
+    )
+    steps = [
+        HistoryBatch(fixtures=(fixture,)),
+        HistoryBatch(fixtures=(replace(fixture, status=FixtureStatus.FINISHED),)),
+        HistoryBatch(results=(abandoned,)),
+        HistoryBatch(fixtures=(replace(fixture, status=FixtureStatus.CANCELLED),)),
+        HistoryBatch(fixtures=(replace(fixture, status=FixtureStatus.FINISHED),)),
+        HistoryBatch(results=(finished(fixture.ref),)),
+        HistoryBatch(fixtures=(replace(fixture, status=FixtureStatus.LIVE),)),
+    ]
+    for step in steps:
+        await upsert_batch(db_session, step)
+        await assert_every_row_is_readable(db_session)
+
+
+async def test_corrected_kickoff_moves_closing_prices_instead_of_duplicating(
+    db_session: AsyncSession,
+) -> None:
+    fixture = make_fixture()
+    await upsert_batch(
+        db_session, HistoryBatch(fixtures=(fixture,), odds=(make_snapshot(fixture),))
+    )
+    moved = replace(fixture, kickoff=KICKOFF - timedelta(hours=5))
+    await upsert_batch(
+        db_session, HistoryBatch(fixtures=(moved,), odds=(make_snapshot(moved, odds=2.3),))
+    )
+    db_session.expunge_all()
+    rows = (await db_session.execute(select(OddsSnapshotRow))).scalars().all()
+    assert [(row.odds, row.taken_at) for row in rows] == [(2.3, moved.kickoff)]
+
+
+async def test_time_series_prices_keep_every_moment(db_session: AsyncSession) -> None:
+    fixture = make_fixture()
+    morning = make_snapshot(fixture, kind=OddsKind.MORNING)
+    later = replace(morning, taken_at=morning.taken_at + timedelta(hours=3), odds=2.4)
+    summary = await upsert_batch(
+        db_session, HistoryBatch(fixtures=(fixture,), odds=(morning, later))
+    )
+    assert summary.odds == 2
+    assert await count(db_session, OddsSnapshotRow) == 2
