@@ -160,18 +160,16 @@ def test_tricky_pairs_are_left_unmatched_when_the_real_club_is_absent(
 def test_internazionale_is_ambiguous_not_silently_merged_with_internacional() -> None:
     result = report(["Internazionale"], ["Inter", "Internacional"])
     assert pairs(result) == {}
-    assert [a.provider.name for a in result.ambiguous] == ["Internazionale"]
+    # Scores 90 / 89 against Inter / Internacional: below the (raised) fuzzy threshold, so
+    # the team is left for a human (alias) instead of being guessed.
+    undecided = {t.name for t in result.unmatched} | {a.provider.name for a in result.ambiguous}
+    assert undecided == {"Internazionale"}
 
 
 def test_exact_inter_wins_over_internacional() -> None:
     assert pairs(report(["Inter"], ["Internacional", "Inter"])) == {"Inter": "Inter"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-M1: a name that is a prefix of another scores exactly 90 (WRatio partial "
-    "scaling) and passes the 90 threshold, so Inter is merged with Internacional",
-)
 @pytest.mark.parametrize(
     ("provider", "history"),
     [("Inter", ["Internacional", "Milan"]), ("Internacional", ["Inter", "Milan"])],

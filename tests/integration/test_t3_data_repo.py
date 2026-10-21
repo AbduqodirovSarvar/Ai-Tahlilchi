@@ -200,7 +200,7 @@ async def test_lease_boundary_and_stale_claimer(
 async def test_completed_jobs_are_never_claimed_again(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    _, task_ids = await seed_signals(factory, 4)
+    await seed_signals(factory, 4)
     async with factory() as session, session.begin():
         for task in await claim_due_recalcs(session, now=NOW):
             assert task.claimed_at is not None
