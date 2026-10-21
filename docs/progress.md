@@ -4,7 +4,7 @@
 > Belgilar: `[x]` bajarildi · `[ ]` ochiq · `[~]` kechiktirilgan / qisman (izoh bilan).
 > Vazifa faqat barcha darvozalar yashil bo'lganda (`pytest`, `ruff`, `mypy`, `lint-imports`) belgilanadi.
 
-**Joriy to'lqin:** T1 (skelet) — sharh va QA kutilmoqda.
+**Joriy to'lqin:** T1 (skelet): QA va sharh topilmalari tuzatildi (fix round 1), qayta tekshiruv kutilmoqda.
 
 ## T0 — Ma'lumot manbalarini tekshirish (F0)
 > Kechiktirilgan: API kalitlari hali yo'q (qarang: [decisions_log.md](decisions_log.md)).
@@ -21,13 +21,13 @@
 
 ## T1 — Skelet (F1) · infra-engineer
 - [x] F1.1 Papka tuzilmasi (src layout), `pyproject.toml`, `uv.lock`
-- [x] F1.2 `src/app/config.py` (pydantic-settings), `.env.example`
-- [x] F1.3 Loglash (`structlog`, JSON/dev), xatolar ierarxiyasi, global xato ushlagich
+- [x] F1.2 `src/app/config.py` (pydantic-settings, `DISPLAY_TZ`), `.env.example`
+- [x] F1.3 Loglash (`structlog`, JSON/dev, maxfiy qiymatlarni tozalash), xatolar ierarxiyasi, global xato ushlagich, chiqish kodlari 0/1/2
 - [x] F1.4 Kod sifati darvozalari: ruff, mypy --strict, import-linter, pytest-cov, pip-audit, deptry, gitleaks, pre-commit
 - [x] F1.5 `Dockerfile` (multi-stage, non-root), `docker-compose.yml`
 - [x] F1.6 GitHub Actions CI (lint + test + security + docker)
 - [x] F1.7 `README.md`
-- [~] F1.8 Minimal bot `/start` → "Ishlayapti ✅" (whitelist bilan): offline testlar bilan tasdiqlangan; jonli Telegram sinovi token qo'shilgandan keyin
+- [x] F1.8 Minimal bot `/start` → "Ishlayapti ✅" (whitelist + faqat shaxsiy chat): offline testlar bilan tasdiqlangan. Jonli Telegram sinovi token qo'shilgandan keyin (F0 kechiktirilgan)
 
 ## T2 — Shartnomalar
 - [ ] F2.1 SQLAlchemy modellari + Alembic boshlang'ich migratsiyasi (data-engineer)

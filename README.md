@@ -1,6 +1,6 @@
 # AI Tahlilchi
 
-Sport o'yinlarini statistik model (Poisson / Dixon-Coles, bozor modeli) va Gemini yordamida tahlil qilib, "value" topilgan o'yinlar bo'yicha Telegram bot orqali tavsiya beruvchi tizim. Bot faqat ruxsat berilgan foydalanuvchilarga (`ADMIN_IDS`) javob beradi.
+Sport o'yinlarini statistik model (Poisson / Dixon-Coles, bozor modeli) va Gemini yordamida tahlil qilib, "value" topilgan o'yinlar bo'yicha Telegram bot orqali tavsiya beruvchi tizim. Bot shaxsiy: faqat ruxsat berilgan foydalanuvchilarga (`ADMIN_IDS`) va faqat bot bilan **shaxsiy chatda** javob beradi (guruh va kanallar e'tiborsiz qoldiriladi).
 
 > **Holat:** T1 (loyiha skeleti). Hozircha bot faqat `/start` ga "Ishlayapti ✅" deb javob beradi. Batafsil holat: [docs/progress.md](docs/progress.md).
 
@@ -47,9 +47,12 @@ cp .env.example .env         # keyin .env ni to'ldiring
 | `API_FOOTBALL_KEY` | ma'lumot yangilash uchun | api-sports.io |
 | `GEMINI_API_KEY` | LLM izohlari uchun | Google AI Studio |
 | `APP_ENV` | yo'q | `dev` (rangli loglar) yoki `prod` (JSON loglar) |
-| `TZ`, `DB_PATH`, `LOG_LEVEL` | yo'q | standart: `Asia/Tashkent`, `data/app.db`, `INFO` |
+| `DISPLAY_TZ` | yo'q | foydalanuvchiga vaqtni ko'rsatish mintaqasi, standart `Asia/Tashkent` (bazada doim UTC). POSIX `TZ` ishlatilmaydi |
+| `DB_PATH`, `LOG_LEVEL` | yo'q | standart: `data/app.db`, `INFO` (katta-kichik harf farqi yo'q) |
 
-`.env` bo'lmasa ham ilova, testlar va CI ishlaydi. Kalit kerak bo'lgan komponent faqat ishga tushirilganda aniq xabar bilan to'xtaydi (masalan, `TELEGRAM_BOT_TOKEN is not set; add it to .env`), chiqish kodi `2`.
+`.env` bo'lmasa ham ilova, testlar va CI ishlaydi. Kalit kerak bo'lgan komponent faqat ishga tushirilganda aniq xabar bilan to'xtaydi (masalan, `TELEGRAM_BOT_TOKEN is not set; add it to .env`).
+
+Chiqish kodlari: `0` normal to'xtash, `1` kutilmagan xato (`fatal_error` logi), `2` sozlama xatosi: kalit yo'q, noto'g'ri qiymat (xabarda faqat o'zgaruvchi nomi bo'ladi, qiymati emas), token noto'g'ri formatda yoki Telegram uni rad etgan. `.env` ni tuzating, qayta urinish yordam bermaydi.
 
 > 🔐 `.env` hech qachon gitga qo'shilmaydi. Kalitlarni kodga, logga yoki chatga yozmang.
 
@@ -57,7 +60,7 @@ cp .env.example .env         # keyin .env ni to'ldiring
 ```bash
 uv run python -m app.main
 ```
-Telegram'da botga `/start` yuboring: javob "Ishlayapti ✅". Whitelist'da bo'lmagan foydalanuvchilarga bot umuman javob bermaydi. To'xtatish: `Ctrl+C`.
+Telegram'da botga shaxsiy chatda `/start` yuboring: javob "Ishlayapti ✅". Whitelist'da bo'lmagan foydalanuvchilarga, shuningdek guruh va kanallarda (admin yozsa ham) bot umuman javob bermaydi. To'xtatish: `Ctrl+C`.
 
 ## Testlar va sifat tekshiruvlari
 Vazifa faqat **hammasi yashil** bo'lganda bajarilgan hisoblanadi (CI ham aynan shularni bajaradi):
@@ -76,13 +79,12 @@ Git hook'lar (bir marta): `uv run pre-commit install`. Hammasini qo'lda: `uv run
 
 ## Docker
 ```bash
-mkdir -p data
 docker compose up -d --build     # ishga tushirish
 docker compose logs -f bot       # loglar (JSON)
 docker compose down              # to'xtatish
 ```
-- Konteyner non-root (`uid 10001`) foydalanuvchi bilan, faqat o'qiladigan fayl tizimida ishlaydi. Baza `./data` papkasida (`/data` volume). Linux serverda bir marta: `sudo chown -R 10001:10001 data`.
-- `.env` bo'lmasa, konteyner sababini logga yozib to'xtaydi va `restart: unless-stopped` tufayli qayta urinadi; kalitlarni qo'shib `docker compose up -d` qiling.
+- Konteyner non-root (`uid 10001`) foydalanuvchi bilan, faqat o'qiladigan fayl tizimida ishlaydi. Baza `bot-data` nomli Docker volume'ida (`/data`); volume image'dagi egalikni oladi, `chown` kerak emas. Volume'ni ko'rish: `docker volume inspect ai-tahlilchi_bot-data`.
+- Qayta ishga tushirish siyosati `on-failure:5`: xato bilan chiqsa ko'pi bilan 5 marta qayta uriniladi. `.env` bo'lmasa yoki noto'g'ri bo'lsa, konteyner sababni logga yozib (kod `2`) to'xtaydi; kalitlarni qo'shib `docker compose up -d` qiling.
 - TLS'ni ushlab qoluvchi korporativ proksi ortida build: `docker build --secret id=ca_bundle,src=ca.pem .` (sertifikat image'ga yozilmaydi).
 
 ## CI
