@@ -124,15 +124,18 @@ def asian_handicap(matrix: FloatArray, home_line: float) -> TwoSidedAsianProbabi
 
 
 def top_scores(matrix: FloatArray, count: int = DEFAULT_TOP_SCORES) -> tuple[ScoreProbability, ...]:
-    """The ``count`` most likely exact scores, most likely first (ties: fewer goals first)."""
+    """The ``count`` most likely exact scores, most likely first.
+
+    Ties are broken deterministically: fewer total goals first, then fewer home goals.
+    """
     checked = _check_matrix(matrix)
     if count < 1:
         msg = f"count must be >= 1, got {count!r}"
         raise ModelInputError(msg)
     home_goals, away_goals = (axis.ravel() for axis in np.indices(checked.shape))
     probabilities = checked.ravel()
-    # lexsort sorts by the last key first: probability descending, then home, then away.
-    order = np.lexsort((away_goals, home_goals, -probabilities))[:count]
+    # lexsort sorts by the last key first: probability descending, total goals, home goals.
+    order = np.lexsort((home_goals, home_goals + away_goals, -probabilities))[:count]
     return tuple(
         ScoreProbability(
             home_goals=int(home_goals[i]),

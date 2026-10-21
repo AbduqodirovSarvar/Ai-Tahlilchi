@@ -138,6 +138,14 @@ def test_top_scores_sorted_with_deterministic_ties() -> None:
     assert len(top_scores(matrix, 100)) == 9
 
 
+def test_top_scores_ties_prefer_fewer_total_goals() -> None:
+    matrix = np.zeros((4, 4))
+    # Four-way tie: total goals decide first (1-0 before 0-3), then home goals (0-2 before 2-0).
+    matrix[0, 3] = matrix[1, 0] = matrix[2, 0] = matrix[0, 2] = 0.25
+    scores = top_scores(matrix, 4)
+    assert [(s.home_goals, s.away_goals) for s in scores] == [(1, 0), (0, 2), (2, 0), (0, 3)]
+
+
 def test_top_scores_of_a_real_matrix(independent: np.ndarray) -> None:
     best = top_scores(independent)[0]
     assert (best.home_goals, best.away_goals) == (1, 1)
