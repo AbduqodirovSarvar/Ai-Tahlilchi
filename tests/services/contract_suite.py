@@ -1,0 +1,643 @@
+"""Reusable behavioural tests of the service contract (``docs/contracts.md`` §4).
+
+Not collected on its own (no ``test_`` prefix). A concrete module imports the ``*Contract``
+classes and provides three fixtures:
+
+- ``services``: a :class:`~app.services.interfaces.Services` bundle under test;
+- ``clock``: the :class:`MutableClock` that implementation reads ("now" starts on a
+  Wednesday morning in Tashkent, before the day's matches);
+- ``user_id``: a whitelisted user with default settings.
+
+The suite is data-agnostic: it discovers leagues, teams and fixtures through the catalog,
+so the real services can run it against any seeded database with fixtures from a week ago
+to two weeks ahead.
+"""
+
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+
+import pytest
+
+from app.domain import MarketType, Sport
+from app.services.errors import CooldownActiveError, NotFoundError, ValidationFailedError
+from app.services.interfaces import (
+    BALANCED_PRESET,
+    MAX_FUTURE_DAYS,
+    RECALC_COOLDOWN,
+    AnalysisProgress,
+    AnalysisQuery,
+    AnalysisResult,
+    AnalysisStage,
+    BetDraft,
+    DateSpec,
+    FixtureListRequest,
+    FixtureOption,
+    ReportGroup,
+    ReportRequest,
+    ResultMark,
+    ResultMarkRequest,
+    RiskProfile,
+    ScopeKind,
+    Services,
+    SignalView,
+    SortKey,
+    TemplateDraft,
+    UserSettingsView,
+    WatchKind,
+    WatchNotification,
+    WatchTarget,
+)
+
+START = datetime(2026, 10, 21, 6, 0, tzinfo=UTC)  # Wednesday 11:00 in Tashkent
+OTHER_USER = 999_999
+
+
+@dataclass
+class MutableClock:
+    """Injected "now" that tests move forward explicitly (no real sleeping)."""
+
+    now: datetime = START
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, delta: timedelta) -> None:
+        self.now += delta
+
+
+@dataclass
+class ProgressRecorder:
+    """Collects progress callbacks."""
+
+    events: list[AnalysisProgress] = field(default_factory=list)
+
+    async def __call__(self, progress: AnalysisProgress) -> None:
+        self.events.append(progress)
+
+
+def local_today(settings: UserSettingsView, clock: MutableClock) -> date:
+    return clock().astimezone(settings.zone).date()
+
+
+def all_markets() -> frozenset[MarketType]:
+    return frozenset(MarketType)
+
+
+async def analyze_week(services: Services, user_id: int, **overrides: object) -> AnalysisResult:
+    """A broad analysis of the next week with permissive thresholds."""
+    values: dict[str, object] = {
+        "dates": DateSpec.next_days(7),
+        "min_probability": 0.30,
+        "min_ev": 0.0,
+        "markets": all_markets(),
+    }
+    values.update(overrides)
+    return await services.analysis.analyze(user_id, AnalysisQuery(**values))  # type: ignore[arg-type]
+
+
+async def retro_signals(services: Services, user_id: int) -> tuple[SignalView, ...]:
+    """Signals of last week's (finished) matches, via a custom retro analysis."""
+    result = await services.analysis.analyze(
+        user_id,
+        AnalysisQuery(
+            dates=DateSpec.between(*_last_week(START.date())),
+            markets=all_markets(),
+            include_no_value=True,
+        ),
+    )
+    return result.signals
+
+
+def _last_week(today: date) -> tuple[date, date]:
+    return today - timedelta(days=7), today - timedelta(days=1)
+
+
+async def first_upcoming_fixture(services: Services, user_id: int) -> FixtureOption:
+    page = await services.catalog.list_fixtures(
+        user_id, FixtureListRequest(dates=DateSpec.next_days(7))
+    )
+    assert page.items, "the seeded data must contain upcoming football fixtures"
+    return page.items[0]
+
+
+SORT_CHECKS: dict[SortKey, Callable[[SignalView], object]] = {
+    SortKey.EV: lambda signal: -signal.ev,
+    SortKey.PROBABILITY: lambda signal: -signal.probability,
+    SortKey.KICKOFF: lambda signal: signal.kickoff,
+}
+
+
+class AnalysisContract:
+    async def test_estimate_resolves_the_window_and_spends_nothing(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        query = AnalysisQuery(dates=DateSpec.today())
+        first = await services.analysis.estimate_cost(user_id, query)
+        second = await services.analysis.estimate_cost(user_id, query)
+
+        assert first == second
+        assert first.window.date_from == first.window.date_to == local_today(settings, clock)
+        assert first.fixtures_found >= 0
+        assert first.api_requests >= 0
+        assert first.within_budget == (first.api_requests <= first.budget_remaining)
+
+    async def test_signals_respect_every_filter(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        query = AnalysisQuery(
+            dates=DateSpec.next_days(7),
+            min_probability=0.40,
+            min_ev=0.02,
+            markets=frozenset({MarketType.MATCH_RESULT, MarketType.TOTALS}),
+        )
+        result = await services.analysis.analyze(user_id, query)
+
+        assert result.signals, "permissive weekly analysis should find signals"
+        assert result.matched >= len(result.signals)
+        today = local_today(settings, clock)
+        for signal in result.signals:
+            assert signal.probability >= query.min_probability
+            assert signal.ev >= query.min_ev
+            assert settings.odds_min <= signal.odds <= settings.odds_max
+            assert signal.market.type in query.markets
+            assert signal.sport in query.sports
+            assert not signal.no_value
+            local_day = signal.kickoff.astimezone(settings.zone).date()
+            assert today <= local_day <= today + timedelta(days=6)
+
+    @pytest.mark.parametrize("sort", list(SortKey))
+    async def test_signals_are_sorted(
+        self, services: Services, user_id: int, sort: SortKey
+    ) -> None:
+        result = await analyze_week(services, user_id, sort=sort)
+        keys = [SORT_CHECKS[sort](signal) for signal in result.signals]
+        assert keys == sorted(keys)  # type: ignore[type-var]
+
+    async def test_count_cap_and_shortfall(self, services: Services, user_id: int) -> None:
+        everything = await analyze_week(services, user_id)
+        capped = await analyze_week(services, user_id, max_signals=3)
+
+        assert len(capped.signals) == min(3, everything.matched)
+        assert capped.requested == 3
+        assert capped.matched == everything.matched
+        assert capped.signals == everything.signals[: len(capped.signals)]
+
+    async def test_per_day_cap(self, services: Services, user_id: int) -> None:
+        settings = await services.settings.get_settings(user_id)
+        result = await analyze_week(services, user_id, max_signals=1, per_day=True)
+        days = [signal.kickoff.astimezone(settings.zone).date() for signal in result.signals]
+        assert len(days) == len(set(days))
+
+    async def test_reanalysis_is_idempotent(self, services: Services, user_id: int) -> None:
+        first = await analyze_week(services, user_id)
+        second = await analyze_week(services, user_id)
+        assert [s.signal_id for s in first.signals] == [s.signal_id for s in second.signals]
+
+    async def test_progress_is_reported_in_order(self, services: Services, user_id: int) -> None:
+        recorder = ProgressRecorder()
+        query = AnalysisQuery(dates=DateSpec.next_days(3))
+        result = await services.analysis.analyze(user_id, query, progress=recorder)
+
+        assert recorder.events
+        assert recorder.events[-1].stage is AnalysisStage.FINISHED
+        assert all(event.total == result.fixtures_analyzed for event in recorder.events)
+        done = [event.done for event in recorder.events]
+        assert done == sorted(done)
+        assert all(0 <= event.done <= event.total for event in recorder.events)
+
+    async def test_custom_analysis_returns_no_value_selections(
+        self, services: Services, user_id: int
+    ) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        query = AnalysisQuery(
+            dates=DateSpec.next_days(7),
+            scope=ScopeKind.FIXTURES,
+            scope_ids=frozenset({fixture.fixture_id}),
+            markets=all_markets(),
+            include_no_value=True,
+        )
+        result = await services.analysis.analyze(user_id, query)
+
+        assert result.signals
+        assert {signal.fixture_id for signal in result.signals} == {fixture.fixture_id}
+        assert len(result.signals) > 1
+        for signal in result.signals:
+            if signal.no_value:
+                assert signal.stake_units == 0
+
+    async def test_league_scope(self, services: Services, user_id: int) -> None:
+        league = (await services.catalog.list_leagues(Sport.FOOTBALL))[0]
+        result = await analyze_week(
+            services, user_id, scope=ScopeKind.LEAGUES, scope_ids=frozenset({league.league_id})
+        )
+        assert {signal.league for signal in result.signals} <= {league.name}
+
+    async def test_window_beyond_the_horizon_is_rejected(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        today = local_today(settings, clock)
+        query = AnalysisQuery(
+            dates=DateSpec.between(
+                today + timedelta(days=10), today + timedelta(days=MAX_FUTURE_DAYS + 1)
+            )
+        )
+        with pytest.raises(ValidationFailedError):
+            await services.analysis.estimate_cost(user_id, query)
+        with pytest.raises(ValidationFailedError):
+            await services.analysis.analyze(user_id, query)
+
+    async def test_retro_analysis_shows_results(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        result = await services.analysis.analyze(
+            user_id,
+            AnalysisQuery(dates=DateSpec.between(*_last_week(clock().date())), min_ev=0.0),
+        )
+        assert result.retro
+        assert result.api_requests_used == 0
+        assert all(signal.kickoff < clock() for signal in result.signals)
+        assert any(signal.result is not None for signal in result.signals)
+
+    async def test_watched_team_is_always_included(self, services: Services, user_id: int) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        teams = await services.catalog.search_teams(fixture.home_team, limit=5)
+        team = next(team for team in teams if team.name == fixture.home_team)
+        await services.watchlist.add_watch(user_id, WatchTarget(WatchKind.TEAM, team.team_id))
+
+        result = await analyze_week(services, user_id, min_probability=0.95, min_ev=0.20)
+
+        watched = [s for s in result.signals if s.fixture_id == fixture.fixture_id]
+        assert watched
+        assert all(signal.watchlist for signal in watched)
+
+
+class RecalcContract:
+    async def test_recalc_updates_the_signal_and_starts_the_cooldown(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+
+        diff = await services.analysis.recalc_signal(user_id, signal.signal_id)
+
+        assert diff.signal.signal_id == signal.signal_id
+        assert diff.before.odds == signal.odds
+        assert diff.after.odds == diff.signal.odds
+        assert diff.recalculated_at == clock()
+        assert diff.signal.version > signal.version or diff.signal.data_as_of is not None
+        with pytest.raises(CooldownActiveError) as excinfo:
+            await services.analysis.recalc_signal(user_id, signal.signal_id)
+        assert timedelta(0) < excinfo.value.retry_after <= RECALC_COOLDOWN
+
+        clock.advance(RECALC_COOLDOWN)
+        again = await services.analysis.recalc_signal(user_id, signal.signal_id)
+        assert again.before == diff.after
+
+    async def test_recalc_of_unknown_or_foreign_signal(
+        self, services: Services, user_id: int
+    ) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        with pytest.raises(NotFoundError):
+            await services.analysis.recalc_signal(user_id, 10**9)
+        with pytest.raises(NotFoundError):
+            await services.analysis.recalc_signal(OTHER_USER, signal.signal_id)
+
+    async def test_recalc_after_kickoff_is_rejected(self, services: Services, user_id: int) -> None:
+        signal = (await retro_signals(services, user_id))[0]
+        with pytest.raises(ValidationFailedError):
+            await services.analysis.recalc_signal(user_id, signal.signal_id)
+
+    async def test_recalc_query_skips_cooled_down_fixtures(
+        self, services: Services, user_id: int
+    ) -> None:
+        result = await analyze_week(services, user_id, max_signals=4)
+        first = result.signals[0]
+        await services.analysis.recalc_signal(user_id, first.signal_id)
+        recorder = ProgressRecorder()
+
+        batch = await services.analysis.recalc_query(user_id, result.query_id, progress=recorder)
+
+        assert batch.query_id == result.query_id
+        assert first.signal_id in batch.skipped_cooldown
+        handled = {d.signal.signal_id for d in batch.diffs} | set(batch.skipped_cooldown)
+        assert handled | set(batch.skipped_started) | set(batch.failed) == {
+            s.signal_id for s in result.signals
+        }
+        assert recorder.events[-1].stage is AnalysisStage.FINISHED
+
+    async def test_recalc_query_ownership(self, services: Services, user_id: int) -> None:
+        result = await analyze_week(services, user_id, max_signals=1)
+        with pytest.raises(NotFoundError):
+            await services.analysis.recalc_query(user_id, "no-such-query")
+        with pytest.raises(NotFoundError):
+            await services.analysis.recalc_query(OTHER_USER, result.query_id)
+
+
+class FixtureDetailContract:
+    async def test_detail_card(self, services: Services, user_id: int) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        detail = await services.analysis.fixture_detail(fixture.fixture_id)
+
+        assert (detail.home_team, detail.away_team) == (fixture.home_team, fixture.away_team)
+        assert len(detail.home_form) <= 5
+        assert len(detail.away_form) <= 5
+        assert len(detail.top_scores) <= 3
+        probabilities = [score.probability for score in detail.top_scores]
+        assert probabilities == sorted(probabilities, reverse=True)
+        assert detail.markets
+        assert all(0 < quote.probability <= 1 for quote in detail.markets)
+        assert detail.home_score is None
+
+    async def test_unknown_fixture(self, services: Services) -> None:
+        with pytest.raises(NotFoundError):
+            await services.analysis.fixture_detail("no-such-fixture")
+
+
+class SignalContract:
+    async def test_get_list_and_hide(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+
+        assert await services.signals.get_signal(user_id, signal.signal_id) == signal
+        week = await services.signals.list_signals(user_id, DateSpec.next_days(7))
+        assert signal.signal_id in {s.signal_id for s in week}
+        assert [s.kickoff for s in week] == sorted(s.kickoff for s in week)
+
+        hidden = await services.signals.hide_signal(user_id, signal.signal_id)
+        assert hidden == await services.signals.hide_signal(user_id, signal.signal_id)
+        visible = await services.signals.list_signals(user_id, DateSpec.next_days(7))
+        everything = await services.signals.list_signals(
+            user_id, DateSpec.next_days(7), include_hidden=True
+        )
+        assert signal.signal_id not in {s.signal_id for s in visible}
+        assert signal.signal_id in {s.signal_id for s in everything}
+
+    async def test_foreign_signals_are_invisible(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        with pytest.raises(NotFoundError):
+            await services.signals.get_signal(OTHER_USER, signal.signal_id)
+        with pytest.raises(NotFoundError):
+            await services.signals.hide_signal(OTHER_USER, signal.signal_id)
+        assert await services.signals.list_signals(OTHER_USER, DateSpec.next_days(7)) == ()
+
+
+class CatalogContract:
+    async def test_leagues_are_sorted_by_name(self, services: Services) -> None:
+        leagues = await services.catalog.list_leagues(Sport.FOOTBALL)
+        assert leagues
+        assert all(league.sport is Sport.FOOTBALL for league in leagues)
+        assert [league.name for league in leagues] == sorted(league.name for league in leagues)
+
+    async def test_team_search(self, services: Services, user_id: int) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        found = await services.catalog.search_teams(fixture.home_team, sport=Sport.FOOTBALL)
+        assert found[0].name == fixture.home_team
+        with pytest.raises(ValidationFailedError):
+            await services.catalog.search_teams("a")
+        with pytest.raises(ValidationFailedError):
+            await services.catalog.search_teams("arsenal", limit=0)
+
+    async def test_fixture_search_by_both_team_names(
+        self, services: Services, user_id: int
+    ) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        found = await services.catalog.search_fixtures(f"{fixture.home_team} - {fixture.away_team}")
+        assert fixture.fixture_id in {option.fixture_id for option in found}
+
+    async def test_fixture_pages(self, services: Services, user_id: int) -> None:
+        request = FixtureListRequest(dates=DateSpec.next_days(7), page_size=5)
+        first = await services.catalog.list_fixtures(user_id, request)
+        assert first.total > 5
+        assert first.page_count == -(-first.total // 5)
+        pages = [first] + [
+            await services.catalog.list_fixtures(user_id, replace(request, page=page))
+            for page in range(1, first.page_count)
+        ]
+        items = [item for page in pages for item in page.items]
+        assert len(items) == first.total == len({item.fixture_id for item in items})
+        assert [item.kickoff for item in items] == sorted(item.kickoff for item in items)
+        past_end = await services.catalog.list_fixtures(
+            user_id, replace(request, page=first.page_count)
+        )
+        assert past_end.items == ()
+
+    async def test_fixture_filters(self, services: Services, user_id: int) -> None:
+        fixture = await first_upcoming_fixture(services, user_id)
+        teams = await services.catalog.search_teams(fixture.away_team)
+        team_id = next(team.team_id for team in teams if team.name == fixture.away_team)
+        page = await services.catalog.list_fixtures(
+            user_id,
+            FixtureListRequest(dates=DateSpec.next_days(7), team_ids=frozenset({team_id})),
+        )
+        assert page.items
+        assert all(fixture.away_team in (i.home_team, i.away_team) for i in page.items)
+
+
+class SettingsContract:
+    async def test_new_user_gets_defaults(self, services: Services) -> None:
+        assert await services.settings.get_settings(123_456) == UserSettingsView()
+
+    async def test_update_persists_and_rederives_the_profile(
+        self, services: Services, user_id: int
+    ) -> None:
+        current = await services.settings.get_settings(user_id)
+        edited = await services.settings.update_settings(
+            user_id, replace(current, min_probability=0.55, bank=Decimal(1000), unit=Decimal(10))
+        )
+        assert edited.risk_profile is RiskProfile.CUSTOM
+        assert await services.settings.get_settings(user_id) == edited
+
+        back = await services.settings.update_settings(
+            user_id, replace(edited, min_probability=BALANCED_PRESET.min_probability)
+        )
+        assert back.risk_profile is RiskProfile.BALANCED
+
+    async def test_apply_risk_profile(self, services: Services, user_id: int) -> None:
+        settings = await services.settings.apply_risk_profile(user_id, RiskProfile.AGGRESSIVE)
+        assert (settings.min_probability, settings.min_ev) == (0.30, 0.08)
+        assert (settings.odds_min, settings.odds_max) == (2.00, 5.00)
+        assert await services.settings.get_settings(user_id) == settings
+
+
+class TemplateContract:
+    async def test_save_replace_list_delete(self, services: Services, user_id: int) -> None:
+        query = AnalysisQuery(dates=DateSpec.weekend())
+        saved = await services.templates.save_template(
+            user_id, TemplateDraft(name="Dam olish", query=query)
+        )
+        replaced = await services.templates.save_template(
+            user_id, TemplateDraft(name="Dam olish", query=replace(query, min_ev=0.1))
+        )
+        other = await services.templates.save_template(
+            user_id, TemplateDraft(name="Bugun", query=AnalysisQuery(dates=DateSpec.today()))
+        )
+
+        assert replaced.template_id == saved.template_id
+        assert replaced.query.min_ev == 0.1
+        assert [t.name for t in await services.templates.list_templates(user_id)] == [
+            "Bugun",
+            "Dam olish",
+        ]
+        await services.templates.delete_template(user_id, other.template_id)
+        assert [t.template_id for t in await services.templates.list_templates(user_id)] == [
+            saved.template_id
+        ]
+        with pytest.raises(NotFoundError):
+            await services.templates.delete_template(user_id, other.template_id)
+        with pytest.raises(NotFoundError):
+            await services.templates.delete_template(OTHER_USER, saved.template_id)
+
+
+class WatchlistContract:
+    async def test_add_notify_remove(self, services: Services) -> None:
+        user_id = 4242
+        league = (await services.catalog.list_leagues(Sport.FOOTBALL))[0]
+        target = WatchTarget(WatchKind.LEAGUE, league.league_id)
+
+        item = await services.watchlist.add_watch(user_id, target)
+        assert await services.watchlist.add_watch(user_id, target) == item
+        assert item.name == league.name
+        updated = await services.watchlist.set_notifications(
+            user_id, target, frozenset({WatchNotification.RESULT})
+        )
+        assert updated.notifications == {WatchNotification.RESULT}
+        assert await services.watchlist.list_watchlist(user_id) == (updated,)
+        assert await services.watchlist.remove_watch(user_id, target)
+        assert not await services.watchlist.remove_watch(user_id, target)
+        with pytest.raises(NotFoundError):
+            await services.watchlist.set_notifications(user_id, target, frozenset())
+
+    async def test_unknown_entity(self, services: Services, user_id: int) -> None:
+        with pytest.raises(NotFoundError):
+            await services.watchlist.add_watch(user_id, WatchTarget(WatchKind.TEAM, "no-team"))
+
+
+class BetContract:
+    async def test_bet_needs_a_stake_or_a_unit(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        with pytest.raises(ValidationFailedError):
+            await services.bets.place_bet(user_id, BetDraft(signal_id=signal.signal_id))
+        with pytest.raises(NotFoundError):
+            await services.bets.place_bet(OTHER_USER, BetDraft(signal_id=signal.signal_id))
+
+    async def test_place_list_and_bank(self, services: Services, user_id: int) -> None:
+        settings = await services.settings.get_settings(user_id)
+        await services.settings.update_settings(
+            user_id, replace(settings, bank=Decimal(1000), unit=Decimal(10))
+        )
+        signal = (await analyze_week(services, user_id)).signals[0]
+
+        bet = await services.bets.place_bet(user_id, BetDraft(signal_id=signal.signal_id))
+
+        assert bet.odds_taken == signal.odds
+        assert bet.stake == Decimal(10) * signal.stake_units
+        assert bet.outcome is None
+        assert await services.bets.list_bets(user_id, open_only=True) == (bet,)
+        bank = await services.bets.bank_summary(user_id)
+        assert bank.balance == Decimal(1000)
+        assert bank.open_bets == 1
+        assert not bank.loss_limit_reached
+
+    async def test_settled_bet_has_profit(self, services: Services, user_id: int) -> None:
+        settled = next(s for s in await retro_signals(services, user_id) if s.result)
+        bet = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=settled.signal_id, odds_taken=2.0, stake=Decimal(10))
+        )
+        assert bet.outcome == settled.result
+        assert bet.profit is not None
+        assert await services.bets.list_bets(user_id, open_only=True) == ()
+
+
+class ResultContract:
+    async def test_pending_and_manual_marks(self, services: Services, user_id: int) -> None:
+        signals = await retro_signals(services, user_id)
+        pending = await services.results.pending_results(user_id)
+        assert {s.signal_id for s in pending} == {s.signal_id for s in signals if s.result is None}
+
+        target = signals[0]
+        marked = await services.results.mark_result(
+            user_id,
+            ResultMarkRequest(
+                signal_id=target.signal_id,
+                mark=ResultMark.CASHOUT,
+                cashout_profit_units=Decimal("0.4"),
+            ),
+        )
+        assert marked.result is ResultMark.CASHOUT
+        assert target.signal_id not in {
+            s.signal_id for s in await services.results.pending_results(user_id)
+        }
+
+    async def test_future_signals_cannot_be_marked(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        with pytest.raises(ValidationFailedError):
+            await services.results.mark_result(
+                user_id, ResultMarkRequest(signal_id=signal.signal_id, mark=ResultMark.WON)
+            )
+
+    async def test_notes(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        await services.results.add_note(user_id, signal.signal_id, "Asosiy hujumchi yo'q edi")
+        for text in ("   ", "x" * 501):
+            with pytest.raises(ValidationFailedError):
+                await services.results.add_note(user_id, signal.signal_id, text)
+        with pytest.raises(NotFoundError):
+            await services.results.add_note(OTHER_USER, signal.signal_id, "izoh")
+
+    async def test_day_summary_is_consistent(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        await services.analysis.analyze(
+            user_id,
+            AnalysisQuery(dates=DateSpec.between(*_last_week(clock().date())), min_ev=0.0),
+        )
+        yesterday = clock().date() - timedelta(days=1)
+        summary = await services.results.day_summary(user_id, yesterday)
+        assert summary.day == yesterday
+        assert summary.won + summary.lost + summary.void + summary.pending <= summary.signals
+
+
+class ReportContract:
+    async def test_report_metrics_are_consistent(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        await services.analysis.analyze(
+            user_id,
+            AnalysisQuery(dates=DateSpec.between(*_last_week(clock().date())), min_ev=0.0),
+        )
+        request = ReportRequest.last_days(14, clock().date(), group_by=ReportGroup.LEAGUE)
+
+        report = await services.reports.report(user_id, request)
+
+        assert report.signals > 0
+        assert report.won + report.lost + report.void <= report.settled <= report.signals
+        assert sum(bucket.count for bucket in report.calibration) == report.won + report.lost
+        assert sum(segment.signals for segment in report.segments) == report.settled
+        if report.win_rate is not None:
+            assert 0 <= report.win_rate <= 1
+        assert report.longest_losing_streak <= report.lost
+
+    async def test_empty_report(self, services: Services) -> None:
+        report = await services.reports.report(54_321, ReportRequest(date_to=START.date()))
+        assert (report.signals, report.settled, report.calibration) == (0, 0, ())
+        assert report.yield_rate is None
+        assert report.roi is None
+
+    async def test_export_is_csv(self, services: Services, user_id: int) -> None:
+        result = await analyze_week(services, user_id)
+        exported = await services.reports.export(user_id)
+        lines = exported.content.decode("utf-8").strip().splitlines()
+        assert exported.filename.endswith(".csv")
+        assert lines[0].startswith("signal_id,")
+        assert len(lines) == 1 + len(result.signals)
+
+
+class StatusContract:
+    async def test_status(self, services: Services) -> None:
+        status = await services.status.system_status()
+        assert status.quotas
+        assert all(quota.remaining >= 0 for quota in status.quotas)
+        assert all(job.name for job in status.jobs)

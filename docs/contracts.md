@@ -3,15 +3,15 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–7 keyingi to'lqinlarda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)** (T2, orkestr ko'rib chiqadi). 6–7 keyingi to'lqinlarda.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
 | 1 | Domen modellari | `src/app/domain/*.py` | data-engineer | hamma | qotirilgan (v1) |
 | 2 | Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant | qotirilgan (v1) |
 | 3 | Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) | qotirilgan (v1) |
-| 4 | Tahlil servisi | `src/app/services/interfaces.py` | pipeline-engineer | bot | hali qotirilmagan |
-| 5 | Soxta servis | `src/app/services/fake.py` (`FakeAnalysisService`) | pipeline-engineer | bot | hali qotirilmagan |
+| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
+| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | hali qotirilmagan |
 | 7 | LLM API si | `src/app/llm/service.py` | llm-engineer | pipeline | hali qotirilmagan |
 
@@ -110,13 +110,146 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 - Idempotent yozish: `app.db.history.upsert_batch(session, HistoryBatch) -> UpsertSummary` (chaqiruvchining tranzaksiyasida); qamrov: `season_coverage(session, source=None) -> list[SeasonCoverage]`.
 - Migratsiya: `uv run alembic upgrade head` (yo'l: `DB_PATH` yoki `-x db_path=...`).
 
-## 4. Tahlil servisi — `src/app/services/interfaces.py`
-**Holat:** hali qotirilmagan · **Versiya:** —
-- `AnalysisQuery`, `AnalysisService`, `SignalView`, `RecalcDiff`: (to'ldiriladi)
+## 4. Servis shartnomasi — `src/app/services/interfaces.py`
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
+
+Bot tizim bilan **faqat** shu modul orqali gaplashadi (domen qiymat turlari `Sport`, `Market`, `MarketType`, `Selection` ham ishlatiladi). Barcha DTO lar `@dataclass(frozen=True, slots=True)`; noto'g'ri kiritma konstruktorda `ValidationFailedError` beradi (noto'g'ri so'rov obyekti umuman yaratilmaydi). Barcha metodlar `async`.
+
+**Konvensiyalar**
+- Lahzalar (`kickoff`, `recalculated_at`, `data_as_of`) — tz-aware **UTC** `datetime`. Foydalanuvchi tanlaydigan **sanalar** (`DateSpec`, `DateWindow`, `ReportRequest`, `day_summary(day)`) — foydalanuvchi vaqt mintaqasidagi (`UserSettingsView.timezone`, standart `Asia/Tashkent`) kalendar sanalari; UTC ga servis o'tkazadi.
+- Ehtimollik, koeffitsient, EV — `float` (`ev=0.05` = +5%); pul va unit — `Decimal`.
+- ID lar shaffof emas: `SignalId`, `BetId`, `TemplateId` — `int`; liga/jamoa/o'yin/so'rov — `EntityId = str` (≤ 64 bayt, `callback_data` ga sig'adi).
+- Takroriy tahlil bir xil signal ID larini qaytaradi (kalit: foydalanuvchi + o'yin + bozor + tanlov).
+
+**Nomlangan chegaralar (bot shulardan foydalanadi, raqamni takrorlamaydi)**
+
+| Konstanta | Qiymat | Ma'nosi |
+|---|---|---|
+| `MIN_PROBABILITY_LOWER` / `_UPPER` | 0.30 / 0.95 | minimal ehtimollik oralig'i |
+| `HIGH_PROBABILITY_WARNING` | 0.80 | §6.6 ogohlantirishi chegarasi |
+| `MIN_EV_LOWER` / `_UPPER` | 0.0 / 0.20 | minimal EV oralig'i |
+| `MAX_FUTURE_DAYS` | 14 | oyna bugundan ko'pi bilan 14 kun oldinga |
+| `MAX_WINDOW_DAYS` | 31 | oyna uzunligi (retro uchun ham) |
+| `PRELIMINARY_AFTER` | 3 kun | undan uzoq signal "⏳ Dastlabki", ishonch bir pog'ona past |
+| `RECALC_COOLDOWN` | 10 daqiqa | bitta o'yin uchun qo'lda qayta hisob |
+| `MANUAL_RESERVE_SHARE` | 0.30 | kunlik API limitining qo'lda so'rovlar zaxirasi |
+| `QUERY_MAX_SIGNALS_UPPER` / `SETTINGS_MAX_SIGNALS_UPPER` | 100 / 30 | so'rov va sozlamadagi signal soni |
+| `MAX_SCOPE_IDS`, `MAX_NOTE_LENGTH`, `MAX_TEMPLATE_NAME_LENGTH` | 50, 500, 64 | |
+| `MIN_SEARCH_LENGTH`, `MAX_SEARCH_RESULTS`, `DEFAULT_PAGE_SIZE`, `MAX_PAGE_SIZE` | 2, 20, 8, 20 | qidiruv va sahifalash |
+| `MIN_ODDS_LIMIT` / `MAX_ODDS_LIMIT` | 1.01 / 100 | koeffitsient kiritmasi |
+| `PREMATCH_MINUTE_CHOICES` | {30, 60, 90} (yoki `None` = o'chiq) | |
+| `CONSERVATIVE_PRESET`, `BALANCED_PRESET`, `AGGRESSIVE_PRESET`, `RISK_PRESETS` | §6.5 jadvali: 60%/3%/1.30–2.00 · 45%/5%/1.50–3.00 · 30%/8%/2.00–5.00 | |
+| `DEFAULT_*` | sport futbol, bozorlar 1X2+Total, 10 signal, 09:00, pre-match 60, tinch soat 00:00–08:00 | |
+
+**Enumlar** (`StrEnum`, servis qatlamiga xos; bazadagi `app.db.enums` bilan qiymatlari mos, xaritalashni real servis qiladi): `ScopeKind` (all/leagues/teams/fixtures), `SortKey` (ev/probability/kickoff), `DateMode` (today/tomorrow/weekend/next_days/range), `ConfidenceLevel` (high/medium/low), `Verdict` (confirm/caution/reject), `SignalState` (active/cancelled/hidden), `ResultMark` (`WON="win"`, `LOST="loss"`, `VOID`, `HALF_WON`, `HALF_LOST`, `CASHOUT`; qo'lda faqat `MANUAL_RESULT_MARKS` = won/lost/void/cashout), `RecalcVerdict` (still_valid/below_threshold/cancelled), `AnalysisStage` (collecting/analysing/reviewing/finished), `RiskProfile` (conservative/balanced/aggressive/custom), `WatchKind` (team/league), `WatchNotification` (lineups/odds_move/result), `FormResult` (win/draw/loss), `TeamSide` (home/away), `ReportGroup` (sport/league/market/risk_profile/confidence).
+
+**Kiritma DTO lari**
+
+| Nom | Maydonlar | Qoidalar |
+|---|---|---|
+| `DateSpec` | `mode`, `days`, `date_from`, `date_to`; konstruktorlar `today()`, `tomorrow()`, `weekend()`, `next_days(n)`, `between(a, b)`; `resolve(today) -> DateWindow` | nisbiy sana (shablonlar uchun); `next_days` 1..14; `weekend` = joriy/kelgusi shanba–yakshanba |
+| `DateWindow` | `date_from`, `date_to`; `days`, `ensure_within_horizon(today)`, `is_retro(today)` | tartibli, ≤ 31 kun; o'tgan oyna (retro) har doim ruxsat |
+| `AnalysisQuery` | `dates: DateSpec`, `sports`, `min_probability`, `min_ev`, `scope`, `scope_ids`, `markets: frozenset[MarketType]`, `max_signals: int \| None` (`None` = hammasi), `per_day`, `sort`, `include_no_value`; `from_settings(settings, dates)` | sport va bozor bo'sh emas; `scope=all` → `scope_ids` bo'sh, aks holda 1..50 ta; `per_day` faqat `max_signals` bilan; horizon tekshiruvi servisda (`resolve` vaqtida) |
+| `UserSettingsView` | sports, league_ids, markets, max_signals, min_probability, min_ev, odds_min, odds_max, risk_profile, send_time, prematch_minutes, quiet_hours (`QuietHours(start, end)` \| None), timezone, bank, unit, daily_loss_limit, weekly_loss_limit; `zone`, `with_risk_profile(p)` | o'qish va yangilash uchun bitta DTO: `dataclasses.replace` bilan o'zgartiriladi; §6.5 oraliqlari; unit ≤ bank; IANA vaqt mintaqasi |
+| `FixtureListRequest` | `dates`, `sports`, `league_ids`, `team_ids`, `page` (0 dan), `page_size` | liga va jamoa berilsa — "yoki" |
+| `TemplateDraft` | `name`, `query`, `schedule: TemplateSchedule(weekdays 1..7, at) \| None` | nom 1..64 belgi |
+| `WatchTarget` | `kind`, `entity_id` | |
+| `BetDraft` | `signal_id`, `odds_taken`, `stake` (`None` → signal qiymati / `unit × stake_units`) | odds > 1, stake > 0 |
+| `ResultMarkRequest` | `signal_id`, `mark`, `cashout_profit_units` | faqat qo'lda belgilanadiganlar; cashout summasi faqat cashout uchun va majburiy |
+| `ReportRequest` | `date_to`, `date_from` (`None` = hammasi), `group_by`; `last_days(n, today)` | |
+
+**Chiqish DTO lari**
+
+| Nom | Asosiy maydonlar |
+|---|---|
+| `CostEstimate` | `window`, `fixtures_found`, `api_requests`, `budget_remaining`; `within_budget` |
+| `AnalysisProgress` / `ProgressCallback` | `stage`, `done`, `total`; `Callable[[AnalysisProgress], Awaitable[None]]` — callback **xato bermasligi kerak** (Telegram xatolarini bot o'zi ushlaydi) |
+| `SignalView` | `signal_id`, `fixture_id`, `sport`, `league`, `home_team`, `away_team`, `kickoff` (UTC), `market: Market`, `selection`, `odds`, `bookmaker`, `probability`, `ev`, `confidence`, `stake_units`, `llm_verdict`, `llm_note`, `risk_flags`, `preliminary`, `no_value`, `watchlist`, `experimental`, `state`, `result`, `version`, `data_as_of`; `fixture_label`, `fair_odds`, `negative_ev` |
+| `AnalysisResult` | `query_id`, `window`, `signals`, `fixtures_analyzed`, `matched` (cheklovdan oldin), `requested`, `api_requests_used`, `failed_fixtures`, `retro`; `shortfall` |
+| `SignalNumbers` / `RecalcDiff` | odds, probability, ev, stake_units, confidence / `signal` (yangilangan karta), `before`, `after`, `verdict`, `recalculated_at`; `changed` |
+| `RecalcBatch` | `query_id`, `diffs`, `skipped_cooldown`, `skipped_started`, `failed` |
+| `FixtureDetail` | forma (≤ 5, eskidan yangiga), `TeamStats` (uy/mehmon roli), `HeadToHead`, `Absence`, `ScoreProbability` (≤ 3, kamayish tartibida), `MarketQuote` (barcha bozorlar jadvali), `OddsMove` (ertalab → hozir), `lineups_confirmed`, hisob (tugagan bo'lsa), `data_as_of` |
+| `LeagueOption`, `TeamOption`, `FixtureOption`, `FixturePage` | tanlash va qidiruv; `FixturePage(items, page, page_count, total)` |
+| `TemplateView`, `WatchItem`, `BetView`, `BankView` (+ `BankPoint`), `DaySummary` | |
+| `ReportView` | signallar, settled, won/lost/void, `profit_units`, `yield_rate` (signallar bo'yicha), `roi` (foydalanuvchi stavkalari bo'yicha), `clv` (o'rtacha), `clv_beat_rate`, `win_rate`, `longest_losing_streak`, `calibration: CalibrationBucket[]`, `segments: SegmentStat[]` |
+| `ExportFile` | `filename`, `content: bytes`, `media_type` |
+| `SystemStatus` | `quotas: ApiQuota[]` (`remaining`), `last_refresh_at`, `jobs: JobStatus[]`, `recent_errors: ErrorEntry[]` |
+
+**Protokollar** (`Services` — botga startda beriladigan to'plam: `analysis`, `signals`, `catalog`, `settings`, `templates`, `watchlist`, `bets`, `results`, `reports`, `status`)
+
+```python
+class AnalysisService(Protocol):
+    async def estimate_cost(self, user_id: int, query: AnalysisQuery) -> CostEstimate: ...
+    async def analyze(self, user_id: int, query: AnalysisQuery, *, progress: ProgressCallback | None = None) -> AnalysisResult: ...
+    async def recalc_signal(self, user_id: int, signal_id: SignalId) -> RecalcDiff: ...
+    async def recalc_query(self, user_id: int, query_id: EntityId, *, progress: ProgressCallback | None = None) -> RecalcBatch: ...
+    async def fixture_detail(self, fixture_id: EntityId) -> FixtureDetail: ...
+
+class SignalService(Protocol):
+    async def get_signal(self, user_id: int, signal_id: SignalId) -> SignalView: ...
+    async def list_signals(self, user_id: int, dates: DateSpec, *, include_hidden: bool = False) -> tuple[SignalView, ...]: ...
+    async def hide_signal(self, user_id: int, signal_id: SignalId) -> SignalView: ...
+
+class CatalogService(Protocol):
+    async def list_leagues(self, sport: Sport) -> tuple[LeagueOption, ...]: ...
+    async def search_teams(self, text: str, *, sport: Sport | None = None, limit: int = 10) -> tuple[TeamOption, ...]: ...
+    async def search_fixtures(self, text: str, *, limit: int = 10) -> tuple[FixtureOption, ...]: ...
+    async def list_fixtures(self, user_id: int, request: FixtureListRequest) -> FixturePage: ...
+
+class SettingsService(Protocol):
+    async def get_settings(self, user_id: int) -> UserSettingsView: ...
+    async def update_settings(self, user_id: int, settings: UserSettingsView) -> UserSettingsView: ...
+    async def apply_risk_profile(self, user_id: int, profile: RiskProfile) -> UserSettingsView: ...
+
+class TemplateService(Protocol):
+    async def save_template(self, user_id: int, draft: TemplateDraft) -> TemplateView: ...
+    async def list_templates(self, user_id: int) -> tuple[TemplateView, ...]: ...
+    async def delete_template(self, user_id: int, template_id: TemplateId) -> None: ...
+
+class WatchlistService(Protocol):
+    async def list_watchlist(self, user_id: int) -> tuple[WatchItem, ...]: ...
+    async def add_watch(self, user_id: int, target: WatchTarget) -> WatchItem: ...
+    async def remove_watch(self, user_id: int, target: WatchTarget) -> bool: ...
+    async def set_notifications(self, user_id: int, target: WatchTarget, notifications: frozenset[WatchNotification]) -> WatchItem: ...
+
+class BetService(Protocol):
+    async def place_bet(self, user_id: int, draft: BetDraft) -> BetView: ...
+    async def list_bets(self, user_id: int, *, open_only: bool = False, limit: int = 20) -> tuple[BetView, ...]: ...
+    async def bank_summary(self, user_id: int) -> BankView: ...
+
+class ResultService(Protocol):
+    async def pending_results(self, user_id: int) -> tuple[SignalView, ...]: ...
+    async def mark_result(self, user_id: int, request: ResultMarkRequest) -> SignalView: ...
+    async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None: ...
+    async def day_summary(self, user_id: int, day: date) -> DaySummary: ...
+
+class ReportService(Protocol):
+    async def report(self, user_id: int, request: ReportRequest) -> ReportView: ...
+    async def export(self, user_id: int) -> ExportFile: ...
+
+class SystemStatusService(Protocol):
+    async def system_status(self) -> SystemStatus: ...
+```
+
+**Semantika (real servis ham shunga amal qiladi; `tests/services/contract_suite.py` tekshiradi)**
+- Oddiy tahlil: tanlov `probability ≥ min_probability`, `ev ≥ min_ev` va sozlamadagi `odds_min..odds_max` ga mos bo'lsa o'tadi; har bir o'yindan **eng yaxshi bitta** tanlov (saralash kaliti bo'yicha); saralanadi, keyin `max_signals` (jami yoki `per_day`) bilan kesiladi. Shartga mos kelmagan o'yin ro'yxatni to'ldirish uchun qo'shilmaydi (`matched`, `shortfall`).
+- `include_no_value=True` (maxsus tahlil, §6.3): filtrlar o'chadi, tanlangan bozorlarning barcha tanlovlari qaytadi, chegaradan pastdagilari `no_value=True`, `stake_units=0`.
+- Sevimli jamoa/liga o'yini (`scope=all`) shartga mos kelmasa ham eng yuqori EV li tanlovi bilan qo'shiladi (`watchlist=True`, `no_value=True`).
+- `kickoff` dan 3 kundan uzoq — `preliminary=True`, ishonch bir pog'ona past. O'tgan oyna — `retro=True`, `result` to'ldirilgan, API sarfi yo'q. O'yin davom etayotgan (in-play) o'yinlar tahlil va ro'yxatdan chiqariladi.
+- Byudjet: `estimate_cost` hech narsa sarflamaydi; `analyze` qo'lda so'rovlar zaxirasidan oshsa `BudgetExceededError(needed, available)`. 10 daqiqa ichida olingan ma'lumot qayta so'ralmaydi.
+- Qayta hisob: bitta o'yin uchun `RECALC_COOLDOWN` da bir marta (`CooldownActiveError(retry_after)`), boshlangan o'yin — `ValidationFailedError`. Zaxira tugagan bo'lsa raqamlar o'zgarmaydi va `data_as_of` ("09:00 holatiga") qo'yiladi. `recalc_query` cooldown dagi va boshlangan signallarni o'tkazib yuboradi (`skipped_*`), bitta o'yindagi bir nechta signalni bitta hisob bilan yangilaydi; bitta xato butun to'plamni yiqitmaydi (`failed`).
+- Egalik: boshqa foydalanuvchining signali, so'rovi yoki shabloni `NotFoundError` (mavjud emasdek). Noma'lum foydalanuvchi standart sozlamalarni oladi.
+- `update_settings` to'liq almashtiradi va `risk_profile` ni chegaralardan qayta chiqaradi (preset bilan aynan mos → shu profil, aks holda `custom`).
+
+**Xatolar — `app.services.errors`:** `ServiceError(AppError)` → `ValidationFailedError(field, message)` (+ `ValueError`), `NotFoundError(entity, entity_id)` (+ `LookupError`), `CooldownActiveError(retry_after: timedelta)`, `BudgetExceededError(needed, available)`.
 
 ## 5. Soxta servis — `src/app/services/fake.py`
-**Holat:** hali qotirilmagan · **Versiya:** —
-- `FakeAnalysisService`: (to'ldiriladi)
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer
+
+- `create_fake_services(*, clock: Clock = system_clock) -> Services` — barcha protokollarning bitta umumiy xotira holati ustidagi soxta amalga oshirilishi (`FakeAnalysisService`, `FakeSignalService`, `FakeCatalogService`, `FakeSettingsService`, `FakeTemplateService`, `FakeWatchlistService`, `FakeBetService`, `FakeResultService`, `FakeReportService`, `FakeSystemStatusService`). `Clock = Callable[[], datetime]` (UTC).
+- Ma'lumot: hash asosida **deterministik** (tasodif yo'q): APL, La Liga, Seriya A, Bundesliga (futbol) va KHL (xokkey, `experimental=True`), soat bo'yicha "bugun" dan 7 kun oldin — 14 kun keyin, har kuni har ligada bitta o'yin; bozorlar 1X2, ikki natija, Total 2.5, BTTS, Fora −0.5 (xokkey: 1X2, Total 5.5). Tugagan o'yinlarning ~15% ida natija "API dan kelmagan" (`/natijalar` uchun).
+- Byudjet: kunlik limit 100, avtomatik sarf 40, qo'lda zaxira 30 so'rov; 10 daqiqalik kesh. Cooldown, progress, idempotentlik va xatolar shartnomadagidek.
+- I/O, tarmoq, `sleep` yo'q. `RecalcVerdict.CANCELLED` va `failed_fixtures > 0` holatlarini soxta servis hosil qilmaydi (real servisda: o'yin qoldirilgan / tarkib, qisman nosozlik).
 
 ## 6. Model API si — `src/app/models/__init__.py`
 **Holat:** hali qotirilmagan · **Versiya:** —
@@ -133,3 +266,4 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 |---|---|---|---|---|
 | 2026-10-21 | 1. Domen, 2. `SportAdapter` | v1 yozildi (T2, F2.4) | data-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 3. Baza sxemasi | v1 yozildi, Alembic `0001` (T2, F2.1) | data-engineer | orkestr ko'rib chiqadi |
+| 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1 taklif yozildi (T2): DTO lar, 10 ta protokol, `Services` to'plami, xatolar ierarxiyasi, deterministik fake, qayta ishlatiladigan shartnoma testlari ([ADR 0004](adr/0004-service-contract.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
