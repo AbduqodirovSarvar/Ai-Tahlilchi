@@ -21,6 +21,7 @@ from app.sports.history.download import (
     download_season,
     looks_like_csv,
     needs_download,
+    season_end,
     season_url,
     write_atomically,
 )
@@ -64,9 +65,16 @@ def test_missing_file_needs_download(tmp_path: Path) -> None:
     assert needs_download(tmp_path / "x.csv", season=2020, now=NOW)
 
 
-def test_complete_season_is_cached_forever(tmp_path: Path) -> None:
-    path = touch(tmp_path / "old.csv", NOW - timedelta(days=900))
+def test_file_saved_after_its_season_ended_is_cached_forever(tmp_path: Path) -> None:
+    path = touch(tmp_path / "old.csv", season_end(2024) + timedelta(days=1))
     assert not needs_download(path, season=2024, now=NOW)
+
+
+def test_file_cached_mid_season_is_fetched_again_after_the_season(tmp_path: Path) -> None:
+    # Saved on 1 March 2025 while 2024/25 was running: it lacks the last results.
+    path = touch(tmp_path / "partial.csv", datetime(2025, 3, 1, tzinfo=UTC))
+    assert needs_download(path, season=2024, now=NOW)
+    assert season_end(2024) == datetime(2025, 7, 1, tzinfo=UTC)
 
 
 def test_current_season_is_refreshed_when_stale(tmp_path: Path) -> None:
