@@ -48,11 +48,6 @@ async def test_old_more_button_does_not_page_through_a_newer_result(
     assert stale or (cards and all(card.startswith("⚽") for card in cards))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-6: a typo'd reversed range without year (25.10-24.10) rolls into next year "
-    "and is reported as 'too long' instead of 'end before start'",
-)
 async def test_reversed_typed_range_says_end_before_start(admin: Client) -> None:
     await admin.send(texts.MENU_ANALYSIS)
 

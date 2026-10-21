@@ -385,6 +385,10 @@ PARSE_BAD_RANGE: Final = (
 )
 PARSE_REVERSED_RANGE: Final = "Tugash sanasi boshlanishdan oldin bo'lishi mumkin emas."
 PARSE_WINDOW_TOO_LONG: Final = "Oraliq juda uzun: ko'pi bilan {max_window} kun."
+PARSE_TOO_OLD: Final = (
+    "Oraliq juda eski: retro-tahlil bugundan ko'pi bilan {max_lookback} kun oldingi "
+    "sanadan boshlanadi."
+)
 PARSE_TOO_FAR: Final = (
     "Oraliq juda uzoqda: bugundan ko'pi bilan {max_future} kun keyingi o'yinlar tahlil qilinadi "
     "(koeffitsientlar odatda 1–2 hafta oldin chiqadi)."

@@ -35,6 +35,8 @@ from app.bot.callbacks import (
 )
 from app.domain import MarketType
 from app.services.interfaces import (
+    MAX_RETRO_LOOKBACK_DAYS,
+    MAX_WINDOW_DAYS,
     RISK_PRESETS,
     RiskProfile,
     ScopeKind,
@@ -54,8 +56,6 @@ CUSTOM: Final = -1
 """Button value meaning "let me type it"."""
 COUNT_ALL: Final = 0
 COUNT_TOGGLE_PER_DAY: Final = -2
-CALENDAR_PAST_DAYS: Final = 90
-"""How far back the calendar goes (retro analysis of finished matches)."""
 
 SETTINGS_MAX_SIGNALS_CHOICES: Final = (3, 5, 10, 15, 20, 30)
 SETTINGS_PROBABILITY_CHOICES: Final = (0.30, 0.40, 0.45, 0.50, 0.55, 0.60, 0.70, 0.80, 0.90)
@@ -172,12 +172,15 @@ def _shift_month(key: int, delta: int) -> int:
 
 def calendar_bounds(today: date) -> tuple[date, date]:
     """First and last selectable day."""
-    return today - timedelta(days=CALENDAR_PAST_DAYS), horizon_end(today)
+    return today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS), horizon_end(today)
 
 
 def _day_button(day: date, today: date, start: date | None) -> InlineKeyboardButton:
     first, last = calendar_bounds(today)
-    if not first <= day <= last or (start is not None and day < start):
+    if start is not None:
+        # The end must keep the window within what the service accepts.
+        first, last = start, min(last, start + timedelta(days=MAX_WINDOW_DAYS - 1))
+    if not first <= day <= last:
         return _button("·", CalendarCb(action="noop"))
     label = str(day.day)
     if day == start:

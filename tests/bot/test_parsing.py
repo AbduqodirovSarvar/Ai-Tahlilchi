@@ -24,7 +24,12 @@ from app.bot.parsing import (
     parse_timezone,
 )
 from app.domain import Sport
-from app.services.interfaces import DateMode, DateSpec
+from app.services.interfaces import (
+    MAX_RETRO_LOOKBACK_DAYS,
+    MAX_WINDOW_DAYS,
+    DateMode,
+    DateSpec,
+)
 
 TODAY = date(2026, 10, 21)
 BOUNDS = {"probability_bounds": (0.30, 0.95), "ev_bounds": (0.0, 0.20)}
@@ -134,6 +139,13 @@ def test_parse_date_range(text: str, expected: tuple[date, date]) -> None:
     assert parse_date_range(text, TODAY) == expected
 
 
+def test_reversed_range_without_year_is_not_rolled_into_a_year_long_window() -> None:
+    start, end = parse_date_range("25.10 - 24.10", TODAY)
+    assert end < start
+    with pytest.raises(InputError, match="oldin"):
+        check_window(start, end, TODAY)
+
+
 def test_parse_date_range_rejects_text() -> None:
     with pytest.raises(InputError, match="tushunmadim"):
         parse_date_range("next week", TODAY)
@@ -149,6 +161,18 @@ def test_check_window_rules() -> None:
         check_window(TODAY - timedelta(days=40), TODAY, TODAY)
     with pytest.raises(InputError, match="uzoqda"):
         check_window(TODAY, TODAY + timedelta(days=14), TODAY)  # horizon: today + 13
+
+
+def test_check_window_retro_lookback_is_bounded() -> None:
+    oldest = TODAY - timedelta(days=MAX_RETRO_LOOKBACK_DAYS)
+    assert check_window(oldest, oldest + timedelta(days=5), TODAY).date_from == oldest
+    with pytest.raises(InputError, match=f"{MAX_RETRO_LOOKBACK_DAYS} kun oldingi"):
+        check_window(oldest - timedelta(days=1), oldest, TODAY)
+    # The longest window is still fine at the lookback edge, one day more is "too long".
+    longest_end = oldest + timedelta(days=MAX_WINDOW_DAYS - 1)
+    assert check_window(oldest, longest_end, TODAY).date_to == longest_end
+    with pytest.raises(InputError, match="uzun"):
+        check_window(oldest, longest_end + timedelta(days=1), TODAY)
 
 
 # --------------------------------------------------------------------------- /tahlil
@@ -225,6 +249,24 @@ def test_quick_ev_count_and_percent() -> None:
 def test_quick_errors(text: str, message: str) -> None:
     with pytest.raises(InputError, match=message):
         quick(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "names"),
+    [
+        ("Schalke 04", ("Schalke 04",)),
+        ("futbol 60% Bayer 04 Leverkusen, Mainz 05", ("Bayer 04 Leverkusen", "Mainz 05")),
+        ("Hannover 96, Inter 7kun", ("Hannover 96", "Inter")),
+        ("bugun Schalke 04 ev5% 10ta", ("Schalke 04",)),
+    ],
+)
+def test_quick_team_names_may_contain_numbers(text: str, names: tuple[str, ...]) -> None:
+    assert quick(text).team_names == names
+
+
+def test_quick_number_in_a_letterless_segment_is_still_ambiguous() -> None:
+    with pytest.raises(InputError, match="foizmi yoki sonmi"):
+        quick("Schalke 04, 60")
 
 
 def test_quick_team_names_are_deduplicated_and_normalised() -> None:

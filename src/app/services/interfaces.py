@@ -50,6 +50,10 @@ MAX_FUTURE_DAYS: Final = 14
 from today inclusive, i.e. it ends on :func:`horizon_end` (``today + 13``) at the latest."""
 MAX_WINDOW_DAYS: Final = 31
 """Longest window (inclusive day count); bounds retro analyses of past dates too."""
+MAX_RETRO_LOOKBACK_DAYS: Final = 90
+"""A retro window may start at most this many days before today (decision #12); together
+with :data:`MAX_WINDOW_DAYS` (the retro window length) it bounds how far back the bot's
+calendar and typed ranges reach."""
 PRELIMINARY_AFTER: Final = timedelta(days=3)
 """Signals further away are preliminary: lineups/injuries unknown, confidence lowered."""
 RECALC_COOLDOWN: Final = timedelta(minutes=10)

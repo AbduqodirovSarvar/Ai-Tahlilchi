@@ -10,7 +10,14 @@ from app.bot import keyboards, texts
 from app.bot.callbacks import CalendarCb
 from app.bot.keyboards import PickerRow
 from app.domain import MarketType, Sport
-from app.services.interfaces import RiskProfile, ScopeKind, SortKey, SportOption
+from app.services.interfaces import (
+    MAX_RETRO_LOOKBACK_DAYS,
+    MAX_WINDOW_DAYS,
+    RiskProfile,
+    ScopeKind,
+    SortKey,
+    SportOption,
+)
 
 TELEGRAM_CALLBACK_LIMIT = 64
 TODAY = date(2026, 10, 21)
@@ -171,3 +178,19 @@ def test_retro_card_has_no_bet_or_recalc() -> None:
 def test_main_menu_texts_are_known() -> None:
     assert texts.MENU_ANALYSIS in keyboards.MENU_TEXTS
     assert len(keyboards.MENU_TEXTS) == 9
+
+
+def test_calendar_end_is_limited_to_the_longest_window_after_the_start() -> None:
+    start = TODAY - timedelta(days=40)  # 11.09
+    markup = keyboards.calendar_keyboard(keyboards.month_key(TODAY), TODAY, start)
+    selectable = [
+        date.fromordinal(CalendarCb.unpack(d).value)
+        for d in callbacks(markup)
+        if d.startswith("wc:day")
+    ]
+    assert max(selectable) == start + timedelta(days=MAX_WINDOW_DAYS - 1)  # 11.10
+
+
+def test_calendar_start_reaches_back_exactly_the_retro_lookback() -> None:
+    first, _ = keyboards.calendar_bounds(TODAY)
+    assert first == TODAY - timedelta(days=MAX_RETRO_LOOKBACK_DAYS)
