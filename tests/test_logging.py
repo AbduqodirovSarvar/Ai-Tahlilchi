@@ -7,7 +7,14 @@ from typing import Literal
 import pytest
 import structlog
 
-from app.logging import REDACTED, configure_logging, get_logger, redact_secrets
+from app.logging import (
+    REDACTED,
+    SecretRedactor,
+    configure_logging,
+    get_logger,
+    is_sensitive_key,
+    redact_secrets,
+)
 
 
 def last_json_line(output: str) -> dict[str, object]:
@@ -144,10 +151,6 @@ def test_redaction_never_masks_the_event_name() -> None:
     assert redact_secrets(None, "info", dict(event)) == event
 
 
-@pytest.mark.xfail(
-    reason="QA-T1 F-2: redact_secrets only inspects top-level keys; nested mappings leak",
-    strict=True,
-)
 def test_secrets_nested_in_mappings_are_redacted(capsys: pytest.CaptureFixture[str]) -> None:
     configure_logging(level="INFO", app_env="prod")
 
@@ -156,10 +159,6 @@ def test_secrets_nested_in_mappings_are_redacted(capsys: pytest.CaptureFixture[s
     assert SECRET not in capsys.readouterr().out
 
 
-@pytest.mark.xfail(
-    reason="QA-T1 F-1: prod dict_tracebacks renders frame locals (show_locals=True)",
-    strict=True,
-)
 def test_prod_exception_logs_do_not_render_frame_locals(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -177,3 +176,107 @@ def test_prod_exception_logs_do_not_render_frame_locals(
     output = capsys.readouterr().out
     assert "request_failed" in output
     assert SECRET not in output
+
+
+# --- T1 fix round: key rules, nesting, value scrubbing ----------------------------------------
+
+CONFIGURED_SECRET = "AIzaSy-CONFIGURED-KEY-0123456789"
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "token",
+        "bot_token",
+        "TELEGRAM_BOT_TOKEN",
+        "api_key",
+        "apikey",
+        "gemini_api_key",
+        "x-api-key",
+        "Authorization",
+        "password",
+        "db_password",
+        "secret",
+        "client_secret",
+    ],
+)
+def test_credential_like_keys_are_sensitive(key: str) -> None:
+    assert is_sensitive_key(key)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["prompt_tokens", "completion_tokens", "tokens_used", "total_tokens", "event", "user_id"],
+)
+def test_token_counters_and_ordinary_keys_are_not_sensitive(key: str) -> None:
+    assert not is_sensitive_key(key)
+
+
+def test_token_counters_stay_visible_in_output(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(level="INFO", app_env="prod")
+
+    get_logger("tests.llm").info("gemini_call", prompt_tokens=120, completion_tokens=30)
+
+    record = last_json_line(capsys.readouterr().out)
+    assert record["prompt_tokens"] == 120
+    assert record["completion_tokens"] == 30
+
+
+def test_nested_mappings_and_sequences_are_redacted() -> None:
+    event = {
+        "event": "http_call",
+        "headers": {"Authorization": "Bearer abc", "accept": "json"},
+        "attempts": [{"api_key": "k1", "status": 429}, ("x", {"token": "t"})],
+    }
+
+    result = redact_secrets(None, "info", event)
+
+    assert result["headers"] == {"Authorization": REDACTED, "accept": "json"}
+    assert result["attempts"] == [{"api_key": REDACTED, "status": 429}, ["x", {"token": REDACTED}]]
+
+
+def test_configured_secret_values_are_scrubbed_from_any_string() -> None:
+    redactor = SecretRedactor([CONFIGURED_SECRET])
+    event = {
+        "event": f"calling with {CONFIGURED_SECRET}",
+        "url": f"https://v3.football.api-sports.io/odds?apiKey={CONFIGURED_SECRET}&page=2",
+        "nested": {"note": [f"key={CONFIGURED_SECRET}"]},
+        "count": 3,
+    }
+
+    result = redactor(None, "info", event)
+
+    assert CONFIGURED_SECRET not in str(result)
+    assert result["url"] == f"https://v3.football.api-sports.io/odds?apiKey={REDACTED}&page=2"
+    assert result["count"] == 3
+
+
+def test_overlapping_secrets_are_fully_scrubbed() -> None:
+    redactor = SecretRedactor(["ABCDEFGH", "ABCDEFGH-LONGER"])
+
+    assert redactor(None, "info", {"event": "ABCDEFGH-LONGER"})["event"] == REDACTED
+
+
+def test_very_short_secret_values_are_not_used_for_scrubbing() -> None:
+    redactor = SecretRedactor(["42"])
+
+    assert redactor(None, "info", {"event": "fixture 42"})["event"] == "fixture 42"
+
+
+@pytest.mark.parametrize("app_env", ["dev", "prod"])
+def test_configured_secrets_are_scrubbed_from_events_and_tracebacks(
+    capsys: pytest.CaptureFixture[str], app_env: Literal["dev", "prod"]
+) -> None:
+    configure_logging(level="INFO", app_env=app_env, secret_values=[CONFIGURED_SECRET])
+
+    try:
+        msg = f"request to https://host/odds?apiKey={CONFIGURED_SECRET} failed"
+        raise ConnectionError(msg)
+    except ConnectionError:
+        get_logger("tests.scrub").exception(f"failed {CONFIGURED_SECRET}")
+    logging.getLogger("aiogram.test").warning("stdlib %s", CONFIGURED_SECRET)
+
+    output = capsys.readouterr().out
+    assert "ConnectionError" in output
+    assert CONFIGURED_SECRET not in output
+    assert output.count(REDACTED) >= 3

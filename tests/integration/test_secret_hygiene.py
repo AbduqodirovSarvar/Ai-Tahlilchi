@@ -51,13 +51,6 @@ async def test_failed_reply_is_logged_without_the_token_in_dev(
     assert TOKEN not in output
 
 
-@pytest.mark.xfail(
-    reason=(
-        "QA-T1 F-1 (critical): prod logging uses structlog dict_tracebacks, whose default "
-        "show_locals=True renders aiogram's local `url` (contains the bot token)"
-    ),
-    strict=True,
-)
 async def test_failed_reply_is_logged_without_the_token_in_prod(
     offline_bot: Bot, capsys: pytest.CaptureFixture[str]
 ) -> None:
