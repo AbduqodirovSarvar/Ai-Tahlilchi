@@ -17,7 +17,7 @@
 - [x] F0.6 Lokal muhit: Python 3.13, `uv`, Git, Docker Desktop
 - [~] F0.7 `scripts/probe_api.py` tekshiruv skripti (data-engineer; kalit kerak)
 - [ ] F0.8 Ligalar ro'yxatini kelishish
-- [ ] F0.9 Tarixiy ma'lumot: football-data.co.uk CSV (T2 dagi F2.7 bilan)
+- [~] F0.9 Tarixiy ma'lumot: football-data.co.uk CSV: import tayyor, yuklab olish korporativ tarmoqda bloklangan (F2.7 ga qarang)
 
 ## T1 — Skelet (F1) · infra-engineer
 - [x] F1.1 Papka tuzilmasi (src layout), `pyproject.toml`, `uv.lock`
@@ -30,9 +30,9 @@
 - [x] F1.8 Minimal bot `/start` → "Ishlayapti ✅" (whitelist + faqat shaxsiy chat): offline testlar bilan tasdiqlangan. Jonli Telegram sinovi token qo'shilgandan keyin (F0 kechiktirilgan)
 
 ## T2 — Shartnomalar
-- [ ] F2.1 SQLAlchemy modellari + Alembic boshlang'ich migratsiyasi (data-engineer)
-- [ ] F2.4 `SportAdapter` protokoli va domen modellari (data-engineer)
-- [ ] F2.7 Tarixiy CSV importi (data-engineer)
+- [x] F2.1 SQLAlchemy modellari (18 jadval) + Alembic `0001` (upgrade/downgrade testlangan), engine (WAL, busy_timeout, foreign_keys), domen ⇄ ORM mapperlar, idempotent upsert (data-engineer)
+- [x] F2.4 `SportAdapter` protokoli va domen modellari: `docs/contracts.md` 1–3 frozen v1 (orkestr tasdig'i kutilmoqda) (data-engineer)
+- [~] F2.7 Tarixiy CSV importi: kod va testlar tayyor (`scripts/import_history.py`, offline/kesh, idempotent). Haqiqiy ma'lumot bilan ishga tushirish **bu mashinada bloklangan**: korporativ veb-filtr football-data.co.uk ni "Gambling" toifasida to'sadi. CSV'larni boshqa tarmoqdan `data/history/<mavsum>/<liga>.csv` ga qo'yib `--offline` bilan yoki serverda ishga tushirish kerak (data-engineer)
 - [ ] `services/interfaces.py` va `services/fake.py` (pipeline-engineer)
 - [ ] Shartnomalarni qotirish (`docs/contracts.md` v1) (orkestr)
 
