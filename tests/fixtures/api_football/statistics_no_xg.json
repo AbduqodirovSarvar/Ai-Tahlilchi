@@ -1,0 +1,42 @@
+{
+  "get": "fixtures/statistics",
+  "parameters": {
+    "fixture": "1208023"
+  },
+  "errors": [],
+  "results": 2,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": [
+    {
+      "team": {
+        "id": 42,
+        "name": "Arsenal",
+        "logo": "https://media.api-sports.io/football/teams/42.png",
+        "winner": null
+      },
+      "statistics": [
+        {
+          "type": "Shots on Goal",
+          "value": 4
+        }
+      ]
+    },
+    {
+      "team": {
+        "id": 39,
+        "name": "Wolves",
+        "logo": "https://media.api-sports.io/football/teams/39.png",
+        "winner": null
+      },
+      "statistics": [
+        {
+          "type": "expected_goals",
+          "value": null
+        }
+      ]
+    }
+  ]
+}

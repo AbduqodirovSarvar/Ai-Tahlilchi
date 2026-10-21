@@ -1,0 +1,13 @@
+{
+  "get": "fixtures",
+  "parameters": {
+    "date": "2024-07-01"
+  },
+  "errors": [],
+  "results": 0,
+  "paging": {
+    "current": 1,
+    "total": 1
+  },
+  "response": []
+}
