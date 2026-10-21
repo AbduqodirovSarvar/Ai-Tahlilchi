@@ -1,0 +1,56 @@
+{
+  "id": "strong_form_confirms",
+  "description": "Forma modelni tasdiqlaydi.",
+  "candidates": [
+    {
+      "candidate_id": "g15",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.55,
+      "p_model": 0.7,
+      "ev": 0.085,
+      "confidence_level": "Yuqori",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": [],
+      "p_market": 0.66
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g15": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g15",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Arsenal formasi kuchli, Everton esa yomon. Ma'lumotlarda salbiy omil yo'q."
+      }
+    ]
+  }
+}

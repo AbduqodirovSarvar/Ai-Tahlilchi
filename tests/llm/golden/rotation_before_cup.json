@@ -1,0 +1,63 @@
+{
+  "id": "rotation_before_cup",
+  "description": "Yevrokubok o'yini oldidan rotatsiya xavfi.",
+  "candidates": [
+    {
+      "candidate_id": "g03",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.75,
+      "p_model": 0.6,
+      "ev": 0.05,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [
+        "3 kundan keyin Yevrokubok o'yini"
+      ],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": [],
+      "p_market": 0.58
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g03": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "rotatsiya"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g03",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "rotatsiya"
+        ],
+        "izoh": "Chelsea 3 kundan keyin Yevrokubok o'ynaydi, shuning uchun asosiy tarkib dam olishi mumkin. Tarkib e'lon qilinmagan."
+      }
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "id": "mixed_batch",
+  "description": "Uchta nomzod: toza, jarohatli, ma'lumotsiz.",
+  "candidates": [
+    {
+      "candidate_id": "g17a",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.6,
+      "p_model": 0.66,
+      "ev": 0.056,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": []
+    },
+    {
+      "candidate_id": "g17b",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Liverpool",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "away",
+      "odds": 2.5,
+      "p_model": 0.45,
+      "ev": 0.125,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        },
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        }
+      ],
+      "absences": [
+        {
+          "team": "Liverpool",
+          "player": "Salah",
+          "status": "out",
+          "reason": "jarohat"
+        }
+      ]
+    },
+    {
+      "candidate_id": "g17c",
+      "league": "Premier League",
+      "home_team": "Everton",
+      "away_team": "Chelsea",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "O/U",
+      "selection": "over",
+      "odds": 1.9,
+      "p_model": 0.57,
+      "ev": 0.083,
+      "confidence_level": "Past",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [],
+      "absences": []
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g17a": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    },
+    "g17b": {
+      "verdict_in": [
+        "rad",
+        "ehtiyot"
+      ],
+      "flags_include": [
+        "jarohat"
+      ]
+    },
+    "g17c": {
+      "verdict_in": [
+        "ehtiyot"
+      ],
+      "flags_include": [
+        "malumot_yetarli_emas"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g17a",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Salbiy omil ko'rinmaydi, forma Arsenal tomonida."
+      },
+      {
+        "candidate_id": "g17b",
+        "verdict": "rad",
+        "risk_flags": [
+          "jarohat"
+        ],
+        "izoh": "Liverpool uchun Salah jarohat tufayli o'ynamaydi, bu stavka asosini buzadi."
+      },
+      {
+        "candidate_id": "g17c",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "malumot_yetarli_emas"
+        ],
+        "izoh": "Forma va tarkib haqida ma'lumot yo'q, ishonch past."
+      }
+    ]
+  }
+}

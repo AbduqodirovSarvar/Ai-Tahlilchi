@@ -1,0 +1,69 @@
+{
+  "id": "lesson_applies",
+  "description": "Saboq shu o'yinga tegishli: rotatsiya.",
+  "candidates": [
+    {
+      "candidate_id": "g13",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.8,
+      "p_model": 0.58,
+      "ev": 0.044,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [
+        "3 kundan keyin Yevrokubok o'yini"
+      ],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": {
+    "lessons": [
+      "Yevrokubokdan 3 kun oldin Chelsea asosiy tarkibni dam oldiradi (2 marta tasdiqlangan)"
+    ],
+    "segment_stats": [
+      "Chelsea ishtirokidagi signallar: 9 ta, 3 o'tdi / 6 o'tmadi"
+    ]
+  },
+  "expected": {
+    "g13": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "rotatsiya"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g13",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "rotatsiya"
+        ],
+        "izoh": "Tajribaga ko'ra Yevrokubokdan oldin Chelsea asosiy tarkibni dam oldiradi. Bu o'yinda ham shunday bo'lishi mumkin."
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ Sport o'yinlarini statistik model (Poisson / Dixon-Coles, bozor modeli) va Gemin
 > **Holat:** T1 (loyiha skeleti). Hozircha bot faqat `/start` ga "Ishlayapti ✅" deb javob beradi. Batafsil holat: [docs/progress.md](docs/progress.md).
 
 ## Hujjatlar
+- [Loyiha holati — bajarilgan va qolgan ishlar](docs/HOLAT.md)
 - [Loyiha rejasi (funksional talablar)](ai_sport_tahlilchisi_va_telegram_bot_loyihasi_rejasi.md)
 - [Ishlab chiqish rejasi (F0–F12)](ishlab_chiqish_rejasi.md)
 - [Agentlar orqali implementatsiya](agentlar_rejasi.md)

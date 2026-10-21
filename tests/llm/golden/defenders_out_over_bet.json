@@ -1,0 +1,67 @@
+{
+  "id": "defenders_out_over_bet",
+  "description": "Mezbon himoyachilari yo'q: Over stavkasi uchun qo'llab-quvvatlovchi omil.",
+  "candidates": [
+    {
+      "candidate_id": "g22",
+      "league": "Premier League",
+      "home_team": "Everton",
+      "away_team": "Arsenal",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "O/U",
+      "selection": "over",
+      "odds": 1.85,
+      "p_model": 0.6,
+      "ev": 0.11,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        },
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        }
+      ],
+      "absences": [
+        {
+          "team": "Everton",
+          "player": "Tarkowski",
+          "status": "out"
+        },
+        {
+          "team": "Everton",
+          "player": "Mykolenko",
+          "status": "out"
+        }
+      ]
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g22": {
+      "verdict_in": [
+        "tasdiq",
+        "ehtiyot"
+      ],
+      "flags_include": []
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g22",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Everton himoyachilari Tarkowski va Mykolenko o'ynamaydi, bu gol urilishi ehtimolini oshiradi."
+      }
+    ]
+  }
+}
