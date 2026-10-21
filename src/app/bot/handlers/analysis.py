@@ -37,6 +37,7 @@ from app.bot.handlers.filters import TYPED_INPUT
 from app.bot.notices import HIGH_PROBABILITY
 from app.bot.parsing import (
     PERCENT,
+    InputError,
     check_window,
     parse_count,
     parse_date_range,
@@ -46,7 +47,9 @@ from app.bot.session import WizardSession, WizardSessionMiddleware
 from app.bot.states import AnalysisFlow, drop_draft
 from app.bot.wizard import (
     BACK,
+    MAX_TEAM_NAMES_PER_MESSAGE,
     add_teams,
+    distinct_names,
     fit_markets,
     high_probability,
     lookup_teams,
@@ -269,7 +272,11 @@ async def on_pick(callback: CallbackQuery, callback_data: PickCb, session: Wizar
 
 async def on_team_text(message: Message, session: WizardSession) -> None:
     """Typed team names (comma-separated) on the teams picker."""
-    names = [name.strip() for name in (message.text or "").split(",") if name.strip()]
+    names = distinct_names((message.text or "").split(","))
+    if len(names) > MAX_TEAM_NAMES_PER_MESSAGE:
+        raise InputError(
+            texts.WIZARD_TEAMS_TOO_MANY_NAMES.format(max_names=MAX_TEAM_NAMES_PER_MESSAGE)
+        )
     draft = session.draft
     lookup = await lookup_teams(session.ctx.services, names, draft.sport_set)
     notice = None

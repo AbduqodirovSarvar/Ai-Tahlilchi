@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from app.bot import texts
+from app.bot.wizard import MAX_TEAM_NAMES_PER_MESSAGE
 from app.domain import Sport
 from app.services.interfaces import MAX_SCOPE_IDS, AnalysisQuery, AnalysisResult, Services
 from tests.e2e.bot_client import Client, answers, shown
@@ -70,11 +71,6 @@ async def test_typed_fractional_percent_is_shown_as_typed(admin: Client) -> None
     assert "≥ 62.5% · EV ≥ 4.5%" in admin.last_text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-8: the wizard team step searches every typed name (no MAX_SCOPE_IDS cap, "
-    "unlike /tahlil): one message can trigger hundreds of catalog searches",
-)
 async def test_team_step_bounds_catalog_searches(admin: Client, services: Services) -> None:
     calls = 0
     real = services.catalog.search_teams
@@ -93,3 +89,38 @@ async def test_team_step_bounds_catalog_searches(admin: Client, services: Servic
     await admin.send(", ".join(f"Team{index:03d}" for index in range(300)))
 
     assert calls <= MAX_SCOPE_IDS
+
+
+async def test_team_step_rejects_a_message_with_too_many_names(admin: Client) -> None:
+    await admin.send(texts.MENU_ANALYSIS)
+    for label in (texts.BTN_TODAY, texts.SPORT_LABELS[Sport.FOOTBALL], "50%", "5%"):
+        await admin.press(label)
+    await admin.press(texts.BTN_SCOPE_TEAMS)
+
+    methods = await admin.send(", ".join(f"Team{index:03d}" for index in range(300)))
+
+    assert shown(methods) == [
+        texts.WIZARD_TEAMS_TOO_MANY_NAMES.format(max_names=MAX_TEAM_NAMES_PER_MESSAGE)
+    ]
+    assert await admin.state() == "AnalysisFlow:teams"
+
+
+async def test_team_step_searches_each_distinct_name_once(
+    admin: Client, services: Services
+) -> None:
+    searched: list[str] = []
+    real = services.catalog.search_teams
+
+    async def recording(text: str, **kwargs: Any) -> Any:
+        searched.append(text)
+        return await real(text, **kwargs)
+
+    services.catalog.search_teams = recording  # type: ignore[method-assign]
+    await admin.send(texts.MENU_ANALYSIS)
+    for label in (texts.BTN_TODAY, texts.SPORT_LABELS[Sport.FOOTBALL], "50%", "5%"):
+        await admin.press(label)
+    await admin.press(texts.BTN_SCOPE_TEAMS)
+
+    await admin.send("Arsenal, arsenal ,  ARSENAL, Inter,, Inter")
+
+    assert searched == ["Arsenal", "Inter"]

@@ -319,6 +319,9 @@ WIZARD_TEAMS: Final = (
     "Jamoa nomini yozing, bir nechtasini vergul bilan: <code>Arsenal, Inter, Barcelona</code>"
 )
 WIZARD_TEAMS_NOT_FOUND: Final = "🔎 Topilmadi: {names}. Boshqacha yozib ko'ring."
+WIZARD_TEAMS_TOO_MANY_NAMES: Final = (
+    "Bir xabarda ko'pi bilan {max_names} ta jamoa nomi yozing. Qolganlarini alohida yuboring."
+)
 WIZARD_TEAMS_CHOOSE: Final = "👇 Kerakli jamoani belgilang (➕):"
 WIZARD_FIXTURES: Final = (
     "⚽ <b>Aniq o'yinlarni belgilang</b> (tanlangan: {count})\nSahifa {page}/{pages}"

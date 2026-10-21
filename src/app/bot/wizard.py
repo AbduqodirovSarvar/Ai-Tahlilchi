@@ -5,7 +5,7 @@ text, then ask :func:`render` for the next :class:`Screen` and display it. Rende
 call read-only services (leagues, fixture pages, cost estimate), never mutating ones.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Final
@@ -52,6 +52,8 @@ from app.services.interfaces import (
 
 FIXTURE_PAGE_SIZE: Final = 8
 TEAM_CANDIDATES: Final = 5
+MAX_TEAM_NAMES_PER_MESSAGE: Final = 10
+"""Typed names resolved per message on the team step (each costs a catalog search)."""
 """Search hits offered per ambiguous team name."""
 
 STEP_STATES: Final[dict[str, State]] = {
@@ -473,15 +475,28 @@ def _exact(name: str, options: Sequence[TeamOption]) -> TeamOption | None:
     return options[0] if len(options) == 1 else None
 
 
+def distinct_names(names: Iterable[str]) -> list[str]:
+    """Names without blanks and case-insensitive repeats, whitespace normalised, in order."""
+    unique: dict[str, str] = {}
+    for name in names:
+        cleaned = " ".join(name.split())
+        if cleaned:
+            unique.setdefault(cleaned.casefold(), cleaned)
+    return list(unique.values())
+
+
 async def lookup_teams(
     services: Services, names: Sequence[str], sports: frozenset[Sport]
 ) -> TeamLookup:
     """Resolve each name: a unique/exact hit is taken, several hits are ambiguous.
 
+    Repeated names are searched once.
+
     Raises:
         InputError: a name is shorter than the catalog's minimum search length.
     """
     sport = next(iter(sports)) if len(sports) == 1 else None
+    names = distinct_names(names)
     found: list[TeamOption] = []
     ambiguous: dict[str, tuple[TeamOption, ...]] = {}
     missing: list[str] = []

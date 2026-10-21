@@ -8,7 +8,13 @@ import pytest
 from aiogram.methods import SendMessage
 
 from app.bot import texts
-from app.bot.formatters import budget_message, cooldown_message, validation_message
+from app.bot.formatters import (
+    TELEGRAM_TEXT_LIMIT,
+    budget_message,
+    cooldown_message,
+    validation_message,
+)
+from app.bot.wizard import MAX_TEAM_NAMES_PER_MESSAGE
 from app.domain import Sport
 from app.services.errors import (
     BudgetExceededError,
@@ -239,6 +245,16 @@ async def test_menu_placeholder_and_unknown_text_are_valid_html(admin: Client) -
 
 
 # --------------------------------------------------------------------------- 4096 split
+def _unknown_team_names() -> str:
+    """The most names one message may carry (10), each long and full of ``&``/``<``.
+
+    Escaped, the "not found" line is one ~13 000-character line: it has to be cut inside.
+    """
+    names = ", ".join(f"{'&Q<' * 128}{index}" for index in range(MAX_TEAM_NAMES_PER_MESSAGE))
+    assert len(names) <= TELEGRAM_TEXT_LIMIT
+    return names
+
+
 def _chunks(methods: list[Any]) -> list[str]:
     return [method.text for method in methods if isinstance(method, SendMessage)]
 
@@ -253,9 +269,7 @@ async def test_very_long_not_found_list_splits_into_valid_html(admin: Client) ->
         texts.BTN_SCOPE_TEAMS,
     ):
         await admin.press(label)
-    # A real Telegram message can be up to 4096 characters: ~360 unknown names with "&".
-    names = ", ".join(f"&Q<{index:03d}" for index in range(360))
-    assert len(names) <= 4096
+    names = _unknown_team_names()
 
     methods = await admin.send(names)
 
@@ -275,7 +289,7 @@ async def test_very_long_not_found_list_never_exceeds_the_limit(admin: Client) -
         texts.BTN_SCOPE_TEAMS,
     ):
         await admin.press(label)
-    names = ", ".join(f"&Q<{index:03d}" for index in range(360))
+    names = _unknown_team_names()
 
     methods = await admin.send(names)
 
