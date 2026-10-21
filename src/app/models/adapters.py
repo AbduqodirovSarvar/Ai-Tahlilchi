@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from types import MappingProxyType
+from typing import Final
 
 from app.domain import (
     ExternalRef,
@@ -117,16 +118,31 @@ class MarketQuote:
 
 type _QuoteKey = tuple[ExternalRef, str, OddsKind, Market]
 
+# Kinds a bet decision may be based on; only the closing price is by definition at kickoff.
+DECISION_KINDS: Final = frozenset(kind for kind in OddsKind if kind is not OddsKind.CLOSING)
 
-def complete_quotes(snapshots: Iterable[OddsSnapshot]) -> list[MarketQuote]:
+
+def is_pre_kickoff(snapshot: OddsSnapshot, kickoff: datetime) -> bool:
+    """False for a decision-time price (not ``closing``) captured at or after kickoff."""
+    return snapshot.kind not in DECISION_KINDS or snapshot.taken_at < kickoff
+
+
+def complete_quotes(
+    snapshots: Iterable[OddsSnapshot], kickoffs: Mapping[ExternalRef, datetime] | None = None
+) -> list[MarketQuote]:
     """Group snapshots into complete per-(fixture, bookmaker, kind, market) quotes.
 
     The newest snapshot of each selection wins (a source may re-send a price). Groups with a
     selection missing are dropped: a partial set cannot be de-vigged. Output order is the
-    order in which each group was first seen.
+    order in which each group was first seen. With ``kickoffs``, decision-time snapshots
+    (every kind but ``closing``) taken at or after their fixture's kickoff are ignored:
+    defence in depth against a late re-sent price deciding a bet.
     """
     latest: dict[_QuoteKey, dict[Selection, OddsSnapshot]] = {}
     for snapshot in snapshots:
+        kickoff = None if kickoffs is None else kickoffs.get(snapshot.fixture)
+        if kickoff is not None and not is_pre_kickoff(snapshot, kickoff):
+            continue
         key = (snapshot.fixture, snapshot.bookmaker, snapshot.kind, snapshot.market)
         group = latest.setdefault(key, {})
         current = group.get(snapshot.selection)

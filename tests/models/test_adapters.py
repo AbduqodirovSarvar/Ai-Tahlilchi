@@ -21,6 +21,7 @@ from app.models import (
     quotes_by_fixture,
     team_key,
 )
+from app.models.backtest import BacktestFixture
 from tests.models.domain_helpers import finished, fixture, snapshots, team
 
 ONE_X_TWO = {Selection.HOME: 2.1, Selection.DRAW: 3.4, Selection.AWAY: 3.6}
@@ -106,3 +107,33 @@ def test_market_quote_validates_its_prices() -> None:
         MarketQuote(prices={Selection.YES: 1.9}, **common)
     with pytest.raises(ModelInputError, match="odds <= 1"):
         MarketQuote(prices={Selection.YES: 1.0, Selection.NO: 1.5}, **common)
+
+
+def test_decision_prices_taken_at_or_after_kickoff_are_ignored() -> None:
+    match = fixture()
+    late = {Selection.HOME: 1.3, Selection.DRAW: 5.0, Selection.AWAY: 9.0}
+    rows = [
+        *snapshots(match, Market.match_result(), ONE_X_TWO),
+        *snapshots(match, Market.match_result(), late, taken_at=match.kickoff),
+        *snapshots(
+            match, Market.match_result(), late, kind=OddsKind.CLOSING, taken_at=match.kickoff
+        ),
+    ]
+    by_kind = {q.kind: q for q in complete_quotes(rows, {match.ref: match.kickoff})}
+    assert dict(by_kind[OddsKind.OPENING].prices) == ONE_X_TWO
+    assert dict(by_kind[OddsKind.CLOSING].prices) == late  # closing is at kickoff by definition
+    # Without kickoffs nothing is filtered: the newest (post-kickoff) price wins.
+    unfiltered = {q.kind: q for q in complete_quotes(rows)}
+    assert dict(unfiltered[OddsKind.OPENING].prices) == late
+
+
+def test_backtest_item_never_offers_a_post_kickoff_decision_quote() -> None:
+    match = fixture()
+    late = complete_quotes(
+        snapshots(match, Market.match_result(), ONE_X_TWO, taken_at=match.kickoff)
+    )
+    record = match_record(match, finished(match, 1, 0))
+    assert record is not None
+    item = BacktestFixture(match, record, tuple(late))
+    assert item.usable_quotes == ()
+    assert item.quote(OddsKind.OPENING, "pinnacle", Market.match_result()) is None

@@ -7,6 +7,7 @@ from datetime import date
 
 from app.domain import Fixture, HistoryBatch, Market, OddsKind
 from app.models.adapters import (
+    DECISION_KINDS,
     MarketQuote,
     complete_quotes,
     match_record,
@@ -59,9 +60,23 @@ class BacktestFixture:
         """Away team key."""
         return team_key(self.fixture.away)
 
+    @property
+    def usable_quotes(self) -> tuple[MarketQuote, ...]:
+        """Quotes without decision-time prices captured at or after kickoff.
+
+        :func:`build_dataset` already drops such snapshots; this second guard keeps a
+        hand-built item from letting a post-kickoff price decide a bet.
+        """
+        kickoff = self.fixture.kickoff
+        return tuple(
+            quote
+            for quote in self.quotes
+            if quote.kind not in DECISION_KINDS or quote.taken_at < kickoff
+        )
+
     def quote(self, kind: OddsKind, bookmaker: str, market: Market) -> MarketQuote | None:
-        """The complete quote of ``market`` by ``bookmaker`` at moment ``kind``, if any."""
-        for quote in self.quotes:
+        """The usable complete quote of ``market`` by ``bookmaker`` at ``kind``, if any."""
+        for quote in self.usable_quotes:
             if quote.kind is kind and quote.bookmaker == bookmaker and quote.market == market:
                 return quote
         return None
@@ -71,10 +86,12 @@ def build_dataset(batch: HistoryBatch) -> tuple[BacktestFixture, ...]:
     """Finished fixtures of ``batch`` with their quotes, in kickoff order.
 
     Fixtures without a finished result (scheduled, postponed, abandoned) are left out: they
-    can neither be learnt from nor settled.
+    can neither be learnt from nor settled. Decision-time prices taken at or after kickoff
+    are dropped (:func:`app.models.adapters.complete_quotes`).
     """
     results = {result.fixture: result for result in batch.results}
-    quotes = quotes_by_fixture(complete_quotes(batch.odds))
+    kickoffs = {fixture.ref: fixture.kickoff for fixture in batch.fixtures}
+    quotes = quotes_by_fixture(complete_quotes(batch.odds, kickoffs))
     items = []
     for fixture in batch.fixtures:
         result = results.get(fixture.ref)
