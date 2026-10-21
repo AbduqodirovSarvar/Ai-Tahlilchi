@@ -1,0 +1,55 @@
+{
+  "id": "empty_experience",
+  "description": "Tajriba konteksti bo'sh; baribir baholanadi.",
+  "candidates": [
+    {
+      "candidate_id": "g18",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Chelsea",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.9,
+      "p_model": 0.57,
+      "ev": 0.083,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": {},
+  "expected": {
+    "g18": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g18",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Liverpool formasi yaxshi va tarkib ma'lum. Salbiy omil ko'rinmaydi."
+      }
+    ]
+  }
+}

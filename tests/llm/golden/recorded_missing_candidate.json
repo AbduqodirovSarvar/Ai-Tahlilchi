@@ -1,0 +1,89 @@
+{
+  "id": "recorded_missing_candidate",
+  "description": "Javobda bitta nomzod yo'q: o'sha nomzod fallback bo'ladi.",
+  "candidates": [
+    {
+      "candidate_id": "g26a",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.7,
+      "p_model": 0.63,
+      "ev": 0.071,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": []
+    },
+    {
+      "candidate_id": "g26b",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Liverpool",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "away",
+      "odds": 2.4,
+      "p_model": 0.46,
+      "ev": 0.104,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        },
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g26a": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    },
+    "g26b": {
+      "status": "fallback"
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g26a",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Arsenal formasi yaxshi, salbiy omil ko'rinmaydi."
+      }
+    ]
+  },
+  "recorded_only": true
+}

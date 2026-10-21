@@ -1,0 +1,50 @@
+{
+  "id": "insufficient_data",
+  "description": "Forma, jarohat va tarkib haqida ma'lumot yo'q.",
+  "candidates": [
+    {
+      "candidate_id": "g04",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "O/U",
+      "selection": "over",
+      "odds": 1.95,
+      "p_model": 0.56,
+      "ev": 0.092,
+      "confidence_level": "Past",
+      "confidence_reasons": [
+        "forma ma'lumoti yo'q",
+        "tarkib e'lon qilinmagan"
+      ],
+      "lineup_known": false,
+      "forms": [],
+      "absences": []
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g04": {
+      "verdict_in": [
+        "ehtiyot"
+      ],
+      "flags_include": [
+        "malumot_yetarli_emas"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g04",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "malumot_yetarli_emas",
+          "tarkib_nomalum"
+        ],
+        "izoh": "Forma va tarkib haqida ma'lumot yetarli emas. Faqat raqamlarga tayanib qaror qilish mumkin."
+      }
+    ]
+  }
+}

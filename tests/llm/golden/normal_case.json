@@ -1,0 +1,56 @@
+{
+  "id": "normal_case",
+  "description": "Salbiy omil yo'q, tarkib ma'lum, forma yaxshi.",
+  "candidates": [
+    {
+      "candidate_id": "g08",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.7,
+      "p_model": 0.64,
+      "ev": 0.088,
+      "confidence_level": "Yuqori",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": [],
+      "p_market": 0.6
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g08": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g08",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Liverpool formasi yaxshi, tarkib e'lon qilingan va salbiy omil ko'rinmaydi."
+      }
+    ]
+  }
+}

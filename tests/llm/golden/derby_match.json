@@ -1,0 +1,63 @@
+{
+  "id": "derby_match",
+  "description": "Derbi: natija o'zgaruvchan bo'lishi mumkin.",
+  "candidates": [
+    {
+      "candidate_id": "g09",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Chelsea",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 2.2,
+      "p_model": 0.5,
+      "ev": 0.1,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [
+        "London derbisi"
+      ],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        }
+      ],
+      "absences": [],
+      "p_market": 0.46
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g09": {
+      "verdict_in": [
+        "ehtiyot",
+        "tasdiq"
+      ],
+      "flags_include": [
+        "derbi"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g09",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "derbi"
+        ],
+        "izoh": "Bu derbi o'yini, shuning uchun forma ta'siri kamayishi mumkin. Boshqa salbiy omil ko'rinmaydi."
+      }
+    ]
+  }
+}
