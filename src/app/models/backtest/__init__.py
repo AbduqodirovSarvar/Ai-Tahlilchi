@@ -13,7 +13,13 @@ from app.models.backtest.betting import (
     candidate_bets,
     select_bets,
 )
-from app.models.backtest.dataset import BacktestFixture, build_dataset, dataset_fingerprint
+from app.models.backtest.dataset import (
+    BacktestFixture,
+    build_dataset,
+    complete_seasons,
+    dataset_fingerprint,
+    season_end,
+)
 from app.models.backtest.experiment import (
     ChosenParameters,
     Evaluation,
@@ -78,6 +84,7 @@ __all__ = [
     "build_dataset",
     "calibration_table",
     "candidate_bets",
+    "complete_seasons",
     "dataset_fingerprint",
     "evaluate",
     "gate_checks",
@@ -87,6 +94,7 @@ __all__ = [
     "render_report",
     "run_experiment",
     "score_table",
+    "season_end",
     "select_bets",
     "split_seasons",
     "summarize_bets",

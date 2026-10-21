@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -15,10 +15,12 @@ from app.models.backtest import (
     RunMetadata,
     SeasonSplit,
     build_dataset,
+    complete_seasons,
     dataset_fingerprint,
     gate_checks,
     render_report,
     run_experiment,
+    season_end,
     split_seasons,
 )
 from tests.models.backtest.conftest import HOLDOUT_SEASON, VALIDATION_SEASON
@@ -182,3 +184,21 @@ def test_fingerprint_is_order_independent_and_data_sensitive(small_batch: Histor
     changed = replace(small_batch, odds=small_batch.odds[1:])
     assert dataset_fingerprint(changed) != dataset_fingerprint(small_batch)
     assert len(dataset_fingerprint(small_batch)) == 64
+
+
+def test_complete_seasons_by_calendar_and_fixture_count(small_batch: HistoryBatch) -> None:
+    fixtures = small_batch.fixtures  # seasons 2020..2022, every league fully played
+    assert season_end(2022) == date(2023, 6, 30)
+    assert complete_seasons(fixtures, today=date(2023, 7, 1)) == (2020, 2021, 2022)
+    # On the last day of 2022/23 that season is not over yet.
+    assert complete_seasons(fixtures, today=date(2023, 6, 30)) == (2020, 2021)
+    # One league of 2021 lost a fifth of its matches: the whole season is unusable.
+    league = fixtures[0].league.ref
+    in_2021 = [f for f in fixtures if f.season == 2021 and f.league.ref == league]
+    dropped = {f.ref for f in in_2021[: len(in_2021) // 5]}
+    partial = [f for f in fixtures if f.ref not in dropped]
+    assert complete_seasons(partial, today=date(2030, 1, 1)) == (2020, 2022)
+    # A couple of missing rows is tolerated (unparseable source lines).
+    almost = [f for f in fixtures if f.ref != in_2021[0].ref]
+    assert complete_seasons(almost, today=date(2030, 1, 1)) == (2020, 2021, 2022)
+    assert complete_seasons([], today=date(2030, 1, 1)) == ()

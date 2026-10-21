@@ -89,9 +89,11 @@ def test_backtest_after_offline_import_of_committed_fixtures(
 
     # Three seasons exist (SP1 2021, D1 2023, E0 2024) but each league has a single season,
     # so no league has any history before its validation fixtures: nothing can be scored.
-    # The correct outcome is a clean refusal, not a report built on nothing.
+    # The correct outcome is a clean refusal, not a report built on nothing. Since the F-1
+    # fix the refusal comes earlier: each fixture file holds only a few matches, far from a
+    # full double round robin, so no season counts as completed for the hold-out.
     assert code == 2
-    assert "no validation predictions could be scored" in capsys.readouterr().out
+    assert "no completed season" in capsys.readouterr().out
     assert not out.exists() or not any(out.iterdir())
 
 
@@ -127,11 +129,6 @@ def test_synthetic_report_is_reproducible_and_records_seed_hash_and_commit(
     assert without_timestamp(reports[0]) == without_timestamp(reports[1])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-1: a season whose unplayed fixtures are simply absent (football-data files only "
-    "list played matches) is taken as the hold-out although it is still in progress",
-)
 def test_a_season_still_in_progress_is_not_the_default_holdout(
     backtest: ModuleType, migrated_db: Path, tmp_path: Path
 ) -> None:

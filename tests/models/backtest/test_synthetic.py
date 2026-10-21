@@ -22,7 +22,7 @@ from app.models.backtest import (
     summarize_bets,
     walk_forward,
 )
-from app.models.backtest.synthetic import round_robin, shin_prices
+from app.models.backtest.synthetic import _quotable_prices, round_robin, shin_prices
 from tests.models.backtest.conftest import SMALL
 
 # Larger than the shared fixture so the ROI interval is informative (~700 bets, ~3 s).
@@ -87,6 +87,21 @@ def test_shin_prices_reject_impossible_margins() -> None:
         shin_prices((0.5, 0.5), 0.0)
     with pytest.raises(ModelInputError, match="margin"):
         shin_prices((0.5, 0.5), 5.0)
+
+
+def test_unquotable_markets_are_skipped_not_fatal() -> None:
+    # A near-certain favourite: the margin is unreachable in Shin's model.
+    extreme = {Selection.YES: 0.999, Selection.NO: 0.001}
+    assert _quotable_prices(extreme, 0.08) is None
+    # Rounds the favourite to odds 1.00.
+    assert _quotable_prices({Selection.YES: 0.997, Selection.NO: 0.003}, 0.01) is None
+    assert _quotable_prices({Selection.YES: 0.5, Selection.NO: 0.5}, 0.05) is not None
+    # Very unequal teams produce such matches; generation must still succeed.
+    lopsided = SyntheticConfig(
+        leagues=1, teams_per_league=6, seasons=1, strength_sd=1.2, home_advantage=0.8, seed=2
+    )
+    batch = generate_history(lopsided)
+    assert len(batch.fixtures) == 30
 
 
 @pytest.mark.parametrize(

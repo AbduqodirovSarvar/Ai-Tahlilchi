@@ -35,6 +35,7 @@ from app.domain import (
     OddsKind,
     OddsSnapshot,
     ResultStatus,
+    Selection,
     Sport,
     Team,
 )
@@ -226,9 +227,9 @@ def _prices(
             for selection, outcome in probabilities.outcomes.items()
         }
         for profile in bookmakers:
-            booked = dict(zip(fair, shin_prices(tuple(fair.values()), profile.margin), strict=True))
-            if min(booked.values()) <= 1.0:
-                continue  # too short to quote at this margin; the whole market is skipped
+            booked = _quotable_prices(fair, profile.margin)
+            if booked is None:
+                continue  # no valid prices at this margin: the whole market is skipped
             taken_at = (
                 fixture.kickoff - _OPENING_LEAD
                 if profile.kind is OddsKind.OPENING
@@ -247,6 +248,21 @@ def _prices(
                 for selection, price in booked.items()
             )
     return snapshots
+
+
+def _quotable_prices(fair: dict[Selection, float], margin: float) -> dict[Selection, float] | None:
+    """Shin-margined prices, or ``None`` when the market cannot be quoted.
+
+    Extreme pairs (a near-certain favourite) either make the margin unreachable in Shin's
+    model or round the favourite to odds <= 1; a real book does not offer such a market.
+    """
+    try:
+        prices = shin_prices(tuple(fair.values()), margin)
+    except ModelInputError:
+        return None
+    if min(prices) <= 1.0:
+        return None
+    return dict(zip(fair, prices, strict=True))
 
 
 def shin_prices(probabilities: tuple[float, ...], margin: float) -> tuple[float, ...]:

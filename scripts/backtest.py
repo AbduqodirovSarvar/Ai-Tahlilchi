@@ -23,7 +23,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Final
 
@@ -52,6 +52,7 @@ from app.models.backtest import (
     RunMetadata,
     SyntheticConfig,
     build_dataset,
+    complete_seasons,
     dataset_fingerprint,
     generate_history,
     render_report,
@@ -86,6 +87,7 @@ class Loaded:
     batch: HistoryBatch
     holdout_season: int | None
     parameters: dict[str, str]
+    complete_seasons: tuple[int, ...] | None = None  # None: every season is complete
 
 
 EMPTY: Final = Loaded(HistoryBatch(), None, {})
@@ -133,8 +135,12 @@ async def _has_schema(engine: AsyncEngine) -> bool:
     return {"fixtures", "odds_snapshots"} <= tables
 
 
-async def load_history(db_path: Path, leagues: frozenset[str]) -> Loaded:
-    """Finished fixtures, results and odds from a database file that exists (may be empty)."""
+async def load_history(db_path: Path, leagues: frozenset[str], *, today: date) -> Loaded:
+    """Finished fixtures, results and odds from a database file that exists (may be empty).
+
+    The default hold-out is the last season that is complete on ``today`` (see
+    :func:`app.models.backtest.complete_seasons`).
+    """
     engine = create_engine(db_path)
     try:
         if not await _has_schema(engine):
@@ -152,18 +158,20 @@ async def load_history(db_path: Path, leagues: frozenset[str]) -> Loaded:
             odds_rows = (await session.scalars(select(OddsSnapshotRow))).all()
     finally:
         await engine.dispose()
-    return _to_batch(fixture_rows, odds_rows, leagues)
+    return _to_batch(fixture_rows, odds_rows, leagues, today=today)
 
 
 def _to_batch(
     fixture_rows: Sequence[FixtureRow],
     odds_rows: Sequence[OddsSnapshotRow],
     leagues: frozenset[str],
+    *,
+    today: date,
 ) -> Loaded:
     selected = [row for row in fixture_rows if not leagues or row.league.external_id in leagues]
-    incomplete = {row.season for row in selected if row.status is not FixtureStatus.FINISHED}
+    # Every stored fixture counts for completeness, played or not.
+    complete = complete_seasons((fixture_from_row(row) for row in selected), today=today)
     finished = [row for row in selected if row.status is FixtureStatus.FINISHED]
-    complete = sorted({row.season for row in finished} - incomplete)
     refs = {row.id: fixture_from_row(row).ref for row in finished}
     batch = HistoryBatch(
         fixtures=tuple(fixture_from_row(row) for row in finished),
@@ -174,9 +182,14 @@ def _to_batch(
             if row.fixture_id in refs
         ),
     )
+    seasons = sorted({row.season for row in selected})
     holdout = complete[-1] if complete else None
-    parameters = {"incomplete seasons (not hold-out)": str(sorted(incomplete) or "-")}
-    return Loaded(batch, holdout, parameters)
+    parameters = {
+        "complete seasons (hold-out candidates)": str(list(complete) or "-"),
+        "incomplete seasons (never hold-out)": str(sorted(set(seasons) - set(complete)) or "-"),
+        "completeness date": today.isoformat(),
+    }
+    return Loaded(batch, holdout, parameters, complete)
 
 
 def synthetic_history(args: argparse.Namespace) -> Loaded:
@@ -346,22 +359,47 @@ def write_report(
     return path
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point; returns the process exit code."""
+def load(args: argparse.Namespace, today: date) -> Loaded:
+    """Synthetic or database history (raises ModelInputError for a bad synthetic config)."""
+    if args.synthetic:
+        return synthetic_history(args)
+    leagues = frozenset(code.strip() for code in args.leagues.split(",") if code.strip())
+    # A missing file would be created empty by SQLite; treat it as "no history".
+    if not args.db_path.is_file():
+        return EMPTY
+    return asyncio.run(load_history(args.db_path, leagues, today=today))
+
+
+def holdout_problem(args: argparse.Namespace, loaded: Loaded) -> str | None:
+    """Why the hold-out season cannot be evaluated, or ``None`` if it can."""
+    complete = loaded.complete_seasons
+    if complete is None:
+        return None
+    if args.holdout_season is not None and args.holdout_season not in complete:
+        return f"--holdout-season {args.holdout_season} is not a completed season {list(complete)}"
+    if args.holdout_season is None and not complete:
+        return "no completed season in the data for the hold-out (seasons still in progress)"
+    return None
+
+
+def main(argv: Sequence[str] | None = None, *, today: date | None = None) -> int:
+    """Entry point; returns the process exit code. ``today`` defaults to the UTC date."""
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(errors="backslashreplace")
     configure_logging(level="INFO", app_env="dev")
     args = parse_args(sys.argv[1:] if argv is None else argv, default_db=get_settings().db_path)
     commit = git_commit()  # before any file is written, so "-dirty" means code changes
-    if args.synthetic:
-        loaded = synthetic_history(args)
-    else:
-        leagues = frozenset(code.strip() for code in args.leagues.split(",") if code.strip())
-        # A missing file would be created empty by SQLite; treat it as "no history".
-        exists = args.db_path.is_file()
-        loaded = asyncio.run(load_history(args.db_path, leagues)) if exists else EMPTY
+    try:
+        loaded = load(args, today or datetime.now(UTC).date())
+    except ModelInputError as exc:
+        logger.error("backtest_aborted", reason=str(exc))
+        return EXIT_NOTHING_TO_EVALUATE
     if not loaded.batch.fixtures:
         logger.error("backtest_aborted", reason=NO_HISTORY_MESSAGE, db_path=str(args.db_path))
+        return EXIT_NOTHING_TO_EVALUATE
+    problem = holdout_problem(args, loaded)
+    if problem is not None:
+        logger.error("backtest_aborted", reason=problem)
         return EXIT_NOTHING_TO_EVALUATE
     try:
         result = run_experiment(
