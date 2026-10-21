@@ -22,9 +22,9 @@ from operator import itemgetter
 from typing import Final
 
 from sqlalchemy import Table, TextClause, and_, bindparam, distinct, func, select, text, update
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db._sql import dialect_insert, table_of
 from app.db.fixture_state import OUTCOME_COLUMNS, FixtureOutcome, merge_outcome
 from app.db.mappers import (
     RowValues,
@@ -36,7 +36,6 @@ from app.db.mappers import (
 from app.db.schema import (
     SINGLE_MOMENT_KINDS,
     SINGLE_MOMENT_ODDS_SQL,
-    Base,
     FixtureRow,
     LeagueRow,
     OddsSnapshotRow,
@@ -235,7 +234,7 @@ async def _apply_results(
         values = {f"new_{name}": value for name, value in merged.values().items()}
         params.append({"target_id": entry.id, **values})
     if params:
-        table = _table_of(FixtureRow)
+        table = table_of(FixtureRow)
         statement = (
             update(table)
             .where(table.c.id == bindparam("target_id"))
@@ -260,7 +259,7 @@ async def _upsert_odds(
     series = _unique_by(
         [row for row in rows if row["kind"] not in SINGLE_MOMENT_KINDS], _SERIES_ODDS_IDENTITY
     )
-    table = _table_of(OddsSnapshotRow)
+    table = table_of(OddsSnapshotRow)
     await _upsert(
         session,
         table,
@@ -286,7 +285,7 @@ async def _upsert_refs(
     """Upsert rows keyed by (source, external_id) and return their ids."""
     if not rows:
         return {}
-    table = _table_of(model)
+    table = table_of(model)
     plan = _UpsertPlan(
         conflict_columns=("source", "external_id"),
         update_columns=tuple(name for name in rows[0] if name not in {"source", "external_id"}),
@@ -340,7 +339,7 @@ async def _upsert(
     """INSERT ... ON CONFLICT DO UPDATE for SQLite and PostgreSQL, in chunks."""
     if not rows:
         return
-    insert = _dialect_insert(session, table)
+    insert = dialect_insert(session, table)
     assignments: dict[str, object] = {name: insert.excluded[name] for name in plan.update_columns}
     if "updated_at" in table.c:
         assignments["updated_at"] = utcnow()
@@ -361,21 +360,3 @@ def _unique_by(rows: Sequence[RowValues], key: Sequence[str]) -> list[RowValues]
     key_of = itemgetter(*key)  # C-level key extraction: this runs once per price row
     unique = {key_of(row): row for row in rows}
     return list(unique.values())
-
-
-def _table_of(model: type[Base]) -> Table:
-    table = model.__table__
-    if not isinstance(table, Table):  # pragma: no cover - every model here maps one table
-        msg = f"{model.__name__} is not mapped to a single table"
-        raise TypeError(msg)
-    return table
-
-
-def _dialect_insert(session: AsyncSession, table: Table) -> sqlite.Insert | postgresql.Insert:
-    dialect = session.get_bind().dialect.name
-    if dialect == "sqlite":
-        return sqlite.insert(table)
-    if dialect == "postgresql":
-        return postgresql.insert(table)
-    msg = f"upsert is not implemented for the {dialect!r} dialect"
-    raise DataError(msg)

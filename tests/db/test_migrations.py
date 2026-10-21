@@ -131,3 +131,37 @@ def test_offline_mode_renders_sql(tmp_path: Path, capsys: pytest.CaptureFixture[
     sql = capsys.readouterr().out
     assert "CREATE TABLE fixtures" in sql
     assert not (tmp_path / "offline.db").exists()
+
+
+def test_0003_adds_signal_recommendation_columns_and_keeps_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "signals.db"
+    config = alembic_config(db_path)
+    command.upgrade(config, "0002")
+    with connect(db_path) as connection:
+        connection.executescript(
+            "INSERT INTO users (id, is_admin, timezone, created_at)"
+            " VALUES (1, 0, 'UTC', '2024-01-01');"
+            "INSERT INTO leagues (id, sport, source, external_id, name, created_at, updated_at)"
+            " VALUES (1, 'football', 's', 'E0', 'EPL', '2024-01-01', '2024-01-01');"
+            "INSERT INTO teams (id, sport, source, external_id, name, normalized_name,"
+            " created_at, updated_at) VALUES"
+            " (1, 'football', 's', 'a', 'A', 'a', '2024-01-01', '2024-01-01'),"
+            " (2, 'football', 's', 'b', 'B', 'b', '2024-01-01', '2024-01-01');"
+            "INSERT INTO fixtures (id, sport, source, external_id, league_id, season, kickoff_at,"
+            " home_team_id, away_team_id, status, created_at, updated_at)"
+            " VALUES (1, 'football', 's', 'f', 1, 2024,"
+            " '2024-01-01', 1, 2, 'scheduled', '2024-01-01', '2024-01-01');"
+            "INSERT INTO signals (id, user_id, fixture_id, market, selection, line, odds, p_model,"
+            " ev, confidence, stake_units, source, status, created_at, updated_at)"
+            " VALUES (1, 1, 1, '1x2', 'home', 0, 2.0, 0.55, 0.1, 'high', '1.0000', 'daily',"
+            " 'active', '2024-01-01', '2024-01-01');"
+        )
+    command.upgrade(config, "head")
+    with connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT recommended_at, min_prob, min_ev, odds_min, odds_max FROM signals"
+        ).fetchone()
+    assert row == (None, None, None, None, None)
+    command.downgrade(config, "0002")
+    with connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM signals").fetchone() == (1,)

@@ -170,7 +170,6 @@ DEP002 = [
     "google-genai",
     "matplotlib",
     "pandas",
-    "rapidfuzz",
     "scikit-learn",
     "tzdata",
 ]
