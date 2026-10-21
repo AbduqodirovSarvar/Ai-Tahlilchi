@@ -85,6 +85,11 @@ def text_update(user_id: int, text: str, update_id: int = 1) -> Update:
     return Update(update_id=update_id, message=message)
 
 
+def bind(update: Update, bot: Bot) -> Update:
+    """``update`` with every nested object mounted to ``bot`` (as aiogram does on receive)."""
+    return Update.model_validate(update.model_dump(), context={"bot": bot})
+
+
 def callback_update(
     user_id: int, data: str, message_id: int, text: str = "", update_id: int = 1
 ) -> Update:
@@ -164,12 +169,10 @@ class BotHarness:
         """``(message_id, callback_data)`` of the newest button whose text contains ``label``."""
         for message_id in sorted(self.markups, reverse=True):
             markup = self.markups[message_id]
-            if markup is None:
-                continue
-            for row in markup.inline_keyboard:
-                for button in row:
-                    if label in button.text and button.callback_data:
-                        return message_id, button.callback_data
+            buttons = [] if markup is None else [b for row in markup.inline_keyboard for b in row]
+            for button in buttons:
+                if label in button.text and button.callback_data:
+                    return message_id, button.callback_data
         msg = f"no button containing {label!r}"
         raise AssertionError(msg)
 

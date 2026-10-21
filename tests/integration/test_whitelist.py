@@ -21,6 +21,7 @@ from aiogram.types import (
 )
 
 from app.bot.dispatcher import build_dispatcher
+from app.services.fake import create_fake_services
 from tests.bot.fakes import ADMIN_ID, STRANGER_ID, RecordingSession, text_update
 
 WHITELIST = frozenset({ADMIN_ID})
@@ -102,7 +103,7 @@ def seen() -> list[TelegramObject]:
 @pytest.fixture
 def dispatcher(seen: list[TelegramObject]) -> Dispatcher:
     """The production dispatcher plus a probe router that records whatever reaches it."""
-    dispatcher = build_dispatcher(WHITELIST)
+    dispatcher = build_dispatcher(WHITELIST, create_fake_services())
     probe = Router(name="probe")
 
     async def record(event: TelegramObject) -> None:
@@ -118,6 +119,8 @@ def dispatcher(seen: list[TelegramObject]) -> Dispatcher:
     ):
         observer.register(record)
     dispatcher.include_router(probe)
+    # Put the probe first: the bot's own catch-all router would otherwise consume updates.
+    dispatcher.sub_routers.insert(0, dispatcher.sub_routers.pop())
     return dispatcher
 
 
@@ -187,7 +190,9 @@ async def test_admin_start_in_a_group_is_ignored(
     group = Chat(id=-100789, type=chat_type, title="Guruh")
     message = Message(message_id=1, date=NOW, chat=group, from_user=user(ADMIN_ID), text="/start")
 
-    await build_dispatcher(WHITELIST).feed_update(bot, Update(update_id=20, message=message))
+    await build_dispatcher(WHITELIST, create_fake_services()).feed_update(
+        bot, Update(update_id=20, message=message)
+    )
 
     assert session.requests == []
 
@@ -200,6 +205,8 @@ async def test_stranger_in_a_group_with_the_admin_is_still_ignored(
         message_id=2, date=NOW, chat=group, from_user=user(STRANGER_ID), text="/start"
     )
 
-    await build_dispatcher(WHITELIST).feed_update(bot, Update(update_id=21, message=message))
+    await build_dispatcher(WHITELIST, create_fake_services()).feed_update(
+        bot, Update(update_id=21, message=message)
+    )
 
     assert session.requests == []

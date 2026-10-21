@@ -120,8 +120,8 @@ async def test_handler_crash_is_reported_and_logged(
         raise RuntimeError(message.text)
 
     # Routers are matched in order; put the crashing one before the catch-all.
-    dispatcher.sub_routers.insert(0, crashing)
-    crashing._parent_router = dispatcher
+    dispatcher.include_router(crashing)
+    dispatcher.sub_routers.insert(0, dispatcher.sub_routers.pop())
 
     await dispatcher.feed_update(bot, text_update(ADMIN_ID, "boom", update_id=77))
 
