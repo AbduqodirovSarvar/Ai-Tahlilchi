@@ -270,14 +270,15 @@ def create_api_football_client(
     *,
     daily_limit: int = FREE_PLAN_DAILY_LIMIT,
     manual_reserve_share: float = DEFAULT_MANUAL_RESERVE_SHARE,
+    config: ProviderConfig = API_FOOTBALL_CONFIG,
 ) -> tuple[ApiFootballClient, httpx.AsyncClient]:
     """Production wiring: the endpoint client and the HTTP client the caller must close."""
-    http = create_http_client(API_FOOTBALL_CONFIG, api_key)
+    http = create_http_client(config, api_key)
     quota = QuotaGuard(
         store,
         QuotaPolicy(daily_limit=daily_limit, manual_reserve_share=manual_reserve_share),
         provider=PROVIDER,
         sport=QUOTA_SPORT,
     )
-    api = ApiClient(API_FOOTBALL_CONFIG, http=http, quota=quota, cache=TtlCache())
+    api = ApiClient(config, http=http, quota=quota, cache=TtlCache())
     return ApiFootballClient(api), http
