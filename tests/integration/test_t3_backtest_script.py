@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from types import ModuleType
 from typing import Final
@@ -129,6 +130,9 @@ def test_synthetic_report_is_reproducible_and_records_seed_hash_and_commit(
     assert without_timestamp(reports[0]) == without_timestamp(reports[1])
 
 
+SEASON_2026_IN_PROGRESS = date(2026, 10, 21)
+
+
 def test_a_season_still_in_progress_is_not_the_default_holdout(
     backtest: ModuleType, migrated_db: Path, tmp_path: Path
 ) -> None:
@@ -147,8 +151,11 @@ def test_a_season_still_in_progress_is_not_the_default_holdout(
     )
     asyncio.run(_store(migrated_db, in_progress))
     out = tmp_path / "out"
+    # Pin "today" inside season 2026 so the test does not change meaning once the real
+    # calendar passes the end of that season.
     code = backtest.main(
-        ["--db-path", str(migrated_db), "--out-dir", str(out), "--label", "db", *TINY_RUN]
+        ["--db-path", str(migrated_db), "--out-dir", str(out), "--label", "db", *TINY_RUN],
+        today=SEASON_2026_IN_PROGRESS,
     )
     assert code == 0
     (report,) = out.glob("*-db.md")
