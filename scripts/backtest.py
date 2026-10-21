@@ -312,6 +312,12 @@ def efficiency_note(result: ExperimentResult) -> str:
     """Sanity verdict for an efficient market: ROI must be consistent with the closing EV."""
     summary = result.holdout.summary
     expected, interval = summary.mean_closing_ev, summary.roi_ci
+    if result.chosen.weight == 0.0:
+        return (
+            "Sanity tekshiruvi (samarali bozor): validatsiya sof bozorni (w = 0) tanladi va "
+            "hold-out da stavka qo'yilmadi — samarali bozorda kutilgan to'g'ri natija "
+            "(DC bozorga ma'lumot qo'shmaydi, bozor narxida EV doim manfiy)."
+        )
     if expected is None or interval is None or summary.mean_clv is None:
         return "Sanity tekshiruvi: hold-out da signal yetarli emas."
     consistent = "ha" if interval.contains(expected) else "YO'Q"

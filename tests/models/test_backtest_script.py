@@ -182,6 +182,18 @@ def test_synthetic_mode_writes_report_with_sanity_note(script: ModuleType, tmp_p
     assert "Haqiqiy ma'lumotdagi F3" in text
     assert "Sanity tekshiruvi" in text
     assert "synthetic.teams_per_league | `6`" in text
+    assert "## F3 darvozasi (hold-out, qaror #11)" in text
+
+
+def test_pure_market_choice_is_explained(script: ModuleType, tmp_path: Path) -> None:
+    tiny = ["--synthetic-leagues", "1", "--synthetic-teams", "6", "--synthetic-seasons", "3"]
+    run = ["--xis", "0.0065", "--weights", "0", "--min-evs", "0.0", "--min-probs", "0.3"]
+    run += ["--refit-days", "28", "--resamples", "50"]
+    assert script.main(["--synthetic", *tiny, "--out-dir", str(tmp_path), *run]) == 0
+    (report,) = tmp_path.glob("*-synthetic.md")
+    text = report.read_text(encoding="utf-8")
+    assert "sof bozorni (w = 0) tanladi" in text
+    assert "Chegaraviy w = 0" in text
 
 
 def test_float_list_parsing(script: ModuleType) -> None:
