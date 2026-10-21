@@ -1254,8 +1254,11 @@ class CatalogService(Protocol):
         """
         ...
 
-    async def list_fixtures(self, request: FixtureListRequest) -> FixturePage:
-        """A page of fixtures (a page past the end is empty, not an error).
+    async def list_fixtures(self, user_id: int, request: FixtureListRequest) -> FixturePage:
+        """A page of fixtures in the user's time zone; in-play matches are left out.
+
+        A page past the end is empty, not an error. When both ``league_ids`` and
+        ``team_ids`` are given, a fixture matches either.
 
         Raises:
             ValidationFailedError: the window ends beyond the horizon.
