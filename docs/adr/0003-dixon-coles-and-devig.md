@@ -38,7 +38,25 @@ P(X = x, Y = y) = τ(x, y; λ, μ, ρ) · Pois(x; λ) · Pois(y; μ)
 
 **Identifikatsiya.** `Σ attack = Σ defence = 0` parametrlash orqali **aniq** bajariladi: optimizator `n−1` erkin parametrni ko'radi, oxirgisi `−Σ(qolganlar)`. Umumiy daraja `intercept` da. Bundan tashqari jamoalar grafi bog'liq bo'lishi kerak: bir-biri bilan hech o'ynamagan guruhlar (masalan, ikki liga aralashtirilgan) nisbiy kuchini aniqlab bo'lmaydi, bu `ModelInputError` beradi. Model **har liga uchun alohida** fit qilinadi. Kuzatuvlar soni (`2 × o'yinlar`) parametrlar sonidan kam bo'lsa ham xato.
 
-**Optimizatsiya.** L-BFGS-B, **analitik gradient** (`∂ℓ/∂log λ = x − λ + (∂τ/∂log λ)/τ`, so'ng `bincount` bilan jamoalarga zanjir qoidasi; test: `check_grad` xatosi < 1e-5), chegaralar: kuchlar `±4` (log), `intercept ∈ [−5, 3]`, `home_advantage ∈ ±1.5`, `ρ ∈ ±0.5`. Chegaralar real ligalarda faol bo'lmaydi, lekin degenerat jamoani (masalan, hech gol urmagan) `−∞` ga ketishdan saqlaydi (test bor). Chiziqli qidiruv `τ ≤ 0` nuqtaga tushsa, `τ` `1e-12` ga qisiladi (log to'siq), optimumda bu holat bo'lmaydi. `result.success` yolg'on yoki parametrlar cheksiz bo'lsa, `ModelFitError` (sabab va iteratsiyalar soni bilan). 20 jamoa × 8 mavsum (3040 o'yin) ≈ 20 ms.
+**Optimizatsiya.** L-BFGS-B, **analitik gradient** (`∂ℓ/∂log λ = x − λ + (∂τ/∂log λ)/τ`, so'ng `bincount` bilan jamoalarga zanjir qoidasi; test: `check_grad` xatosi < 1e-5), chegaralar: kuchlar `±4` (log), `intercept ∈ [−5, 3]`, `home_advantage ∈ ±1.5`, `ρ ∈ ±0.5`. Chegaralar real ligalarda faol bo'lmaydi, lekin degenerat jamoani (masalan, hech gol urmagan) `−∞` ga ketishdan saqlaydi (test bor). Chiziqli qidiruv `τ ≤ 0` nuqtaga tushsa, `τ` `1e-12` ga qisiladi (log to'siq), optimumda bu holat bo'lmaydi.
+
+**Eskirgan ma'lumot va konvergensiya** (T2 sharhidan keyin). Ko'tarilish va tushish bo'lgan uzun tarixda yillar oldin tushib ketgan jamoalarning og'irligi ~1e-6 bo'lib qoladi. Ular deyarli tekis yo'nalishlar hosil qiladi, natijada L-BFGS-B qat'iy `gtol` ga yetmay iteratsiya limitida to'xtardi (sharhchi: 6 mavsum, ξ = 0.0065 da 30 fitdan 29 tasi `ModelFitError`). Ikki chora ko'rildi:
+1. **Fitdan oldin olib tashlash:** nisbiy vaqt og'irligi `< 1e-4` bo'lgan o'yinlar, so'ng umumiy og'irligi eng og'ir jamoanikining `< 1e-3` qismi bo'lgan jamoalar (va ularning o'yinlari). Bunday jamoa modelda yo'q bo'ladi va so'ralsa `UnknownTeamError` beradi. Bu to'g'ri xatti-harakat: ma'lumoti eskirgan. `n_matches` ishlatilgan o'yinlar sonini bildiradi.
+2. **Statsionarlik bo'yicha qabul qilish:** optimizator limitda to'xtasa ham, chegaraga proyeksiya qilingan gradient normasi (maksimum, og'irlik birligiga) `≤ 1e-5` bo'lsa, nuqta qabul qilinadi. Jamoa bo'yicha egrilik ~0.05 bo'lgani uchun bu parametr xatosini ~2e-4 (log) bilan cheklaydi; kuchning standart xatosi ~0.05. Aks holda `ModelFitError` (proyeksiyalangan gradient, iteratsiyalar va sabab bilan). `DixonColesModel` diagnostikani saqlaydi: `converged` (optimizatorning qat'iy mezoni), `termination`, `projected_gradient`. Bular tenglik solishtirishiga kirmaydi.
+
+O'lchovlar (shu mashina, Windows; 10 seed, har fit 3 marta ishga tushirilib eng yaxshisi olingan):
+- Sharhchi repro'si (bitta mavsum bitta sanada) bo'yicha: faqat 1-chora bilan 70 fitdan 0 tasi muvaffaqiyatsiz va hammasi qat'iy konvergensiya bilan tugadi; faqat 2-chora bilan 30 dan 1 tasi muvaffaqiyatsiz. Demak 1-chora asosiy, 2-chora zaxira.
+- Regressiya testlari (6 mavsum ξ = 0.0065 va 12 mavsum ξ = 0.003) tuzatishdan oldin `ModelFitError` berishi tekshirilgan.
+
+| Ma'lumot | ξ (1/kun) | Median | Maksimum |
+|---|---|---|---|
+| 20 jamoa, 3040 o'yin, kuniga 10 o'yin (≈ 300 kunlik tarix, test ligasi) | 0 … 0.0065 | 0.02–0.03 s | 0.04 s |
+| Ko'tarilish/tushish, 6 mavsum (2280 o'yin) | 0.0065 | 0.07 s | 0.10 s |
+| Ko'tarilish/tushish, 8 mavsum (3040 o'yin) | 0.003 | 0.18 s | 0.32 s |
+| Ko'tarilish/tushish, 12 mavsum (4560 o'yin) | 0.003 | 0.22 s | 0.41 s |
+| Ko'tarilish/tushish, 12 mavsum (4560 o'yin) | 0.0019 | 0.20 s | 0.28 s |
+
+Avvalgi "≈ 20 ms" bahosi faqat qisqa tarixli test ligasiga tegishli edi va optimistik bo'lib chiqdi. Sharhchi tuzatishdan oldin boshqa sozlamada median 0.27 s, ξ = 0.003 da 0.77 s va ko'tarilish bilan maksimum 1.8 s o'lchagan. Backtest uchun reja: har bir fit 0.5 s gacha deb hisoblansin.
 
 **Ma'lumot sizib chiqishi.** `as_of` **eksklyuziv**: `match_date >= as_of` bo'lgan o'yin tashlab yuborilmaydi, balki xato beradi. Walk-forward'da bunday o'yin look-ahead xatosidir va jim o'tib ketmasligi kerak. Sanalar `datetime.date` (`datetime` emas: aralashtirish kun arifmetikasini buzadi).
 
@@ -48,7 +66,7 @@ P(X = x, Y = y) = τ(x, y; λ, μ, ρ) · Pois(x; λ) · Pois(y; μ)
 
 ## 3. Hisob matritsasi va bozorlar
 - Matritsa `m[i, j]`, `i, j ≤ N`. `N` avtomatik: kamida 10, Poisson dumi `P(X > N) < 1e-10` bo'lguncha oshiriladi (maksimum 50). So'ng DC tuzatish va **normallash** (`m / Σm`): bozor ehtimolliklari doim 1 ga teng bo'ladi, kesilgan dum yo'qolmaydi. Poisson log-pmf `gammaln` orqali (katta λ da ham barqaror).
-- 1X2: diagonal ostida, ustida va diagonal; ikki natija (1X, 12, X2); BTTS `1 − P(x=0 yoki y=0)`; eng ehtimolli N ta hisob (teng bo'lsa kam gol birinchi).
+- 1X2: diagonal ostida, ustida va diagonal; ikki natija (1X, 12, X2); BTTS `1 − P(x=0 yoki y=0)`; eng ehtimolli N ta hisob (ehtimolliklar teng bo'lsa: avval jami gol kami, so'ng uy gollari kami).
 - **Osiyo chiziqlari** (total va fora): margin = `jami − chiziq` (over), `chiziq − jami` (under), `(uy − mehmon) + fora` (uy). Chiziq 0.25 ga karrali. Butun/yarim chiziq: `> 0` yutuq, `= 0` qaytarish (push), `< 0` yutqazish. Chorak chiziq (2.25, −0.75) stavkaning yarmi qo'shni ikki chiziqqa bo'linadi: margin `+0.25` → yarim yutuq, `−0.25` → yarim yutqazish. Natija besh ehtimollik: `win, half_win, push, half_loss, loss`. Tekshiruv (property test): chorak chiziq EV = ikki yarim chiziq EV larining o'rtachasi.
 - Mustaqil orakullar: ρ = 0 da `scipy.stats.skellam` (1X2, fora), `poisson(λ+μ)` (totallar), `(1−e^−λ)(1−e^−μ)` (BTTS).
 
@@ -66,5 +84,5 @@ P(X = x, Y = y) = τ(x, y; λ, μ, ρ) · Pois(x; λ) · Pois(y; μ)
 
 ## Oqibatlar
 - `ξ`, ansambl `w` va EV chegarasi backtestda tanlanadi (F3.7); bu ADR faqat formulalarni qotiradi.
-- `scipy` uchun tip stub'lari (`scipy-stubs`) lock-faylda yo'q: scipy importlari `# type: ignore[import-untyped]` bilan belgilangan va qaytgan qiymatlar `float(...)` bilan aniq tiplanadi. infra-engineer'ga `scipy-stubs` ni dev bog'liqlikka qo'shish taklif qilingan.
+- `scipy-stubs` dev bog'liqlik sifatida qo'shilgan (orkestr ruxsati bilan, T2 sharhi): scipy chaqiruvlari `mypy --strict` ostida `type: ignore` siz tekshiriladi.
 - Model funksiyalari sinxron va sof; pipeline ularni `asyncio.to_thread` orqali chaqiradi.
