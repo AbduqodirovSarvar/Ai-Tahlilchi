@@ -24,6 +24,7 @@ from app.sports.history.football_data import (
     LEAGUES,
     ParsedSeason,
     RowError,
+    _expand_two_digit_year,
     decode_csv,
     league_for,
     parse_date,
@@ -243,6 +244,13 @@ def test_parse_date_formats(text: str, season: int, expected: date) -> None:
 def test_parse_date_rejects_other_text(text: str) -> None:
     with pytest.raises(RowError):
         parse_date(text, season=2024)
+
+
+@pytest.mark.parametrize(
+    ("two_digits", "season", "year"), [(99, 2001, 1999), (1, 1999, 2001), (24, 2024, 2024)]
+)
+def test_two_digit_year_takes_the_nearest_century(two_digits: int, season: int, year: int) -> None:
+    assert _expand_two_digit_year(two_digits, season) == year
 
 
 @pytest.mark.parametrize("text", ["16/08/2023", "01/10/2025", "16/08/14"])

@@ -178,11 +178,6 @@ def test_reimport_after_score_and_price_correction_updates_in_place(
     assert {("home", -0.75, 1.99), ("home", -0.5, 1.9)} <= closing_handicap
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T2 F-1: a kick-off time correction re-keys every snapshot (taken_at) and "
-    "keeps the old ones, so the fixture ends up with two closing prices per selection",
-)
 def test_reimport_after_kickoff_time_correction_does_not_duplicate_odds(
     workspace: ImportWorkspace,
 ) -> None:

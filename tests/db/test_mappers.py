@@ -3,7 +3,7 @@
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -87,7 +87,9 @@ async def test_scheduled_fixture_has_no_result(db_session: AsyncSession) -> None
 
 async def test_corrupt_row_raises_instead_of_leaking(db_session: AsyncSession) -> None:
     await upsert_batch(
-        db_session, HistoryBatch(fixtures=(make_fixture(status=FixtureStatus.FINISHED),))
+        db_session, HistoryBatch(fixtures=(make_fixture(status=FixtureStatus.SCHEDULED),))
     )
+    # Written behind the repository's back: the mapper must refuse it, not pass it on.
+    await db_session.execute(update(FixtureRow).values(status=FixtureStatus.FINISHED))
     with pytest.raises(DomainValidationError, match="needs both scores"):
         result_from_row(await load_fixture(db_session))
