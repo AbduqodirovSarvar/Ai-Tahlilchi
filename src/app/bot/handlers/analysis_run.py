@@ -73,7 +73,7 @@ async def run_analysis(session: WizardSession) -> None:
     await session.answer()
     await session.state.set_state(AnalysisFlow.running)
     wizard_message = session.message
-    summary = texts.WIZARD_CONFIRM.split("\n", 1)[0].format(
+    summary = texts.WIZARD_RUN_SUMMARY.format(
         **summary_fields(draft, window_label(query.dates.resolve(session.ctx.today)))
     )
     await edit_html(wizard_message, f"{summary}\n{texts.WIZARD_STARTED}")

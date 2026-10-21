@@ -110,11 +110,5 @@ class SettingsCb(CallbackData, prefix="st"):
     index: int = 0
 
 
-class MenuCb(CallbackData, prefix="mn"):
-    """Inline shortcuts back to a menu section (``settings``)."""
-
-    section: str
-
-
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""

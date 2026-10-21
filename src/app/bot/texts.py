@@ -289,7 +289,6 @@ CALENDAR_PICK_END: Final = (
     "📅 Boshlanish: <b>{start}</b>\n<b>Tugash sanasini</b> tanlang (shu kunni qayta bosing — "
     "bir kunlik oraliq):"
 )
-CALENDAR_OUT_OF_RANGE: Final = "Bu sana tanlab bo'lmaydi"
 WIZARD_SPORT: Final = "🏅 <b>2/7 · Sport turi</b>"
 WIZARD_PROBABILITY: Final = (
     "🎯 <b>3/7 · Minimal o'tish ehtimolligi</b>\nStandart (sozlamalardan): {default}"

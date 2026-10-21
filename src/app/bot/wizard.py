@@ -5,7 +5,7 @@ text, then ask :func:`render` for the next :class:`Screen` and display it. Rende
 call read-only services (leagues, fixture pages, cost estimate), never mutating ones.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Final
@@ -49,8 +49,6 @@ from app.services.interfaces import (
     SportOption,
     TeamOption,
 )
-
-type Clock = Callable[[], datetime]
 
 FIXTURE_PAGE_SIZE: Final = 8
 TEAM_CANDIDATES: Final = 5
