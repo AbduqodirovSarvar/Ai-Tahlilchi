@@ -42,15 +42,15 @@
 - [ ] F2.5 Futbol adapteri
 - [ ] F2.6 Jamoa nomlarini normallashtirish va qidiruv
 - [ ] F2.8 Ma'lumotlar qatlami testlari
-- [ ] F3.1 De-vig (proporsional, Shin)
-- [ ] F3.2 Dixon-Coles modeli va bozorlar
+- [x] F3.1 De-vig (proporsional, Shin, power): `models/devig.py` (T2, quant-modeler; [ADR 0003](adr/0003-dixon-coles-and-devig.md))
+- [x] F3.2 Dixon-Coles modeli va bozorlar: `models/poisson.py`, `models/score_markets.py`, `models/asian.py` (T2: primitivlar bilan sof yadro; domen turlariga adapterlar T3 da)
 - [ ] F3.3 Bozor modeli
 - [ ] F3.4 Ansambl
-- [ ] F3.5 EV va staking
+- [x] F3.5 EV va staking: `models/ev.py`, `models/staking.py` (Kelly 1/4, maksimal 2%, flat; Osiyo chiziqlari uchun ham)
 - [ ] F3.6 Ishonch darajasi
 - [ ] F3.7 Walk-forward backtest
 - [ ] F3.8 Backtest hisoboti
-- [ ] F3.9 Model unit testlari
+- [~] F3.9 Model unit testlari: F3.1, F3.2, F3.5 uchun tayyor (orakullar, hypothesis, sintetik tiklash, sonli barqarorlik; `src/app/models` qamrovi 99.8%). F3.3, F3.4, F3.6 va backtest leakage testi T3 da
 - [ ] 🚦 F3 darvozasi
 - [ ] F6.1 Bot karkasi: routerlar, middleware
 - [ ] F6.2 Asosiy menyu, `/start`, `/yordam`

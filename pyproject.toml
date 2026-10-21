@@ -41,6 +41,7 @@ dev = [
     "pytest-cov>=7.1",
     "respx>=0.23",
     "ruff>=0.17",
+    "scipy-stubs>=1.18.1.1",
 ]
 
 [build-system]
@@ -165,11 +166,9 @@ DEP002 = [
     "apscheduler",
     "google-genai",
     "matplotlib",
-    "numpy",
     "pandas",
     "rapidfuzz",
     "scikit-learn",
-    "scipy",
     "tzdata",
 ]
 # DEP004 (dev dependency in non-test code): the CI coverage gate script uses coverage.
