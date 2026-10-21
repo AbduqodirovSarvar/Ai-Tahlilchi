@@ -159,6 +159,10 @@ class ApiClient:
         """Whether ``path``+``params`` would be answered from cache (costs nothing)."""
         return self._cache.get(cache_key(path, params)) is not None
 
+    def invalidate(self, path: str, params: QueryParams) -> None:
+        """Forget a cached body (e.g. one that turned out to carry provider errors)."""
+        self._cache.discard(cache_key(path, params))
+
     async def get_json(
         self,
         path: str,

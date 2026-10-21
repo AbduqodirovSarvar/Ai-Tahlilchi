@@ -135,6 +135,19 @@ async def test_errors_in_body_raise(
     assert field in error.value.errors
 
 
+async def test_error_responses_are_not_cached(harness: Harness, router: respx.MockRouter) -> None:
+    route = router.get("/fixtures").mock(
+        side_effect=[
+            httpx.Response(200, json={"errors": {"rateLimit": "Too many requests"}}),
+            httpx.Response(200, json=load("fixtures_empty.json")),
+        ]
+    )
+    with pytest.raises(ApiFootballError, match="rateLimit"):
+        await harness.football.fixtures_by_date(date(2024, 10, 26), purpose=AUTO)
+    assert await harness.football.fixtures_by_date(date(2024, 10, 26), purpose=AUTO) == []
+    assert route.call_count == 2
+
+
 async def test_error_list_form_is_reported(harness: Harness, router: respx.MockRouter) -> None:
     router.get("/fixtures").respond(json={"errors": ["bad parameter"], "response": []})
     with pytest.raises(ApiFootballError, match="bad parameter"):

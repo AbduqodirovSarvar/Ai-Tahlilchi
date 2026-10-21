@@ -203,6 +203,8 @@ class ApiFootballClient:
             msg = f"{PROVIDER} {endpoint}: unexpected response format ({exc.error_count()} errors)"
             raise ExternalServiceError(msg) from exc
         if envelope.error_messages:
+            # An error body (rate limit, plan, bad key) must not be served from cache.
+            self._api.invalidate(endpoint, params)
             raise ApiFootballError(endpoint, envelope.error_messages)
         return envelope
 

@@ -64,6 +64,10 @@ class TtlCache[V]:
         while len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
 
+    def discard(self, key: str) -> None:
+        """Drop one entry if present."""
+        self._entries.pop(key, None)
+
     def clear(self) -> None:
         """Drop every entry."""
         self._entries.clear()
