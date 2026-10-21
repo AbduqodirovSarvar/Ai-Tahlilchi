@@ -6,7 +6,7 @@ HTML-escaped here; templates in :mod:`app.bot.texts` are trusted HTML.
 
 import html
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -484,21 +484,37 @@ def _split_long_line(line: str, limit: int) -> list[str]:
     """Cut one over-long line between atoms; tags open at a cut are closed and reopened.
 
     Plain text that happens to contain ``&`` or ``<`` was escaped upstream, so an unescaped
-    ``&...;`` here is always a whole entity.
+    ``&...;`` here is always a whole entity. Pathological input (an atom or tag overhead
+    that cannot fit in half a message) falls back to plain cutting so the limit always holds.
     """
     chunks: list[str] = []
     current = ""
     open_tags: list[tuple[str, str]] = []  # (name, full opening tag)
-    for atom in _HTML_ATOM.findall(line):
+    for atom in _atoms(line, limit):
         after = _after(open_tags, atom)
-        closers = "".join(f"</{name}>" for name, _ in reversed(after))
+        closers = _close(after)
+        if (len(_reopen(after)) + len(closers)) * 2 > limit:
+            after, closers = [], ""
         if len(current) + len(atom) + len(closers) > limit and current != _reopen(open_tags):
-            chunks.append(current + "".join(f"</{name}>" for name, _ in reversed(open_tags)))
+            chunks.append(current + _close(open_tags))
             current = _reopen(open_tags)
         current += atom
         open_tags = after
     chunks.append(current)
     return chunks
+
+
+def _atoms(line: str, limit: int) -> Iterator[str]:
+    """Tags, entities and characters of ``line``; a piece wider than a message is split."""
+    for atom in _HTML_ATOM.findall(line):
+        if len(atom) * 2 > limit:
+            yield from atom
+        else:
+            yield atom
+
+
+def _close(open_tags: list[tuple[str, str]]) -> str:
+    return "".join(f"</{name}>" for name, _ in reversed(open_tags))
 
 
 def _reopen(open_tags: list[tuple[str, str]]) -> str:

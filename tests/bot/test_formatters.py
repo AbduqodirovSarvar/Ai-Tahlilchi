@@ -27,8 +27,8 @@ from app.bot.formatters import (
     result_page,
     selection_label,
     split_message,
-    threshold_percent,
     sports_label,
+    threshold_percent,
     validation_message,
     window_label,
 )

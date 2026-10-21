@@ -103,11 +103,17 @@ class ResultsCb(CallbackData, prefix="rp"):
 
 
 class SettingsCb(CallbackData, prefix="st"):
-    """Settings: ``open`` a field editor, ``set`` a preset (index), ``toggle``, ``input``."""
+    """Settings: ``open`` a field editor, ``set`` a preset (index), ``toggle``, ``input``.
+
+    ``toggle`` names its item by ``key`` (enum value, or a short hash of a league id with its
+    ``index``) instead of a bare position, so a list that changed since the keyboard was
+    drawn can never toggle a different item.
+    """
 
     field: str
     action: str = "open"
     index: int = 0
+    key: str = ""
 
 
 class NoopCb(CallbackData, prefix="nx"):

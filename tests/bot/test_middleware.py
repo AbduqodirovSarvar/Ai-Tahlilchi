@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 
 from app.bot import texts
 from app.bot.draft import StaleDraftError
+from app.bot.messaging import answer_callback
 from app.bot.middleware import (
     ErrorMiddleware,
     RateLimitMiddleware,
@@ -168,6 +169,35 @@ async def test_error_middleware_reports_long_callback_errors_as_message(
 
     kinds = [type(m).__name__ for m in session.requests]
     assert kinds == ["AnswerCallbackQuery", "SendMessage"]
+
+
+async def test_error_after_the_callback_was_answered_still_reaches_the_user(
+    bot: Bot, session: RecordingSession
+) -> None:
+    """A handler that answered ("Saqlandi") and then failed: the alert would be rejected."""
+    update = bind(callback_update(ADMIN_ID, "x", 1), bot)
+    callback = update.callback_query
+    assert callback is not None
+
+    async def answers_then_fails(_event: Any, _data: dict[str, Any]) -> None:
+        await answer_callback(callback, texts.SETTINGS_SAVED)
+        raise NotFoundError("signal", 1)
+
+    assert await ErrorMiddleware()(answers_then_fails, callback, {}) is None
+
+    kinds = [type(m).__name__ for m in session.requests]
+    assert kinds == ["AnswerCallbackQuery", "SendMessage"]
+    assert session.requests[1].text == texts.NOT_FOUND  # type: ignore[attr-defined]
+
+
+async def test_error_before_any_answer_is_an_alert(bot: Bot, session: RecordingSession) -> None:
+    update = bind(callback_update(ADMIN_ID, "x", 1), bot)
+    assert update.callback_query is not None
+    handler = AsyncMock(side_effect=NotFoundError("signal", 1))
+
+    await ErrorMiddleware()(handler, update.callback_query, {})
+
+    assert [type(m).__name__ for m in session.requests] == ["AnswerCallbackQuery"]
 
 
 async def test_error_middleware_survives_telegram_failure(

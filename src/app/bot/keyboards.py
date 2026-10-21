@@ -1,6 +1,7 @@
 """Keyboard builders (pure: data in, aiogram markup out) and the preset choices they offer."""
 
 import calendar
+import zlib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, time, timedelta
@@ -458,13 +459,30 @@ def settings_choice_keyboard(
     return _markup([*_chunks(buttons, 3), *_settings_footer(name)])
 
 
+def toggle_key(field: str, value: str) -> str:
+    """What a multi-select button carries to name its item (see :class:`SettingsCb`).
+
+    Sports and markets are identified by their enum value; league ids can be up to 40
+    bytes, so a leagues button carries ``crc32(id)`` (plus its index) instead.
+    """
+    if field == "leagues":
+        return f"{zlib.crc32(value.encode()):08x}"
+    return value
+
+
 def settings_toggle_keyboard(
-    name: str, labels: Sequence[str], selected: Sequence[bool]
+    name: str, labels: Sequence[str], selected: Sequence[bool], values: Sequence[str]
 ) -> InlineKeyboardMarkup:
-    """Multi-select field (sports, markets, leagues), saved on every toggle."""
+    """Multi-select field (sports, markets, leagues), saved on every toggle.
+
+    ``values`` are the item ids (enum values or league ids) in the order of ``labels``.
+    """
     buttons = [
-        _button(_checked(label, on=on), SettingsCb(field=name, action="toggle", index=index))
-        for index, (label, on) in enumerate(zip(labels, selected, strict=True))
+        _button(
+            _checked(label, on=on),
+            SettingsCb(field=name, action="toggle", index=index, key=toggle_key(name, value)),
+        )
+        for index, (label, on, value) in enumerate(zip(labels, selected, values, strict=True))
     ]
     return _markup([*_chunks(buttons, 2), *_settings_footer(name)])
 

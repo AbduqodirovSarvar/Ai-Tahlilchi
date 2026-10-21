@@ -107,7 +107,11 @@ def test_calendar_keyboards_fit(offset: int, start_offset: int | None) -> None:
 )
 def test_settings_editors_fit(field: str, labels: list[str]) -> None:
     assert_fits(keyboards.settings_choice_keyboard(field, labels, current=0))
-    assert_fits(keyboards.settings_toggle_keyboard(field, labels, [True] * len(labels)))
+    assert_fits(
+        keyboards.settings_toggle_keyboard(
+            field, labels, [True] * len(labels), [f"v{i}" for i in range(len(labels))]
+        )
+    )
 
 
 def test_calendar_only_allows_days_within_horizon() -> None:
