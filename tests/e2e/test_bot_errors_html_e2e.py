@@ -243,11 +243,6 @@ def _chunks(methods: list[Any]) -> list[str]:
     return [method.text for method in methods if isinstance(method, SendMessage)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-3: split_message hard-cuts a single >4096-char line at an arbitrary offset, "
-    "splitting HTML entities such as &amp; (Telegram: can't parse entities)",
-)
 async def test_very_long_not_found_list_splits_into_valid_html(admin: Client) -> None:
     await admin.send(texts.MENU_ANALYSIS)
     for label in (

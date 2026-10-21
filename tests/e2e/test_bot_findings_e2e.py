@@ -56,11 +56,6 @@ async def test_reversed_typed_range_says_end_before_start(admin: Client) -> None
     assert shown(methods) == [texts.PARSE_REVERSED_RANGE]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-7: percents are displayed with 0 decimals: a typed EV 4.5% is shown as "
-    "'EV ≥ 4%' (and 62.5% as '62%') on the confirmation and in settings",
-)
 async def test_typed_fractional_percent_is_shown_as_typed(admin: Client) -> None:
     await admin.send(texts.MENU_ANALYSIS)
     await admin.press(texts.BTN_TODAY)

@@ -1,5 +1,6 @@
 """Snapshot-style tests of app.bot.formatters (cards, grouping, summaries, splitting)."""
 
+import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -26,6 +27,7 @@ from app.bot.formatters import (
     result_page,
     selection_label,
     split_message,
+    threshold_percent,
     sports_label,
     validation_message,
     window_label,
@@ -314,3 +316,45 @@ def test_card_with_every_flag_fits_one_message() -> None:
 
 def test_market_labels_cover_every_market() -> None:
     assert set(texts.MARKET_LABELS) == set(MarketType)
+
+
+@pytest.mark.parametrize(
+    ("fraction", "shown"),
+    [(0.625, "62.5%"), (0.045, "4.5%"), (0.055, "5.5%"), (0.07, "7%"), (0.6, "60%"), (0.0, "0%")],
+)
+def test_threshold_percent_keeps_what_the_user_typed(fraction: float, shown: str) -> None:
+    assert threshold_percent(fraction) == shown
+
+
+_ENTITY_OR_TAG = re.compile(r"<[^<>]*>|&#?\w{1,10};")
+
+
+def test_split_message_never_cuts_inside_an_entity() -> None:
+    line = ", ".join("A &amp; B &lt;x&gt;" for _ in range(60))
+    chunks = split_message(line, limit=100)
+
+    assert len(chunks) > 5
+    assert all(len(chunk) <= 100 for chunk in chunks)
+    assert "".join(chunks) == line
+    for chunk in chunks:
+        assert "&" not in _ENTITY_OR_TAG.sub("", chunk)
+
+
+def test_split_message_closes_and_reopens_tags_at_a_cut() -> None:
+    line = "<b>" + "word <i>it</i> " * 30 + "</b> tail"
+    chunks = split_message(line, limit=60)
+
+    assert len(chunks) > 3
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    for chunk in chunks:
+        assert chunk.count("<b>") == chunk.count("</b>")
+        assert chunk.count("<i>") == chunk.count("</i>")
+    plain = re.sub(r"</?[bi]>", "", "".join(chunks))
+    assert plain == re.sub(r"</?[bi]>", "", line)
+
+
+@given(st.text(alphabet="ab &;<>/bi#1", max_size=300), st.integers(12, 80))
+def test_split_message_entities_and_limit_hold_for_any_markup_soup(text: str, limit: int) -> None:
+    chunks = split_message(text, limit)
+
+    assert all(len(chunk) <= limit for chunk in chunks)

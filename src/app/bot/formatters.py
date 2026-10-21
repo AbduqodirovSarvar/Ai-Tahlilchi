@@ -5,6 +5,7 @@ HTML-escaped here; templates in :mod:`app.bot.texts` are trusted HTML.
 """
 
 import html
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -55,6 +56,15 @@ def percent(fraction: float, *, signed: bool = False, decimals: int = 0) -> str:
     value = fraction * PERCENT
     sign = "+" if signed and value > 0 else ""
     return f"{sign}{value:.{decimals}f}%"
+
+
+def threshold_percent(fraction: float) -> str:
+    """A threshold the user typed: ``0.625`` → ``62.5%``, ``0.07`` → ``7%``.
+
+    Fractions are kept (one decimal) so what the user entered is what they see; plain
+    ``percent`` would round ``4.5`` to ``4``.
+    """
+    return f"{round(fraction * PERCENT, 1):g}%"
 
 
 def odds(value: float) -> str:
@@ -364,8 +374,8 @@ def settings_values(settings: UserSettingsView, league_names: dict[str, str]) ->
         "leagues": leagues,
         "markets": markets_label(settings.markets),
         "max_signals": str(settings.max_signals),
-        "min_probability": percent(settings.min_probability),
-        "min_ev": percent(settings.min_ev, decimals=0),
+        "min_probability": threshold_percent(settings.min_probability),
+        "min_ev": threshold_percent(settings.min_ev),
         "odds": f"{odds(settings.odds_min)}{texts.RANGE_DASH}{odds(settings.odds_max)}",
         "risk": texts.RISK_LABELS[settings.risk_profile],
         "send_time": clock(settings.send_time),
@@ -442,7 +452,7 @@ def split_message(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
     """Split into chunks of at most ``limit`` characters, preferring line boundaries.
 
     Our HTML never spans lines, so cutting between lines keeps tags balanced. A single
-    over-long line is cut hard (only possible for pathological input).
+    over-long line is cut by :func:`_split_long_line`, which never breaks an entity or tag.
     """
     if len(text) <= limit:
         return [text]
@@ -455,14 +465,57 @@ def split_message(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
             continue
         if current:
             chunks.append(current)
-        rest = line
-        while len(rest) > limit:
-            chunks.append(rest[:limit])
-            rest = rest[limit:]
-        current = rest
+        if len(line) <= limit:
+            current = line
+            continue
+        *head, current = _split_long_line(line, limit)
+        chunks.extend(head)
     if current:
         chunks.append(current)
     return chunks
+
+
+_HTML_ATOM: Final = re.compile(r"<[^<>]*>|&#?\w{1,10};|.", re.DOTALL)
+"""A tag, an entity or one character: the smallest pieces a cut must not split."""
+_TAG_NAME: Final = re.compile(r"<(/?)([A-Za-z][\w-]*)")
+
+
+def _split_long_line(line: str, limit: int) -> list[str]:
+    """Cut one over-long line between atoms; tags open at a cut are closed and reopened.
+
+    Plain text that happens to contain ``&`` or ``<`` was escaped upstream, so an unescaped
+    ``&...;`` here is always a whole entity.
+    """
+    chunks: list[str] = []
+    current = ""
+    open_tags: list[tuple[str, str]] = []  # (name, full opening tag)
+    for atom in _HTML_ATOM.findall(line):
+        after = _after(open_tags, atom)
+        closers = "".join(f"</{name}>" for name, _ in reversed(after))
+        if len(current) + len(atom) + len(closers) > limit and current != _reopen(open_tags):
+            chunks.append(current + "".join(f"</{name}>" for name, _ in reversed(open_tags)))
+            current = _reopen(open_tags)
+        current += atom
+        open_tags = after
+    chunks.append(current)
+    return chunks
+
+
+def _reopen(open_tags: list[tuple[str, str]]) -> str:
+    return "".join(tag for _, tag in open_tags)
+
+
+def _after(open_tags: list[tuple[str, str]], atom: str) -> list[tuple[str, str]]:
+    """The open-tag stack once ``atom`` has been appended."""
+    match = _TAG_NAME.match(atom) if atom.startswith("<") else None
+    if match is None:
+        return open_tags
+    name = match.group(2).lower()
+    if not match.group(1):
+        return [*open_tags, (name, atom)]
+    if open_tags and open_tags[-1][0] == name:
+        return open_tags[:-1]
+    return open_tags
 
 
 def local_today(now: datetime, zone: ZoneInfo) -> date:

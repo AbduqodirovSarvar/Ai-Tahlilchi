@@ -20,9 +20,9 @@ from app.bot.formatters import (
     clock,
     escape,
     markets_label,
-    percent,
     short_date,
     sports_label,
+    threshold_percent,
     weekday_name,
     window_label,
 )
@@ -236,7 +236,7 @@ def _default(draft: WizardDraft, key: str, fallback: float) -> float:
 async def _probability(draft: WizardDraft, ctx: WizardContext) -> Screen:
     del ctx
     default = _default(draft, "min_probability", draft.min_probability)
-    text = texts.WIZARD_PROBABILITY.format(default=percent(default))
+    text = texts.WIZARD_PROBABILITY.format(default=threshold_percent(default))
     return Screen("probability", text, keyboards.probability_keyboard(default), draft)
 
 
@@ -256,7 +256,7 @@ async def _ev(draft: WizardDraft, ctx: WizardContext) -> Screen:
     del ctx
     default = _default(draft, "min_ev", draft.min_ev)
     text = texts.WIZARD_EV.format(
-        probability=percent(draft.min_probability), default=percent(default)
+        probability=threshold_percent(draft.min_probability), default=threshold_percent(default)
     )
     return Screen("ev", text, keyboards.ev_keyboard(default), draft)
 
@@ -384,8 +384,8 @@ def summary_fields(draft: WizardDraft, window: str) -> dict[str, str]:
     return {
         "window": window,
         "sports": sports_label(draft.sport_set),
-        "probability": percent(draft.min_probability),
-        "ev": percent(draft.min_ev),
+        "probability": threshold_percent(draft.min_probability),
+        "ev": threshold_percent(draft.min_ev),
         "scope": scope,
         "markets": markets_label(draft.market_set),
         "count": count,
