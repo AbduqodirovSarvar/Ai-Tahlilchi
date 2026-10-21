@@ -21,10 +21,10 @@ from typing import Final
 
 import numpy as np
 import numpy.typing as npt
-from scipy.optimize import minimize  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
-from scipy.sparse import coo_matrix  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
-from scipy.sparse.csgraph import connected_components  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
-from scipy.special import gammaln, pdtrc  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
+from scipy.optimize import minimize
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
+from scipy.special import gammaln, pdtrc
 
 from app.models.exceptions import ModelFitError, ModelInputError, UnknownTeamError
 
@@ -354,8 +354,8 @@ def _check_identifiable(matches: Sequence[MatchRecord], teams: tuple[str, ...]) 
         msg = f"{len(matches)} matches give fewer observations than {n_params} parameters"
         raise ModelInputError(msg)
     index = {team: position for position, team in enumerate(teams)}
-    rows = [index[m.home_team] for m in matches]
-    cols = [index[m.away_team] for m in matches]
+    rows = np.array([index[m.home_team] for m in matches], dtype=np.int64)
+    cols = np.array([index[m.away_team] for m in matches], dtype=np.int64)
     graph = coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n_teams, n_teams))
     n_components, _ = connected_components(graph, directed=False)
     if n_components > 1:

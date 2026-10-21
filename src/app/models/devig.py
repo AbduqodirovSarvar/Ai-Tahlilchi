@@ -20,7 +20,7 @@ from typing import Final
 
 import numpy as np
 import numpy.typing as npt
-from scipy.optimize import brentq  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
+from scipy.optimize import brentq
 
 from app.models._validation import check_market_odds
 

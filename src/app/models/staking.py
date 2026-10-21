@@ -9,7 +9,7 @@ import math
 from decimal import ROUND_DOWN, Decimal
 from typing import Final
 
-from scipy.optimize import brentq  # type: ignore[import-untyped]  # no scipy stubs in the lock (see report)
+from scipy.optimize import brentq
 
 from app.models._validation import check_odds
 from app.models.asian import AsianOutcomeProbabilities, settlement_returns
