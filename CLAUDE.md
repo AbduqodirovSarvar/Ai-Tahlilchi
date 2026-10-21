@@ -18,6 +18,7 @@ Python 3.13, `uv`, `aiogram 3`, `httpx` + `tenacity`, `SQLAlchemy 2` (async) + `
 
 ## Buyruqlar
 > Bu mashinada `uv` PATH da yo'q: barcha `uv ...` buyruqlari **`python -m uv ...`** shaklida ishga tushiriladi (masalan, `python -m uv run pytest`). CI va Docker da oddiy `uv` ishlatiladi.
+> Bu mashinada korporativ TLS proksi bor: yuklab olish kerak bo'lsa `UV_SYSTEM_CERTS=1` o'rnating; Docker build uchun ixtiyoriy `--secret id=ca_bundle` (README ga qarang). Sertifikatlarni repoga yozmang.
 
 ```
 uv sync                      # bog'liqliklar
