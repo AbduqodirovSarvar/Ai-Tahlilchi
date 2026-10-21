@@ -3,7 +3,7 @@ import math
 
 import numpy as np
 import pytest
-from hypothesis import example, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from app.models import (
@@ -65,6 +65,8 @@ def test_shin_recovers_true_probabilities_from_shin_prices(
     roots = [math.sqrt(insider_share * p + (1.0 - insider_share) * p * p) for p in truth]
     beta = sum(roots)
     odds = [1.0 / (beta * root) for root in roots]
+    # A heavy favourite with many insiders can get an implied probability >= 1: no market.
+    assume(all(price > 1.0 for price in odds))
     assert devig_shin(odds) == pytest.approx(tuple(truth), abs=1e-8)
     if insider_share > 1e-6:
         assert shin_insider_share(odds) == pytest.approx(insider_share, abs=1e-7)
