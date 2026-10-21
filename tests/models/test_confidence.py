@@ -147,3 +147,14 @@ def test_level_never_rises_when_inputs_get_worse(inputs: ConfidenceInputs) -> No
         min_team_matches=max(inputs.min_team_matches - 10, 0),
     )
     assert order.index(assess_confidence(worse).level) >= base
+
+
+@pytest.mark.parametrize(("market", "model"), [(0.35, 0.50), (0.10, 0.25), (0.70, 0.85)])
+def test_exactly_fifteen_points_is_not_a_sanity_case(market: float, model: float) -> None:
+    # Strict threshold on the gap rounded to 1e-9: float noise cannot flip the decision.
+    assessment = assess_confidence(
+        replace(IDEAL, model_probability=model, market_probability=market)
+    )
+    assert assessment.disagreement == 0.15
+    assert not assessment.sanity_flag
+    assert assessment.reasons == (ConfidenceReason.MODEL_MARKET_DISAGREEMENT,)

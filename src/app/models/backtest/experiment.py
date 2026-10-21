@@ -57,6 +57,8 @@ from app.models.market import DEFAULT_MARKET_MODEL, MarketModelConfig
 
 DEFAULT_SEED: Final = 20261021
 DEFAULT_MIN_VALIDATION_BETS: Final = 50
+# The ensemble with this weight is the de-vigged bet-time market alone.
+PURE_MARKET_WEIGHT: Final = 0.0
 _MIN_SEASONS: Final = 3
 
 
@@ -65,7 +67,8 @@ class GridSpec:
     """Values tried for each tuned parameter."""
 
     xis: tuple[float, ...] = (0.0, 0.0019, 0.0065)
-    weights: tuple[float, ...] = (0.25, 0.5, 0.75, 1.0)
+    # w = 0 is the pure-market baseline (decision #11); w = 1 the pure Dixon-Coles model.
+    weights: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
     min_evs: tuple[float, ...] = (0.0, 0.02, 0.05, 0.08)
     min_probabilities: tuple[float, ...] = (0.30, 0.45, 0.55)
 
@@ -167,11 +170,16 @@ class ChosenParameters:
     min_ev: float
     min_probability: float
     underpowered: bool
+    boundary_weight: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Evaluation:
-    """Results of one configuration on one season."""
+    """Results of one configuration on one season.
+
+    ``log_loss`` is the ensemble's mean log-loss over every partition market and
+    ``baseline_log_loss`` the same for the pure bet-time market (``w = 0``).
+    """
 
     season: int
     summary: BettingSummary
@@ -180,6 +188,8 @@ class Evaluation:
     by_league: Mapping[str, BettingSummary]
     by_market: Mapping[str, BettingSummary]
     bets: tuple[Bet, ...]
+    log_loss: float
+    baseline_log_loss: float
     predictions: int
     skipped: Mapping[SkipReason, int]
     fits: int
@@ -238,6 +248,7 @@ def evaluate(
     )
     bets = select_bets(candidates, config.bet_filter(chosen.min_ev, chosen.min_probability))
     samples = probability_samples(run.predictions, chosen.weight)
+    baseline = probability_samples(run.predictions, PURE_MARKET_WEIGHT)
 
     def summary(selected: Sequence[Bet]) -> BettingSummary:
         return summarize_bets(
@@ -252,6 +263,8 @@ def evaluate(
         by_league={name: summary(group) for name, group in _group(bets, _league_of).items()},
         by_market={name: summary(group) for name, group in _group(bets, _market_of).items()},
         bets=tuple(bets),
+        log_loss=mean_log_loss(samples, _ensemble_forecast),
+        baseline_log_loss=mean_log_loss(baseline, _ensemble_forecast),
         predictions=len(run.predictions),
         skipped=run.skipped,
         fits=run.fits,
@@ -306,6 +319,7 @@ def _choose(rows: Sequence[GridRow], config: ExperimentConfig) -> ChosenParamete
         min_ev=best.min_ev,
         min_probability=best.min_probability,
         underpowered=not powered,
+        boundary_weight=best.weight in {min(config.grid.weights), max(config.grid.weights)},
     )
 
 

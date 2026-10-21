@@ -49,8 +49,11 @@ class BettingSummary:
     """Returns of a set of bets under flat and fractional-Kelly staking.
 
     ROI is profit per unit staked (also called yield). ``kelly_bank_return`` is the Kelly
-    profit relative to the starting bank. CLV statistics cover bets with a closing price;
-    ``roi_at_closing`` re-prices the same bets at the bookmaker's closing odds.
+    profit relative to the starting bank. CLV statistics cover only bets whose market has
+    a closing price (an Asian line can move between opening and closing, leaving the bet
+    without one); ``n_without_closing`` and ``roi_without_closing`` (at the odds taken)
+    describe the excluded bets so the coverage is visible. ``roi_at_closing`` re-prices
+    the bets that have a closing quote at the bookmaker's closing odds.
     """
 
     n_bets: int
@@ -61,6 +64,8 @@ class BettingSummary:
     hit_rate: float
     max_drawdown: float
     n_clv: int
+    n_without_closing: int
+    roi_without_closing: float | None
     mean_clv: float | None
     clv_ci: Interval | None
     beat_close_rate: float | None
@@ -89,6 +94,7 @@ def summarize_bets(
     at_closing = [bet for bet in bets if bet.closing_profit is not None]
     closing_profit = np.array([bet.closing_profit for bet in at_closing], dtype=np.float64)
     closing_stake = np.array([bet.flat_stake for bet in at_closing], dtype=np.float64)
+    without = [bet for bet in bets if bet.clv is None]
     return BettingSummary(
         n_bets=len(bets),
         turnover=float(flat_stake.sum()),
@@ -98,6 +104,12 @@ def summarize_bets(
         hit_rate=float(np.mean(flat_profit > 0.0)) if bets else 0.0,
         max_drawdown=max_drawdown(flat_profit),
         n_clv=len(clv),
+        n_without_closing=len(without),
+        roi_without_closing=(
+            math.fsum(b.flat_profit for b in without) / math.fsum(b.flat_stake for b in without)
+            if without
+            else None
+        ),
         mean_clv=float(clv.mean()) if len(clv) else None,
         clv_ci=bootstrap_ratio_ci(clv, np.ones_like(clv), rng=rng, n_resamples=n_resamples),
         beat_close_rate=float(np.mean(clv > 0.0)) if len(clv) else None,

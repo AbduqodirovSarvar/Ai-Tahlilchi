@@ -13,7 +13,13 @@ from app.models.backtest.betting import (
     candidate_bets,
     select_bets,
 )
-from app.models.backtest.dataset import BacktestFixture, build_dataset, dataset_fingerprint
+from app.models.backtest.dataset import (
+    BacktestFixture,
+    build_dataset,
+    complete_seasons,
+    dataset_fingerprint,
+    season_end,
+)
 from app.models.backtest.experiment import (
     ChosenParameters,
     Evaluation,
@@ -39,7 +45,14 @@ from app.models.backtest.metrics import (
     score_table,
     summarize_bets,
 )
-from app.models.backtest.report import GateCheck, RunMetadata, gate_checks, render_report
+from app.models.backtest.report import (
+    GateCheck,
+    GateStatus,
+    RunMetadata,
+    gate_checks,
+    gate_passed,
+    render_report,
+)
 from app.models.backtest.synthetic import SyntheticConfig, generate_history
 from app.models.backtest.walk_forward import (
     FixturePrediction,
@@ -61,6 +74,7 @@ __all__ = [
     "ExperimentResult",
     "FixturePrediction",
     "GateCheck",
+    "GateStatus",
     "GridRow",
     "GridSpec",
     "Interval",
@@ -78,15 +92,18 @@ __all__ = [
     "build_dataset",
     "calibration_table",
     "candidate_bets",
+    "complete_seasons",
     "dataset_fingerprint",
     "evaluate",
     "gate_checks",
+    "gate_passed",
     "generate_history",
     "max_drawdown",
     "probability_samples",
     "render_report",
     "run_experiment",
     "score_table",
+    "season_end",
     "select_bets",
     "split_seasons",
     "summarize_bets",

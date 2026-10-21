@@ -50,7 +50,7 @@
 - [x] F3.5 EV va staking: `models/ev.py`, `models/staking.py` (Kelly 1/4, maksimal 2%, flat; Osiyo chiziqlari uchun ham); `asian_fair_odds` (T3)
 - [x] F3.6 Ishonch darajasi: `models/confidence.py` (Yuqori/O'rta/Past, sabab kodlari, > 15 p.p. sanity bayrog'i) (T3)
 - [x] F3.7 Walk-forward backtest: `app.models.backtest` (sof) + `scripts/backtest.py` (DB yoki `--synthetic`) (T3)
-- [~] F3.8 Backtest hisoboti: sintetik samarali bozorda [docs/backtest/2026-10-21-synthetic.md](backtest/2026-10-21-synthetic.md) (vosita tekshirildi: ustunlik yo'q, CLV ≈ −3%). **Haqiqiy ma'lumotdagi hisobot serverda** (qarorlar jurnali #7)
+- [~] F3.8 Backtest hisoboti: sintetik samarali bozorda, qaror #11 darvozasi bilan: [standart](backtest/2026-10-21-synthetic.md) (w = 0 tanlandi, stavka yo'q) va [diagnostika, w > 0](backtest/2026-10-21-synthetic-model-only.md) (ROI ahamiyatsiz, CLV −3.2% ❌). T3 fix: QA F-1…F-5 va sharh topilmalari tuzatildi. **Haqiqiy ma'lumotdagi hisobot serverda** (qarorlar jurnali #7)
 - [x] F3.9 Model unit testlari: adapterlar, bozor modeli, ansambl, ishonch, backtest (instrumentlangan leakage testlari, samarali bozor sanity testi, hypothesis); `src/app/models` qamrovi 99.7% (T3)
 - [ ] 🚦 F3 darvozasi: **kutilmoqda** — haqiqiy football-data tarixi bilan serverda `scripts/import_history.py` + `scripts/backtest.py` (#7)
 - [x] F6.1 Bot karkasi: routerlar (factory), middleware (whitelist, user konteksti, token-bucket rate limit, servis xatolari → o'zbekcha xabar), `Services` DI, `APP_SERVICES=fake` ([ADR 0006](adr/0006-bot-architecture.md)) (bot-engineer)

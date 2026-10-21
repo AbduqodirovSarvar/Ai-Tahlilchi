@@ -236,11 +236,6 @@ def test_future_data_never_changes_an_earlier_bet_or_the_selection(
     assert perturbed.holdout.bets != original.holdout.bets
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-3: prices labelled 'opening' are trusted even when taken after kickoff; "
-    "the newest snapshot wins, so a late re-sent price decides the bet",
-)
 def test_an_opening_price_taken_after_kickoff_is_not_used_for_the_bet() -> None:
     match = fixture()
     before_kickoff = {Selection.HOME: 2.10, Selection.DRAW: 3.40, Selection.AWAY: 3.60}

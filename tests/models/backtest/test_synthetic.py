@@ -11,18 +11,24 @@ from app.domain import HistoryBatch, Market, OddsKind, Selection
 from app.models import ModelInputError, devig_shin
 from app.models.backtest import (
     BetFilter,
+    ExperimentConfig,
+    GateStatus,
+    GridSpec,
     PricingConfig,
     StakingConfig,
     SyntheticConfig,
     WalkForwardConfig,
     build_dataset,
     candidate_bets,
+    gate_checks,
+    gate_passed,
     generate_history,
+    run_experiment,
     select_bets,
     summarize_bets,
     walk_forward,
 )
-from app.models.backtest.synthetic import round_robin, shin_prices
+from app.models.backtest.synthetic import _quotable_prices, round_robin, shin_prices
 from tests.models.backtest.conftest import SMALL
 
 # Larger than the shared fixture so the ROI interval is informative (~700 bets, ~3 s).
@@ -89,6 +95,21 @@ def test_shin_prices_reject_impossible_margins() -> None:
         shin_prices((0.5, 0.5), 5.0)
 
 
+def test_unquotable_markets_are_skipped_not_fatal() -> None:
+    # A near-certain favourite: the margin is unreachable in Shin's model.
+    extreme = {Selection.YES: 0.999, Selection.NO: 0.001}
+    assert _quotable_prices(extreme, 0.08) is None
+    # Rounds the favourite to odds 1.00.
+    assert _quotable_prices({Selection.YES: 0.997, Selection.NO: 0.003}, 0.01) is None
+    assert _quotable_prices({Selection.YES: 0.5, Selection.NO: 0.5}, 0.05) is not None
+    # Very unequal teams produce such matches; generation must still succeed.
+    lopsided = SyntheticConfig(
+        leagues=1, teams_per_league=6, seasons=1, strength_sd=1.2, home_advantage=0.8, seed=2
+    )
+    batch = generate_history(lopsided)
+    assert len(batch.fixtures) == 30
+
+
 @pytest.mark.parametrize(
     "change", [{"teams_per_league": 5}, {"teams_per_league": 2}, {"leagues": 0}, {"seasons": 0}]
 )
@@ -142,3 +163,32 @@ def test_backtest_finds_no_edge_on_an_efficient_market() -> None:
     # Nobody beats an efficient close: CLV is negative, positive only through odds rounding.
     assert summary.mean_clv < 0.0
     assert summary.beat_close_rate < 0.05
+
+
+# Forced pure-model betting on everything with value: as many bets as possible, so the gate
+# is not failed merely for lack of signals (the old point-estimate gate passed falsely here).
+FORCED_MODEL = ExperimentConfig(
+    grid=GridSpec(xis=(0.0065,), weights=(1.0,), min_evs=(0.0,), min_probabilities=(0.0,)),
+    refit_days=28,
+    odds_min=1.01,
+    odds_max=100.0,
+    n_resamples=300,
+    min_validation_bets=1,
+)
+
+
+@pytest.mark.parametrize("seed", [21, 22])
+def test_gate_never_passes_on_an_efficient_market(seed: int) -> None:
+    config = SyntheticConfig(
+        leagues=4, teams_per_league=12, seasons=3, first_season=2020, seed=seed
+    )
+    result = run_experiment(build_dataset(generate_history(config)), FORCED_MODEL)
+    checks = gate_checks(result.holdout, result.chosen)
+    assert result.holdout.summary.n_clv >= 500  # enough signals: the failure is statistical
+    assert not gate_passed(checks)
+    _, clv, _, leagues, baseline = checks
+    assert clv.status is GateStatus.FAILED  # mean CLV is negative: nobody beats the close
+    assert result.holdout.summary.mean_clv is not None
+    assert result.holdout.summary.mean_clv < 0.0
+    assert leagues.status is GateStatus.FAILED
+    assert baseline.status is GateStatus.FAILED  # the pure market has the better log-loss

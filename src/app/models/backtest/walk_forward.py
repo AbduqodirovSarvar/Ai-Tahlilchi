@@ -165,7 +165,8 @@ def _predict(
     team_matches = min(fit.team_matches[item.home], fit.team_matches[item.away])
     if team_matches < config.min_team_matches:
         return SkipReason.THIN_HISTORY
-    markets = [quote.market for quote in item.quotes if quote.kind is config.prediction_kind]
+    quotes = item.usable_quotes
+    markets = [quote.market for quote in quotes if quote.kind is config.prediction_kind]
     if not markets:
         return SkipReason.NO_PRICES
     try:
@@ -180,12 +181,10 @@ def _predict(
         model=MappingProxyType(model),
         market=MappingProxyType(
             fair_markets(
-                item.quotes, kind=config.prediction_kind, config=market_config, references=model
+                quotes, kind=config.prediction_kind, config=market_config, references=model
             )
         ),
         closing=MappingProxyType(
-            fair_markets(
-                item.quotes, kind=config.closing_kind, config=market_config, references=model
-            )
+            fair_markets(quotes, kind=config.closing_kind, config=market_config, references=model)
         ),
     )

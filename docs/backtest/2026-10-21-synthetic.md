@@ -1,17 +1,17 @@
 # Backtest hisoboti: synthetic
 
 > Bu **sintetik** ma'lumotdagi backtest: bozor ta'rifiga ko'ra samarali (narx = haqiqiy ehtimollik + marja), shuning uchun kutilgan natija ROI ~ -marja va ahamiyatli ustunlik yo'qligi. U backtest vositasini tekshiradi, modelni emas. **Haqiqiy ma'lumotdagi F3 darvozasi hali kutilmoqda** (qarorlar jurnali #7: football-data.co.uk bu mashinada bloklangan; serverda `scripts/import_history.py` + `scripts/backtest.py` bilan bajariladi).
-> Sanity tekshiruvi (samarali bozor): kutilgan ROI (yopilish taqsimotida) -2.98%, haqiqiy ROI +7.48% [-15.14%; +29.26%], 89 ta signal. CI kutilganni o'z ichiga oladi: ha; ahamiyatli musbat ustunlik: yo'q; o'rtacha CLV -3.19%.
+> Sanity tekshiruvi (samarali bozor): validatsiya sof bozorni (w = 0) tanladi va hold-out da stavka qo'yilmadi — samarali bozorda kutilgan to'g'ri natija (DC bozorga ma'lumot qo'shmaydi, bozor narxida EV doim manfiy).
 
 - **Rejim:** sintetik
-- **Sana:** 2026-10-21T09:48:14+00:00
+- **Sana:** 2026-10-21T10:46:47+00:00
 - **F3 darvozasi (shu ma'lumotda):** ❌ bajarilmadi
 
 ## Qayta olinadiganlik
 
 | Parametr | Qiymat |
 |---|---|
-| Git commit | `d8dee247980e124e0377d331567fce3a3e9bd863` |
+| Git commit | `19607df74cb185b6d95ae338c1bb1cd0c19ba9b0` |
 | Ma'lumot izi (SHA-256) | `64a643c158179830f5b4170e7ae806e66ab89ab18d39736d9e41b409e436c5c9` |
 | Seed (bootstrap) | `20261021` |
 | O'yinlar (tugagan) | 5700 |
@@ -46,9 +46,11 @@
 
 ## Parametr tanlash (validatsiya 2022)
 
-- Sinalgan konfiguratsiyalar soni: **144** (xi x w x min EV x min ehtimollik). Eng yaxshi validatsiya ROI si ko'p sinov (multiple testing) sababli **optimistik**; haqiqiy baho - hold-out.
+- Sinalgan konfiguratsiyalar soni: **180** (xi x w x min EV x min ehtimollik). Eng yaxshi validatsiya ROI si ko'p sinov (multiple testing) sababli **optimistik**; haqiqiy baho - hold-out.
 - 1-bosqich: `(xi, w)` validatsiya log-loss bo'yicha; 2-bosqich: chegaralar ROI bo'yicha (>= 50 signal).
-- **Tanlangan:** xi = 0.0019, w = 0.25, min EV = +8.00%, min ehtimollik = 30.0%.
+- **Tanlangan:** xi = 0, w = 0, min EV = +0.00%, min ehtimollik = 30.0%.
+- ⚠️ Chegaraviy w = 0 tanlandi (grid chekkasi): sof bozor modeli eng yaxshi; DC qo'shimcha ma'lumot bermadi.
+- ⚠️ Hech bir chegara validatsiyada >= 50 signal bermadi: eng ko'p signalli konfiguratsiya tanlandi.
 
 Validatsiya ROI bo'yicha eng yaxshi 10 ta qator:
 
@@ -71,56 +73,50 @@ Bashoratlar: 1140 · o'tkazib yuborilgan: yo'q · fitlar: 114 (muvaffaqiyatsiz: 
 
 | Ko'rsatkich | Qiymat |
 |---|---|
-| Signallar | 89 |
-| ROI / yield (flat) | +7.48% [-15.14%; +29.26%] |
-| Foyda (flat, birlik) | +6.66 |
-| Hit rate (foyda bilan yopilgan) | 43.8% |
-| Maksimal pasayish (flat, birlik) | 10.28 |
-| ROI yopilish narxida (89 ta) | +7.98% [-15.16%; +31.16%] |
-| CLV: o'rtacha log(odds / yopilish adolatli) (89 ta) | -3.19% [-3.33%; -3.05%] |
-| Yopilishni yutgan ulush | 0.0% |
-| Yopilish taqsimotida kutilgan EV | -2.98% |
-| Kelly 1/4: ROI · bank daromadi · maks. pasayish | +4.18% · +6.76% · 19.44 |
+| Signallar | 0 |
+| ROI / yield (flat) | +0.00%  |
+| Foyda (flat, birlik) | +0.00 |
+| Hit rate (foyda bilan yopilgan) | 0.0% |
+| Maksimal pasayish (flat, birlik) | 0.00 |
+| ROI yopilish narxida (0 ta) | -  |
+| CLV: o'rtacha log(odds / yopilish adolatli) (0 ta) | -  |
+| Yopilish narxi bor stavkalar (CLV qamrovi) | 0 / 0 |
+| Yopilishsiz stavkalar ROI, olingan narxda (0 ta) | - |
+| Yopilishni yutgan ulush | - |
+| Yopilish taqsimotida kutilgan EV | - |
+| Kelly 1/4: ROI · bank daromadi · maks. pasayish | +0.00% · +0.00% · 0.00 |
 
 **Proper scoring (bozor nusxasiga o'rtacha; kichik = yaxshi):**
 
 | Guruh | n | log-loss ansambl | log-loss DC | log-loss bozor (yopilish) | Brier ansambl | Brier DC | Brier bozor |
 |---|---|---|---|---|---|---|---|
-| 1x2 | 1132 | 0.9279 | 0.9506 | 0.9273 | 0.5487 | 0.5628 | 0.5487 |
-| asian_handicap (x.5) | 294 | 0.6954 | 0.7287 | 0.6918 | 0.5021 | 0.5311 | 0.4987 |
-| totals 2.5 | 1136 | 0.6105 | 0.6302 | 0.6097 | 0.4237 | 0.4393 | 0.4232 |
-| all | 2562 | 0.7605 | 0.7830 | 0.7594 | 0.4879 | 0.5044 | 0.4873 |
+| 1x2 | 1132 | 0.9274 | 0.9487 | 0.9273 | 0.5488 | 0.5619 | 0.5487 |
+| asian_handicap (x.5) | 294 | 0.6917 | 0.7319 | 0.6918 | 0.4986 | 0.5349 | 0.4987 |
+| totals 2.5 | 1136 | 0.6097 | 0.6325 | 0.6097 | 0.4233 | 0.4419 | 0.4232 |
+| all | 2562 | 0.7595 | 0.7836 | 0.7594 | 0.4874 | 0.5056 | 0.4873 |
 
 **Kalibratsiya (ansambl):**
 
 | Oraliq | n | o'rtacha bashorat | haqiqiy chastota | og'ish |
 |---|---|---|---|---|
-| 0%-10% | 283 | 6.2% | 6.0% | -0.2 p.p. |
-| 10%-20% | 694 | 15.7% | 16.6% | +0.9 p.p. |
-| 20%-30% | 1212 | 25.2% | 23.3% | -1.9 p.p. |
-| 30%-40% | 961 | 34.6% | 35.4% | +0.8 p.p. |
-| 40%-50% | 1038 | 45.3% | 46.1% | +0.7 p.p. |
-| 50%-60% | 978 | 54.5% | 55.1% | +0.6 p.p. |
-| 60%-70% | 498 | 64.9% | 64.5% | -0.4 p.p. |
-| 70%-80% | 335 | 74.4% | 73.7% | -0.7 p.p. |
-| 80%-90% | 200 | 84.4% | 85.0% | +0.6 p.p. |
-| 90%-100% | 57 | 93.1% | 93.0% | -0.1 p.p. |
+| 0%-10% | 321 | 6.1% | 5.9% | -0.2 p.p. |
+| 10%-20% | 734 | 15.7% | 18.0% | +2.3 p.p. |
+| 20%-30% | 1171 | 25.2% | 23.8% | -1.4 p.p. |
+| 30%-40% | 911 | 34.5% | 34.7% | +0.2 p.p. |
+| 40%-50% | 1027 | 45.5% | 44.0% | -1.5 p.p. |
+| 50%-60% | 970 | 54.2% | 57.1% | +2.9 p.p. |
+| 60%-70% | 487 | 64.9% | 63.0% | -1.8 p.p. |
+| 70%-80% | 346 | 74.4% | 74.3% | -0.1 p.p. |
+| 80%-90% | 209 | 84.6% | 81.3% | -3.2 p.p. |
+| 90%-100% | 80 | 93.2% | 95.0% | +1.8 p.p. |
 
 **Liga kesimi:**
 
-| Kesim | signallar | ROI (95% CI) | CLV |
-|---|---|---|---|
-| Synthetic League 0 | 17 | +41.76% [-18.13%; +100.01%] | -3.24% |
-| Synthetic League 1 | 28 | -2.50% [-36.44%; +33.75%] | -3.46% |
-| Synthetic League 2 | 44 | +0.59% [-32.76%; +33.71%] | -3.00% |
+_signal yo'q_
 
 **Bozor kesimi:**
 
-| Kesim | signallar | ROI (95% CI) | CLV |
-|---|---|---|---|
-| 1x2 | 20 | +65.50% [+10.55%; +115.86%] | -2.61% |
-| asian_handicap | 40 | +7.60% [-19.28%; +33.01%] | -3.01% |
-| totals 2.5 | 29 | -32.69% [-71.18%; +9.04%] | -3.84% |
+_signal yo'q_
 
 ## Validatsiya (tanlangan konfiguratsiya, optimistik): mavsum 2022
 
@@ -128,56 +124,50 @@ Bashoratlar: 1140 · o'tkazib yuborilgan: yo'q · fitlar: 114 (muvaffaqiyatsiz: 
 
 | Ko'rsatkich | Qiymat |
 |---|---|
-| Signallar | 94 |
-| ROI / yield (flat) | +14.01% [-9.35%; +38.96%] |
-| Foyda (flat, birlik) | +13.17 |
-| Hit rate (foyda bilan yopilgan) | 46.8% |
-| Maksimal pasayish (flat, birlik) | 5.88 |
-| ROI yopilish narxida (94 ta) | +14.54% [-10.32%; +39.18%] |
-| CLV: o'rtacha log(odds / yopilish adolatli) (94 ta) | -3.10% [-3.22%; -2.98%] |
-| Yopilishni yutgan ulush | 0.0% |
-| Yopilish taqsimotida kutilgan EV | -2.95% |
-| Kelly 1/4: ROI · bank daromadi · maks. pasayish | +7.66% · +12.86% · 11.53 |
+| Signallar | 0 |
+| ROI / yield (flat) | +0.00%  |
+| Foyda (flat, birlik) | +0.00 |
+| Hit rate (foyda bilan yopilgan) | 0.0% |
+| Maksimal pasayish (flat, birlik) | 0.00 |
+| ROI yopilish narxida (0 ta) | -  |
+| CLV: o'rtacha log(odds / yopilish adolatli) (0 ta) | -  |
+| Yopilish narxi bor stavkalar (CLV qamrovi) | 0 / 0 |
+| Yopilishsiz stavkalar ROI, olingan narxda (0 ta) | - |
+| Yopilishni yutgan ulush | - |
+| Yopilish taqsimotida kutilgan EV | - |
+| Kelly 1/4: ROI · bank daromadi · maks. pasayish | +0.00% · +0.00% · 0.00 |
 
 **Proper scoring (bozor nusxasiga o'rtacha; kichik = yaxshi):**
 
 | Guruh | n | log-loss ansambl | log-loss DC | log-loss bozor (yopilish) | Brier ansambl | Brier DC | Brier bozor |
 |---|---|---|---|---|---|---|---|
-| 1x2 | 1139 | 0.9265 | 0.9466 | 0.9275 | 0.5489 | 0.5624 | 0.5497 |
-| asian_handicap (x.5) | 283 | 0.6893 | 0.7152 | 0.6888 | 0.4962 | 0.5192 | 0.4957 |
-| totals 2.5 | 1140 | 0.6287 | 0.6560 | 0.6245 | 0.4400 | 0.4634 | 0.4368 |
-| all | 2562 | 0.7678 | 0.7918 | 0.7663 | 0.4946 | 0.5136 | 0.4935 |
+| 1x2 | 1139 | 0.9275 | 0.9501 | 0.9275 | 0.5497 | 0.5648 | 0.5497 |
+| asian_handicap (x.5) | 283 | 0.6888 | 0.7153 | 0.6888 | 0.4956 | 0.5194 | 0.4957 |
+| totals 2.5 | 1140 | 0.6244 | 0.6581 | 0.6245 | 0.4367 | 0.4653 | 0.4368 |
+| all | 2562 | 0.7663 | 0.7943 | 0.7663 | 0.4935 | 0.5155 | 0.4935 |
 
 **Kalibratsiya (ansambl):**
 
 | Oraliq | n | o'rtacha bashorat | haqiqiy chastota | og'ish |
 |---|---|---|---|---|
-| 0%-10% | 225 | 6.4% | 6.2% | -0.2 p.p. |
-| 10%-20% | 659 | 16.0% | 14.6% | -1.4 p.p. |
-| 20%-30% | 1264 | 25.3% | 24.5% | -0.8 p.p. |
-| 30%-40% | 996 | 34.6% | 35.1% | +0.6 p.p. |
-| 40%-50% | 1096 | 45.3% | 47.0% | +1.7 p.p. |
-| 50%-60% | 984 | 54.7% | 53.3% | -1.4 p.p. |
-| 60%-70% | 522 | 64.7% | 65.7% | +1.0 p.p. |
-| 70%-80% | 331 | 74.6% | 75.2% | +0.7 p.p. |
-| 80%-90% | 146 | 83.9% | 83.6% | -0.4 p.p. |
-| 90%-100% | 40 | 93.1% | 97.5% | +4.4 p.p. |
+| 0%-10% | 241 | 6.3% | 5.4% | -0.9 p.p. |
+| 10%-20% | 691 | 15.7% | 14.6% | -1.1 p.p. |
+| 20%-30% | 1249 | 25.1% | 25.5% | +0.4 p.p. |
+| 30%-40% | 991 | 34.6% | 35.3% | +0.7 p.p. |
+| 40%-50% | 1035 | 45.7% | 47.3% | +1.6 p.p. |
+| 50%-60% | 950 | 54.1% | 50.9% | -3.1 p.p. |
+| 60%-70% | 556 | 64.7% | 66.4% | +1.7 p.p. |
+| 70%-80% | 327 | 74.5% | 74.9% | +0.4 p.p. |
+| 80%-90% | 177 | 84.2% | 81.9% | -2.3 p.p. |
+| 90%-100% | 46 | 93.5% | 100.0% | +6.5 p.p. |
 
 **Liga kesimi:**
 
-| Kesim | signallar | ROI (95% CI) | CLV |
-|---|---|---|---|
-| Synthetic League 0 | 28 | +43.43% [-4.01%; +89.75%] | -3.14% |
-| Synthetic League 1 | 28 | +26.70% [-15.29%; +69.54%] | -3.08% |
-| Synthetic League 2 | 38 | -17.03% [-51.19%; +17.28%] | -3.09% |
+_signal yo'q_
 
 **Bozor kesimi:**
 
-| Kesim | signallar | ROI (95% CI) | CLV |
-|---|---|---|---|
-| 1x2 | 35 | +43.86% [-2.14%; +87.97%] | -2.68% |
-| asian_handicap | 36 | -7.43% [-37.61%; +23.24%] | -2.99% |
-| totals 2.5 | 23 | +2.13% [-51.22%; +58.00%] | -3.91% |
+_signal yo'q_
 
 ## Grafiklar
 
@@ -185,11 +175,14 @@ Bashoratlar: 1140 · o'tkazib yuborilgan: yo'q · fitlar: 114 (muvaffaqiyatsiz: 
 
 ![Foyda egri chizig'i](2026-10-21-synthetic-equity.png)
 
-## F3 darvozasi (hold-out)
+## F3 darvozasi (hold-out, qaror #11)
 
-| Mezon | Natija | Tafsilot |
-|---|---|---|
-| Kalibratsiya: har 10% oraliqda og'ish <= 5 p.p. | ✅ | eng katta og'ish 1.9 p.p. (9 ta oraliq, n >= 100) |
-| Yopilish koeffitsientida >= 500 signal va ROI >= 0% | ❌ | 89 ta signal, ROI (yopilishda) +7.98% [-15.16%; +31.16%] |
-| EV >= 5% filtrida ROI musbat | ✅ | ROI +7.48% [-15.14%; +29.26%], 89 ta signal |
-| Kamida 3 ta ligada musbat yoki nolga yaqin | ❌ | 2 ta liga ROI >= -2.00%: Synthetic League 0, Synthetic League 2 |
+| Mezon | Nuqta bahosi | 95% CI | n | Holat | Izoh |
+|---|---|---|---|---|---|
+| Kalibratsiya: har 10% oraliqda (n >= 30) og'ish <= 5 p.p. | eng katta 3.2 p.p. | - | 10 oraliq / 6256 bashorat | ✅ | ansambl, partition bozorlar |
+| >= 500 signal; CLV o'rtachasi > 0 va 95% CI pastki chegarasi > 0 | - | - | 0 / 0 | ❌ | faqat yopilish narxi bor stavkalar; signal kam (< 500) |
+| ROI: nuqta >= 0% va 95% CI pastki chegarasi >= -2.00% | - | - | 0 | ❌ | flat, olingan koeffitsientda |
+| Kamida 3 ta ligada (har biri n >= 100) CLV > 0 | 0 liga | - | 0 / 0 liga n >= 100 | ❌ | - |
+| Sof bozor (w = 0) bazaviy varianti bilan solishtirish (log-loss) | 0.7595 vs 0.7595 | - | hold-out partition bozorlar | ❌ | w = 0 tanlandi: DC bozorga ma'lumot qo'shmaydi |
+
+Darvoza faqat barcha mezonlar ✅ bo'lsa o'tadi. 'ahamiyatsiz' = nuqta bahosi bajarilgan, lekin 95% CI bajarilmagan (qarorlar jurnali #11): ✅ hisoblanmaydi.

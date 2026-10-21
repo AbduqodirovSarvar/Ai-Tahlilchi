@@ -67,6 +67,14 @@ def test_summary_hand_computed() -> None:
     assert summary.roi_ci.contains(0.0)
 
 
+def test_bets_without_closing_are_reported_separately() -> None:
+    bets = [bet(1.0), bet(-1.0, clv_fair=None, closing=None), bet(0.5, clv_fair=None)]
+    summary = summarize_bets(bets, bank=100.0, seed=1, n_resamples=50)
+    assert (summary.n_bets, summary.n_clv, summary.n_without_closing) == (3, 1, 2)
+    assert summary.roi_without_closing == pytest.approx(-0.25)
+    assert summarize_bets([bet(1.0)], bank=100.0, seed=1).roi_without_closing is None
+
+
 def test_summary_of_no_bets() -> None:
     summary = summarize_bets([], bank=100.0, seed=1)
     assert (summary.n_bets, summary.roi, summary.hit_rate, summary.max_drawdown) == (0, 0, 0, 0)
