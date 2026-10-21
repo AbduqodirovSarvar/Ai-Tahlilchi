@@ -34,8 +34,10 @@ from app.services.interfaces import (
     DateSpec,
     FixtureListRequest,
     FixtureOption,
+    RecalcVerdict,
     ReportGroup,
     ReportRequest,
+    ReportView,
     ResultMark,
     ResultMarkRequest,
     RiskProfile,
@@ -112,6 +114,25 @@ async def retro_signals(services: Services, user_id: int) -> tuple[SignalView, .
 
 def _last_week(today: date) -> tuple[date, date]:
     return today - timedelta(days=7), today - timedelta(days=1)
+
+
+SETTLE_DELAY = timedelta(days=4)
+"""Moves "now" past every match of a ``next_days(3)`` analysis."""
+
+
+async def settled_recommendations(
+    services: Services, user_id: int, clock: MutableClock
+) -> tuple[SignalView, ...]:
+    """Recommend signals for the next three days, then let the matches finish."""
+    result = await analyze_week(services, user_id, dates=DateSpec.next_days(3))
+    assert result.signals, "the seeded data must yield recommendations"
+    clock.advance(SETTLE_DELAY)
+    return tuple([await services.signals.get_signal(user_id, s.signal_id) for s in result.signals])
+
+
+def assert_counts(report: ReportView) -> None:
+    assert report.won + report.lost + report.void <= report.settled <= report.signals
+    assert sum(bucket.count for bucket in report.calibration) == report.won + report.lost
 
 
 async def first_upcoming_fixture(services: Services, user_id: int) -> FixtureOption:
@@ -260,20 +281,226 @@ class AnalysisContract:
         )
         assert result.retro
         assert result.api_requests_used == 0
+        assert result.signals
         assert all(signal.kickoff < clock() for signal in result.signals)
         assert any(signal.result is not None for signal in result.signals)
+        assert all(signal.retro and not signal.recommended for signal in result.signals)
 
-    async def test_watched_team_is_always_included(self, services: Services, user_id: int) -> None:
+    async def test_kicked_off_fixtures_never_become_real_signals(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        clock.advance(timedelta(hours=14))  # 01:00 next day in Tashkent: yesterday's are over
+        result = await analyze_week(services, user_id, dates=DateSpec.between(*_two_days(clock)))
+
+        assert any(signal.retro for signal in result.signals)
+        for signal in result.signals:
+            if signal.kickoff <= clock():
+                assert signal.retro
+                assert not signal.recommended
+            else:
+                assert not signal.retro
+                assert signal.recommended
+
+    async def test_watched_team_is_always_included_outside_the_cap(
+        self, services: Services, user_id: int
+    ) -> None:
         fixture = await first_upcoming_fixture(services, user_id)
         teams = await services.catalog.search_teams(fixture.home_team, limit=5)
         team = next(team for team in teams if team.name == fixture.home_team)
         await services.watchlist.add_watch(user_id, WatchTarget(WatchKind.TEAM, team.team_id))
 
-        result = await analyze_week(services, user_id, min_probability=0.95, min_ev=0.20)
+        strict = await analyze_week(services, user_id, min_probability=0.95, min_ev=0.20)
+        capped = await analyze_week(services, user_id, max_signals=1)
 
-        watched = [s for s in result.signals if s.fixture_id == fixture.fixture_id]
+        watched = [s for s in strict.signals if s.fixture_id == fixture.fixture_id]
         assert watched
         assert all(signal.watchlist for signal in watched)
+        assert strict.matched == 0
+        regular = [s for s in capped.signals if not s.watchlist]
+        assert len(regular) == 1
+        assert any(signal.watchlist for signal in capped.signals)
+        assert capped.matched >= len(regular)
+
+    async def test_scope_all_follows_the_settings_leagues(
+        self, services: Services, user_id: int
+    ) -> None:
+        league = (await services.catalog.list_leagues(Sport.FOOTBALL))[0]
+        settings = await services.settings.get_settings(user_id)
+        await services.settings.update_settings(
+            user_id, replace(settings, league_ids=frozenset({league.league_id}))
+        )
+
+        result = await analyze_week(services, user_id)
+        page = await services.catalog.list_fixtures(
+            user_id, FixtureListRequest(dates=DateSpec.next_days(7), page_size=20)
+        )
+
+        assert result.signals
+        assert {signal.league for signal in result.signals} == {league.name}
+        assert {item.league for item in page.items} == {league.name}
+
+    async def test_failing_progress_callback_does_not_abort(
+        self, services: Services, user_id: int
+    ) -> None:
+        async def broken(progress: AnalysisProgress) -> None:
+            raise RuntimeError(progress.stage)
+
+        result = await services.analysis.analyze(
+            user_id, AnalysisQuery(dates=DateSpec.next_days(2)), progress=broken
+        )
+        batch = await services.analysis.recalc_query(user_id, result.query_id, progress=broken)
+        assert result.fixtures_analyzed > 0
+        assert batch.query_id == result.query_id
+
+
+def _two_days(clock: MutableClock) -> tuple[date, date]:
+    """Yesterday and today in Tashkent."""
+    today = clock().astimezone(UserSettingsView().zone).date()
+    return today - timedelta(days=1), today
+
+
+class RecommendationContract:
+    async def test_recommendation_is_sticky(self, services: Services, user_id: int) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        assert signal.recommended
+
+        strict = await services.analysis.analyze(
+            user_id,
+            AnalysisQuery(
+                dates=DateSpec.next_days(7),
+                scope=ScopeKind.FIXTURES,
+                scope_ids=frozenset({signal.fixture_id}),
+                min_probability=0.95,
+                min_ev=0.20,
+                markets=all_markets(),
+                include_no_value=True,
+            ),
+        )
+
+        again = next(s for s in strict.signals if s.signal_id == signal.signal_id)
+        assert again.recommended_at == signal.recommended_at
+        assert not again.no_value
+        exported = (await services.reports.export(user_id)).content.decode()
+        assert f"\n{signal.signal_id}," in exported
+
+    async def test_no_value_selection_is_recommended_only_when_a_query_passes_it(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        candidate, custom = await _no_value_candidate(services, user_id, settings)
+        assert not candidate.recommended
+        assert candidate.signal_id not in await _exported_ids(services, user_id)
+
+        clock.advance(timedelta(minutes=5))
+        normal = await analyze_week(
+            services,
+            user_id,
+            scope=ScopeKind.FIXTURES,
+            scope_ids=frozenset({candidate.fixture_id}),
+            markets=custom,
+        )
+
+        promoted = next(s for s in normal.signals if s.signal_id == candidate.signal_id)
+        assert promoted.recommended_at == clock()
+        assert not promoted.no_value
+        assert candidate.signal_id in await _exported_ids(services, user_id)
+
+    async def test_hidden_signals_still_count(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signals = await settled_recommendations(services, user_id, clock)
+        request = ReportRequest.recent(14)
+        before = await services.reports.report(user_id, request)
+        losers = [s for s in signals if s.result is ResultMark.LOST]
+        assert losers
+
+        for signal in losers:
+            await services.signals.hide_signal(user_id, signal.signal_id)
+        after = await services.reports.report(user_id, request)
+
+        assert after == before
+        assert len(await _exported_ids(services, user_id)) == len(signals)
+
+    async def test_retro_signals_never_count(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        retro = await retro_signals(services, user_id)
+        assert retro
+
+        report = await services.reports.report(user_id, ReportRequest.recent(14))
+        assert report.signals == 0
+        assert await _exported_ids(services, user_id) == set()
+        assert await services.results.pending_results(user_id) == ()
+        assert (
+            await services.signals.list_signals(
+                user_id, DateSpec.between(*_last_week(clock().date()))
+            )
+            == ()
+        )
+        with pytest.raises(ValidationFailedError):
+            await services.bets.place_bet(
+                user_id, BetDraft(signal_id=retro[0].signal_id, stake=Decimal(1))
+            )
+        with pytest.raises(ValidationFailedError):
+            await services.results.mark_result(
+                user_id, ResultMarkRequest(signal_id=retro[0].signal_id, mark=ResultMark.WON)
+            )
+
+    async def test_recalc_verdict_uses_the_creation_thresholds(
+        self, services: Services, user_id: int
+    ) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        settings = await services.settings.get_settings(user_id)
+        await services.settings.update_settings(
+            user_id, replace(settings, min_probability=0.95, min_ev=0.20)
+        )
+
+        diff = await services.analysis.recalc_signal(user_id, signal.signal_id)
+
+        passes = (
+            diff.after.probability >= 0.30
+            and diff.after.ev >= 0.0
+            and settings.odds_min <= diff.after.odds <= settings.odds_max
+        )
+        assert (diff.verdict is RecalcVerdict.STILL_VALID) == passes
+
+
+async def _no_value_candidate(
+    services: Services, user_id: int, settings: UserSettingsView
+) -> tuple[SignalView, frozenset[MarketType]]:
+    """A no-value selection that a permissive normal analysis would pick for its fixture."""
+    page = await services.catalog.list_fixtures(
+        user_id, FixtureListRequest(dates=DateSpec.next_days(7), page_size=20)
+    )
+    for fixture in page.items:
+        custom = await services.analysis.analyze(
+            user_id,
+            AnalysisQuery(
+                dates=DateSpec.next_days(7),
+                scope=ScopeKind.FIXTURES,
+                scope_ids=frozenset({fixture.fixture_id}),
+                min_ev=0.20,
+                markets=all_markets(),
+                include_no_value=True,
+            ),
+        )
+        passing = [
+            s
+            for s in custom.signals
+            if s.no_value
+            and s.probability >= 0.30
+            and s.ev >= 0.0
+            and settings.odds_min <= s.odds <= settings.odds_max
+        ]
+        if passing:
+            best = max(passing, key=lambda s: s.ev)
+            return best, frozenset({best.market.type})
+    pytest.fail("no fixture offers a promotable no-value selection")
+
+
+async def _exported_ids(services: Services, user_id: int) -> set[int]:
+    lines = (await services.reports.export(user_id)).content.decode().strip().splitlines()
+    return {int(line.split(",", 1)[0]) for line in lines[1:]}
 
 
 class RecalcContract:
@@ -541,19 +768,26 @@ class BetContract:
         assert bank.open_bets == 1
         assert not bank.loss_limit_reached
 
-    async def test_settled_bet_has_profit(self, services: Services, user_id: int) -> None:
-        settled = next(s for s in await retro_signals(services, user_id) if s.result)
-        bet = await services.bets.place_bet(
-            user_id, BetDraft(signal_id=settled.signal_id, odds_taken=2.0, stake=Decimal(10))
+    async def test_settled_bet_has_profit(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
         )
+        clock.advance(SETTLE_DELAY)
+
+        settled = await services.signals.get_signal(user_id, signal.signal_id)
+        (bet,) = await services.bets.list_bets(user_id)
         assert bet.outcome == settled.result
-        assert bet.profit is not None
-        assert await services.bets.list_bets(user_id, open_only=True) == ()
+        assert (bet.profit is None) == (settled.result is None)
 
 
 class ResultContract:
-    async def test_pending_and_manual_marks(self, services: Services, user_id: int) -> None:
-        signals = await retro_signals(services, user_id)
+    async def test_pending_and_manual_marks(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signals = await settled_recommendations(services, user_id, clock)
         pending = await services.results.pending_results(user_id)
         assert {s.signal_id for s in pending} == {s.signal_id for s in signals if s.result is None}
 
@@ -590,13 +824,15 @@ class ResultContract:
     async def test_day_summary_is_consistent(
         self, services: Services, user_id: int, clock: MutableClock
     ) -> None:
-        await services.analysis.analyze(
-            user_id,
-            AnalysisQuery(dates=DateSpec.between(*_last_week(clock().date())), min_ev=0.0),
-        )
-        yesterday = clock().date() - timedelta(days=1)
-        summary = await services.results.day_summary(user_id, yesterday)
-        assert summary.day == yesterday
+        settings = await services.settings.get_settings(user_id)
+        signals = await settled_recommendations(services, user_id, clock)
+        day = signals[0].kickoff.astimezone(settings.zone).date()
+
+        summary = await services.results.day_summary(user_id, day)
+
+        same_day = [s for s in signals if s.kickoff.astimezone(settings.zone).date() == day]
+        assert summary.day == day
+        assert summary.signals == len(same_day)
         assert summary.won + summary.lost + summary.void + summary.pending <= summary.signals
 
 
@@ -604,18 +840,24 @@ class ReportContract:
     async def test_report_metrics_are_consistent(
         self, services: Services, user_id: int, clock: MutableClock
     ) -> None:
-        await services.analysis.analyze(
-            user_id,
-            AnalysisQuery(dates=DateSpec.between(*_last_week(clock().date())), min_ev=0.0),
-        )
-        request = ReportRequest.last_days(14, clock().date(), group_by=ReportGroup.LEAGUE)
+        signals = await settled_recommendations(services, user_id, clock)
+        request = ReportRequest.recent(14, group_by=ReportGroup.LEAGUE)
 
         report = await services.reports.report(user_id, request)
 
-        assert report.signals > 0
-        assert report.won + report.lost + report.void <= report.settled <= report.signals
-        assert sum(bucket.count for bucket in report.calibration) == report.won + report.lost
+        assert report.signals == len(signals)
+        assert report.settled > 0
+        assert_counts(report)
+        assert report.date_to == clock().astimezone(UserSettingsView().zone).date()
+        assert report.date_from == report.date_to - timedelta(days=13)
         assert sum(segment.signals for segment in report.segments) == report.settled
+        explicit = await services.reports.report(
+            user_id,
+            ReportRequest(
+                date_from=report.date_from, date_to=report.date_to, group_by=ReportGroup.LEAGUE
+            ),
+        )
+        assert explicit == report
         if report.win_rate is not None:
             assert 0 <= report.win_rate <= 1
         assert report.longest_losing_streak <= report.lost
@@ -625,6 +867,25 @@ class ReportContract:
         assert (report.signals, report.settled, report.calibration) == (0, 0, ())
         assert report.yield_rate is None
         assert report.roi is None
+        all_time = await services.reports.report(54_321, ReportRequest.all_time())
+        assert all_time.date_from is None
+
+    async def test_roi_counts_the_users_bets(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
+        )
+        clock.advance(SETTLE_DELAY)
+        (bet,) = await services.bets.list_bets(user_id)
+
+        report = await services.reports.report(user_id, ReportRequest.recent(14))
+
+        if bet.profit is None:
+            assert report.roi is None
+        else:
+            assert report.roi == pytest.approx(float(bet.profit / bet.stake))
 
     async def test_export_is_csv(self, services: Services, user_id: int) -> None:
         result = await analyze_week(services, user_id)
@@ -633,6 +894,22 @@ class ReportContract:
         assert exported.filename.endswith(".csv")
         assert lines[0].startswith("signal_id,")
         assert len(lines) == 1 + len(result.signals)
+
+
+class SportsContract:
+    async def test_every_sport_is_listed_and_football_is_available(
+        self, services: Services
+    ) -> None:
+        sports = await services.catalog.list_sports()
+        by_sport = {option.sport: option for option in sports}
+
+        assert [option.sport for option in sports] == list(Sport)
+        football = by_sport[Sport.FOOTBALL]
+        assert football.available
+        assert not football.experimental
+        assert MarketType.MATCH_RESULT in football.supported_markets
+        for option in sports:
+            assert option.available == bool(option.supported_markets)
 
 
 class StatusContract:

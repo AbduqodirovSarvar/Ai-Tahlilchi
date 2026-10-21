@@ -24,6 +24,7 @@ from app.sports.history.football_data import (
     LEAGUES,
     ParsedSeason,
     RowError,
+    _expand_two_digit_year,
     decode_csv,
     league_for,
     parse_date,
@@ -76,7 +77,7 @@ def test_uk_kickoff_is_converted_to_utc(premier_league: ParsedSeason) -> None:
     fixture = by_home(premier_league, "Man United")
     assert fixture.kickoff == datetime(2024, 8, 16, 19, 0, tzinfo=UTC)  # 20:00 BST
     assert fixture.season == 2024
-    assert fixture.ref.external_id == "E0/2024/2024-08-16/Man United/Fulham"
+    assert fixture.ref.external_id == "E0/2024/Man United/Fulham"
 
 
 def test_missing_kickoff_time_uses_default_and_is_counted(premier_league: ParsedSeason) -> None:
@@ -225,27 +226,45 @@ def test_season_code(season: int, code: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected"),
+    ("text", "season", "expected"),
     [
-        ("16/08/2024", date(2024, 8, 16)),
-        ("1/8/24", date(2024, 8, 1)),
-        ("31/12/99", date(2099, 12, 31)),
+        ("16/08/2024", 2024, date(2024, 8, 16)),
+        ("1/8/24", 2024, date(2024, 8, 1)),
+        ("07/08/99", 1999, date(1999, 8, 7)),
+        ("15/01/00", 1999, date(2000, 1, 15)),
+        ("31/12/99", 2099, date(2099, 12, 31)),
+        ("26/07/2020", 2019, date(2020, 7, 26)),  # COVID-extended season, inside the margin
     ],
 )
-def test_parse_date_formats(text: str, expected: date) -> None:
-    assert parse_date(text) == expected
+def test_parse_date_formats(text: str, season: int, expected: date) -> None:
+    assert parse_date(text, season=season) == expected
 
 
 @pytest.mark.parametrize("text", ["", "2024-08-16", "16.08.2024", "31/02/2024", "16/08/202"])
 def test_parse_date_rejects_other_text(text: str) -> None:
     with pytest.raises(RowError):
-        parse_date(text)
+        parse_date(text, season=2024)
 
 
-@given(st.dates(min_value=date(2000, 1, 1), max_value=date(2099, 12, 31)))
+@pytest.mark.parametrize(
+    ("two_digits", "season", "year"), [(99, 2001, 1999), (1, 1999, 2001), (24, 2024, 2024)]
+)
+def test_two_digit_year_takes_the_nearest_century(two_digits: int, season: int, year: int) -> None:
+    assert _expand_two_digit_year(two_digits, season) == year
+
+
+@pytest.mark.parametrize("text", ["16/08/2023", "01/10/2025", "16/08/14"])
+def test_parse_date_rejects_dates_outside_the_season(text: str) -> None:
+    with pytest.raises(RowError, match="outside season 2024/2025"):
+        parse_date(text, season=2024)
+
+
+@given(st.dates(min_value=date(1950, 7, 1), max_value=date(2150, 6, 30)))
 def test_parse_date_round_trips_both_year_styles(day: date) -> None:
-    assert parse_date(day.strftime("%d/%m/%Y")) == day
-    assert parse_date(day.strftime("%d/%m/%y")) == day
+    season = day.year if day.month >= 7 else day.year - 1
+    assert parse_date(day.strftime("%d/%m/%Y"), season=season) == day
+    two_digit = f"{day.day:02d}/{day.month:02d}/{day.year % 100:02d}"
+    assert parse_date(two_digit, season=season) == day
 
 
 @pytest.mark.parametrize(

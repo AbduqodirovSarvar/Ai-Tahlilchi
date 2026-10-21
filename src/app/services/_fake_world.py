@@ -123,6 +123,11 @@ _SEEDS: Final = (
 )
 EXPERIMENTAL_SPORTS: Final = frozenset({Sport.HOCKEY})
 """Sports without a backtest yet: their signals carry the "🧪 Test rejimi" flag."""
+SPORT_MARKETS: Final[dict[Sport, frozenset[MarketType]]] = {
+    Sport.FOOTBALL: frozenset(MarketType),
+    Sport.HOCKEY: frozenset({MarketType.MATCH_RESULT, MarketType.TOTALS}),
+}
+"""Markets the sample world prices per sport; sports missing here are unavailable."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

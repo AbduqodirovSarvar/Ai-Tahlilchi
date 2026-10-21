@@ -15,7 +15,6 @@ from app.services.interfaces import (
     CalibrationBucket,
     DaySummary,
     ReportGroup,
-    ReportRequest,
     ReportView,
     ResultMark,
     RiskProfile,
@@ -74,20 +73,24 @@ def day_summary(day_rows: Sequence[SignalOutcome], day: date) -> DaySummary:
 
 
 def build_report(
-    request: ReportRequest, rows: Sequence[SignalOutcome], bets: tuple[Decimal, Decimal]
+    period: tuple[date | None, date],
+    group_by: ReportGroup | None,
+    rows: Sequence[SignalOutcome],
+    bets: tuple[Decimal, Decimal],
 ) -> ReportView:
-    """Report over ``rows`` (already filtered to the period); ``bets`` = (profit, stake)."""
+    """Report over ``rows`` (already filtered to ``period``); ``bets`` = (profit, stake)."""
     settled = [row for row in rows if row.view.result is not None]
     marks = [row.view.result for row in settled]
     won = sum(mark in _WINS for mark in marks)
     lost = sum(mark in _LOSSES for mark in marks)
     profit = _total(row.profit_units for row in settled)
-    staked = _total(row.view.stake_units for row in settled if row.view.result != ResultMark.VOID)
+    staked = _staked(settled)
     clvs = [row.clv for row in settled if row.clv is not None]
     bet_profit, bet_stake = bets
+    date_from, date_to = period
     return ReportView(
-        date_from=request.date_from,
-        date_to=request.date_to,
+        date_from=date_from,
+        date_to=date_to,
         signals=len(rows),
         settled=len(settled),
         won=won,
@@ -101,12 +104,17 @@ def build_report(
         win_rate=won / (won + lost) if won + lost else None,
         longest_losing_streak=_longest_losing_streak(settled),
         calibration=_calibration(settled),
-        segments=_segments(settled, request.group_by),
+        segments=_segments(settled, group_by),
     )
 
 
 def _total(values: Iterable[Decimal | None]) -> Decimal:
     return sum((value for value in values if value is not None), Decimal(0))
+
+
+def _staked(settled: Sequence[SignalOutcome]) -> Decimal:
+    """Units at risk: void signals returned the stake, so they do not count."""
+    return _total(row.view.stake_units for row in settled if row.view.result != ResultMark.VOID)
 
 
 def _mean(values: Sequence[float]) -> float | None:
@@ -165,7 +173,7 @@ def _segment(key: str, rows: Sequence[SignalOutcome]) -> SegmentStat:
     won = sum(mark in _WINS for mark in marks)
     decided = won + sum(mark in _LOSSES for mark in marks)
     profit = _total(row.profit_units for row in rows)
-    staked = _total(row.view.stake_units for row in rows)
+    staked = _staked(rows)
     return SegmentStat(
         key=key,
         signals=len(rows),

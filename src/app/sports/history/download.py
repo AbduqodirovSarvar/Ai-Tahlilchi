@@ -10,7 +10,7 @@ corporate proxy CA). Verification is never disabled.
 """
 
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
@@ -40,7 +40,13 @@ RETRY_WAIT: wait_base = wait_exponential(multiplier=1, min=1, max=10)
 USER_AGENT: Final = "ai-tahlilchi/0.1 (historical data import)"
 HTTP_NOT_FOUND: Final = 404
 HTTP_SERVER_ERROR: Final = 500
-_SNIFF_BYTES: Final = 512
+_SNIFF_BYTES: Final = 2048
+_UTF8_BOM: Final = b"\xef\xbb\xbf"
+_TEAM_COLUMN_PAIRS: Final = (
+    frozenset({"HomeTeam", "AwayTeam"}),
+    frozenset({"Home", "Away"}),
+    frozenset({"HT", "AT"}),
+)
 
 
 class _TransientHTTPError(Exception):
@@ -62,21 +68,34 @@ def current_season(today: date) -> int:
     return today.year if today.month >= SEASON_START_MONTH else today.year - 1
 
 
+def season_end(season: int) -> datetime:
+    """First moment after ``season``: files saved from then on hold the whole season."""
+    return datetime(season + 1, SEASON_START_MONTH, 1, tzinfo=UTC)
+
+
 def needs_download(path: Path, *, season: int, now: datetime) -> bool:
-    """Whether the cached file is missing, or belongs to the current season and is stale."""
+    """Whether the cached file is missing, stale (current season) or incomplete (past season).
+
+    A past season's file is final only if it was saved after the season ended; a copy
+    cached mid-season lacks the last results and closing prices, so it is fetched again.
+    """
     if not path.is_file():
         return True
+    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
     if season < current_season(now.date()):
-        return False
-    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=now.tzinfo)
+        return modified < season_end(season)
     return now - modified > CURRENT_SEASON_MAX_AGE
 
 
 def looks_like_csv(content: bytes) -> bool:
-    """Cheap check that a response is a football-data CSV, not an HTML/error page."""
-    head = content[:_SNIFF_BYTES].lstrip(b"\xef\xbb\xbf").lstrip()
-    first_line = head.split(b"\n", 1)[0]
-    return not head.lower().startswith(b"<") and b"," in first_line and b"Date" in first_line
+    """Whether a response starts with a football-data header, not an HTML/text error page.
+
+    The first line must name the ``Date`` column and a home/away team column pair.
+    """
+    head = content[:_SNIFF_BYTES].removeprefix(_UTF8_BOM).lstrip()
+    first_line = head.split(b"\n", 1)[0].decode("latin-1")
+    columns = {cell.strip() for cell in first_line.split(",")}
+    return "Date" in columns and any(pair <= columns for pair in _TEAM_COLUMN_PAIRS)
 
 
 def create_client() -> httpx.AsyncClient:

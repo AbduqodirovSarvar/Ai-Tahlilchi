@@ -1,8 +1,8 @@
 # ADR 0004: Servis shartnomasi (bot ⇄ tizim) va soxta servis
 
-- **Holat:** taklif (frozen v1 taklif, orkestr tasdig'i kutilmoqda)
+- **Holat:** qabul qilingan (frozen v1 orkestr tomonidan tasdiqlangan, 2026-10-21; `docs/decisions_log.md` #8, #9). v1.1 qo'shimchalari (T3) — pastdagi 10-bo'lim (orkestr tasdig'i kutilmoqda).
 - **Sana:** 2026-10-21
-- **Muallif:** pipeline-engineer (T2)
+- **Muallif:** pipeline-engineer (T2, T3)
 
 ## Kontekst
 Bot (T3) pipeline (T4) tayyor bo'lishidan oldin qurilishi kerak. Bot faqat `app.services` ni import qila oladi (`import-linter`), servislar esa `db`/`models`/`sports`/`llm` ni bevosita emas, faqat `pipeline` orqali ishlatadi. Shuning uchun bot ehtiyojlaridan (asosiy reja §6.2–6.13) kelib chiqqan barqaror shartnoma va uning to'liq soxta amalga oshirilishi kerak.
@@ -35,6 +35,16 @@ Raqamlar `blake2b(key)` dan olinadi (`random` yo'q, ruff S311 yo'q), shuning uch
 
 ### 9. Qayta ishlatiladigan shartnoma testlari
 `tests/services/contract_suite.py` dagi `*Contract` klasslari ma'lumotdan mustaqil (liga/jamoa/o'yinlarni katalog orqali topadi) va faqat `services`, `clock`, `user_id` fixture larini talab qiladi. F4 da real servis shu to'plamni seed qilingan baza bilan ishga tushiradi: bot fake da ko'rgan xatti-harakat real servisda ham kafolatlanadi.
+
+### 10. v1.1: hisobot halolligi va tavsiya identifikatsiyasi (T3, kod sharhi natijasida)
+Kontekst: sharh hisobotlarni buzishi mumkin bo'lgan yo'llarni topdi — yashirilgan mag'lubiyatlar yield'ni oshirardi, retro tahlil natijalari haqiqiy signal sifatida saqlanardi, keyingi qattiq maxsus tahlil tavsiyani `no_value` ga aylantirib hisobotdan chiqarardi, `scope=all` sozlamadagi ligalarga amal qilmasdi.
+- **Hisobot to'plami bitta va qat'iy:** "tavsiya qilingan va retro bo'lmagan" signallar (yashirilganlari ham). Yashirish — faqat ko'rinish. Bu reja §6.13 C dagi "barcha signallar hisobga olinadi, tanlov xatosi bo'lmasin" qoidasining bajarilishi.
+- **Retro — alohida manba (`SignalSource.RETRO`), saqlanadi, lekin hech qachon tavsiya emas.** Variantlar: (a) umuman saqlamaslik — karta tugmalari (batafsil) uchun ID kerak bo'lgani uchun rad etildi; (b) belgili saqlash — tanlandi, retro kaliti haqiqiy signal kalitidan alohida.
+- **Tavsiya "yopishqoq" (`recommended_at`):** birinchi marta chegaradan o'tgan vaqt saqlanadi va o'zgarmaydi; `no_value` signal keyinroq o'tsa — o'sha keyingi vaqt bilan (orqaga sanab "tavsiya qilingan" bo'lib qolmaydi). Signal o'sha paytdagi chegaralarni saqlaydi va recalc verdikti shular bilan hisoblanadi (keyin sozlama o'zgarsa, eski signal "yomonlashdi" deb ko'rinmaydi).
+- **Sevimlilar kesimdan tashqarida:** §6.7 "har doim kiritiladi" — `max_signals` va `matched` ga ta'sir qilmaydi.
+- **Horizon:** "14 kun" = bugun bilan 14 kalendar kuni (`today+13`); `next_days(14)` va `between()` bir xil chegarada. Avvalgi `today+14` bilan `next_days` maksimumi mos kelmas edi.
+- **Qo'shimcha DTO/metodlar faqat qo'shish orqali:** `date_to` ni ixtiyoriy qilish (standart `None`) mavjud chaqiruvlarni buzmaydi; protokolga `list_sports` qo'shildi (real servis ham uni amalga oshiradi).
+- **Fake hech qachon productionga kirmaydi:** alohida `import-linter` qoidasi.
 
 ## Oqibatlar
 - Bot T3 da to'liq ishlay oladi; real servis F4 da shu protokollarni amalga oshiradi va `contract_suite` dan o'tishi shart.

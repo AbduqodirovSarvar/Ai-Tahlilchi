@@ -73,6 +73,35 @@ def test_migrations_run_on_a_database_with_data(tmp_path: Path) -> None:
     assert table_names(db_path) == {"alembic_version"}
 
 
+def test_0002_keeps_the_latest_of_duplicate_closing_prices(tmp_path: Path) -> None:
+    db_path = tmp_path / "dupes.db"
+    config = alembic_config(db_path)
+    command.upgrade(config, "0001")
+    with connect(db_path) as connection:
+        connection.executescript(
+            "INSERT INTO leagues (id, sport, source, external_id, name, created_at, updated_at)"
+            " VALUES (1, 'football', 's', 'E0', 'EPL', '2024-01-01', '2024-01-01');"
+            "INSERT INTO teams (id, sport, source, external_id, name, normalized_name,"
+            " created_at, updated_at) VALUES"
+            " (1, 'football', 's', 'a', 'A', 'a', '2024-01-01', '2024-01-01'),"
+            " (2, 'football', 's', 'b', 'B', 'b', '2024-01-01', '2024-01-01');"
+            "INSERT INTO fixtures (id, sport, source, external_id, league_id, season, kickoff_at,"
+            " home_team_id, away_team_id, status, created_at, updated_at)"
+            " VALUES (1, 'football', 's', 'f', 1, 2024,"
+            " '2024-01-01', 1, 2, 'finished', '2024-01-01', '2024-01-01');"
+            "INSERT INTO odds_snapshots (fixture_id, bookmaker, market, selection, line, odds,"
+            " kind, taken_at) VALUES"
+            " (1, 'pinnacle', '1x2', 'home', 0, 2.0, 'closing', '2024-01-01 15:00:00'),"
+            " (1, 'pinnacle', '1x2', 'home', 0, 2.1, 'closing', '2024-01-01 12:00:00'),"
+            " (1, 'pinnacle', '1x2', 'home', 0, 2.2, 'morning', '2024-01-01 09:00:00'),"
+            " (1, 'pinnacle', '1x2', 'home', 0, 2.3, 'morning', '2024-01-01 10:00:00');"
+        )
+    command.upgrade(config, "head")
+    with connect(db_path) as connection:
+        rows = connection.execute("SELECT kind, odds FROM odds_snapshots ORDER BY id").fetchall()
+    assert rows == [("closing", 2.1), ("morning", 2.2), ("morning", 2.3)]
+
+
 def test_single_linear_history() -> None:
     scripts = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
     assert len(scripts.get_heads()) == 1

@@ -2,9 +2,11 @@
 
 import argparse
 import importlib.util
+import os
 import shutil
 import sqlite3
 from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 
@@ -13,6 +15,10 @@ import pytest
 import respx
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.exc import OperationalError
+
+from app.domain import HistoryBatch
+from app.sports.history.football_data import season_code
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "football_data"
@@ -146,3 +152,58 @@ def test_defaults_are_the_agreed_leagues_and_seasons(script: ModuleType) -> None
     assert options.seasons == (2021, 2022, 2023, 2024, 2025, 2026)
     assert options.cache_dir == Path("data/history")
     assert not options.offline
+
+
+@pytest.mark.parametrize(
+    "error",
+    [OperationalError("INSERT", {}, Exception("database is locked")), OSError("disk full")],
+)
+def test_database_or_disk_error_fails_only_that_file(
+    script: ModuleType,
+    db_path: Path,
+    cache_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    real_upsert = script.upsert_batch
+
+    async def failing_for_e0(session: object, batch: HistoryBatch) -> object:
+        if batch.fixtures and batch.fixtures[0].league.ref.external_id == "E0":
+            raise error
+        return await real_upsert(session, batch)
+
+    monkeypatch.setattr(script, "upsert_batch", failing_for_e0)
+    assert run(script, db_path, cache_dir, "--offline") == 1
+    assert counts(db_path)[0] == 3 + 2  # SP1 and D1 still imported; E0 rolled back
+
+
+@respx.mock
+def test_failed_refresh_falls_back_to_the_stale_cache(
+    script: ModuleType, db_path: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    season = script.current_season(datetime.now(UTC).date())
+    cached = tmp_path / "cache" / season_code(season) / "E0.csv"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(
+        b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG\n" + f"E0,15/08/{season},A,B,1,0\n".encode()
+    )
+    week_ago = (datetime.now(UTC) - timedelta(days=7)).timestamp()
+    os.utime(cached, (week_ago, week_ago))
+    respx.get().mock(return_value=httpx.Response(200, content=b"<html>blocked</html>"))
+
+    exit_code = script.main(
+        [
+            "--leagues",
+            "E0",
+            "--seasons",
+            str(season),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--db-path",
+            str(db_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert counts(db_path)[0] == 1
+    assert "using_stale_cache" in capsys.readouterr().out

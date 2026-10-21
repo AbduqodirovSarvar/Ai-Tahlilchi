@@ -20,7 +20,7 @@ Conventions:
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Final, Protocol, Self
@@ -33,7 +33,10 @@ type SignalId = int
 type BetId = int
 type TemplateId = int
 type EntityId = str
-"""Opaque id of a league, team, fixture or saved analysis query (≤ 64 bytes)."""
+"""Opaque id of a league, team, fixture or saved query; at most 40 UTF-8 bytes."""
+
+MAX_ENTITY_ID_BYTES: Final = 40
+"""Leaves room for an action prefix in Telegram's 64-byte ``callback_data``."""
 
 # --------------------------------------------------------------------------- limits
 MIN_PROBABILITY_LOWER: Final = 0.30
@@ -43,7 +46,8 @@ HIGH_PROBABILITY_WARNING: Final = 0.80
 MIN_EV_LOWER: Final = 0.0
 MIN_EV_UPPER: Final = 0.20
 MAX_FUTURE_DAYS: Final = 14
-"""Bookmakers publish odds 1-2 weeks ahead, so the window may end at most this far out."""
+"""Bookmakers publish odds 1-2 weeks ahead: a window covers at most this many days counted
+from today inclusive, i.e. it ends on :func:`horizon_end` (``today + 13``) at the latest."""
 MAX_WINDOW_DAYS: Final = 31
 """Longest window (inclusive day count); bounds retro analyses of past dates too."""
 PRELIMINARY_AFTER: Final = timedelta(days=3)
@@ -100,6 +104,20 @@ def _check_positive(value: Decimal | None, field: str) -> None:
         _check(value.is_finite() and value > 0, field, f"must be positive (got {value})")
 
 
+def is_valid_entity_id(value: str) -> bool:
+    """True for a non-blank id of at most :data:`MAX_ENTITY_ID_BYTES` UTF-8 bytes."""
+    return bool(value.strip()) and len(value.encode()) <= MAX_ENTITY_ID_BYTES
+
+
+def _check_entity_ids(values: frozenset[str] | tuple[str, ...], field: str) -> None:
+    """Every id fits the :data:`MAX_ENTITY_ID_BYTES` budget."""
+    _check(
+        all(is_valid_entity_id(value) for value in values),
+        field,
+        f"ids must be non-blank and at most {MAX_ENTITY_ID_BYTES} bytes",
+    )
+
+
 # --------------------------------------------------------------------------- enums
 class ScopeKind(StrEnum):
     """Which fixtures an analysis covers (plan §6.2, step 4)."""
@@ -150,6 +168,20 @@ class SignalState(StrEnum):
     ACTIVE = "active"
     CANCELLED = "cancelled"
     HIDDEN = "hidden"
+
+
+class SignalSource(StrEnum):
+    """Which flow produced a signal.
+
+    ``retro`` signals describe matches that had already kicked off when analysed: they show
+    what the model would have said, are never recommendations and never enter reports.
+    """
+
+    ANALYSIS = "analysis"
+    DAILY = "daily"
+    CUSTOM = "custom"
+    WATCHLIST = "watchlist"
+    RETRO = "retro"
 
 
 class ResultMark(StrEnum):
@@ -254,16 +286,39 @@ class DateWindow:
         return (self.date_to - self.date_from).days + 1
 
     def ensure_within_horizon(self, today: date) -> None:
-        """Reject windows ending more than :data:`MAX_FUTURE_DAYS` after ``today``.
+        """Reject windows ending after :func:`horizon_end` (``today + 13``).
 
         Past windows (retro analysis) are always allowed.
         """
-        limit = today + timedelta(days=MAX_FUTURE_DAYS)
-        _check(self.date_to <= limit, "date_to", f"must be at most {MAX_FUTURE_DAYS} days ahead")
+        _check(
+            self.date_to <= horizon_end(today),
+            "date_to",
+            f"must be within {MAX_FUTURE_DAYS} days from today (today included)",
+        )
 
     def is_retro(self, today: date) -> bool:
         """True when the whole window is in the past (results already known)."""
         return self.date_to < today
+
+    def utc_bounds(self, zone: ZoneInfo) -> tuple[datetime, datetime]:
+        """Half-open UTC interval ``[start, end)`` covering the window's local days.
+
+        Local midnights are converted by ``zoneinfo``, so days around a DST change are
+        23 or 25 hours long. This is the only place local dates become UTC instants.
+        """
+        start = datetime.combine(self.date_from, time(0), tzinfo=zone)
+        end = datetime.combine(self.date_to + timedelta(days=1), time(0), tzinfo=zone)
+        return start.astimezone(UTC), end.astimezone(UTC)
+
+    def contains(self, instant: datetime, zone: ZoneInfo) -> bool:
+        """True when ``instant`` falls on one of the window's local days."""
+        start, end = self.utc_bounds(zone)
+        return start <= instant < end
+
+
+def horizon_end(today: date) -> date:
+    """Last day a window may include: :data:`MAX_FUTURE_DAYS` days counting ``today``."""
+    return today + timedelta(days=MAX_FUTURE_DAYS - 1)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -416,8 +471,10 @@ DEFAULT_QUIET_HOURS: Final = QuietHours(time(0, 0), time(8, 0))
 class UserSettingsView:
     """A user's settings (plan §6.5). Also the update DTO: change with ``dataclasses.replace``.
 
-    Empty ``league_ids`` means "the default tracked leagues". ``prematch_minutes=None``
-    switches the pre-match update off, ``quiet_hours=None`` switches quiet hours off.
+    Empty ``league_ids`` means "every tracked league"; otherwise ``scope=all`` analyses and
+    unfiltered fixture lists cover only these leagues (watched entities are always added).
+    ``prematch_minutes=None`` switches the pre-match update off, ``quiet_hours=None``
+    switches quiet hours off.
     """
 
     sports: frozenset[Sport] = DEFAULT_SPORTS
@@ -460,6 +517,7 @@ class UserSettingsView:
             f"must be one of {sorted(PREMATCH_MINUTE_CHOICES)} or off",
         )
         _check(_is_time_zone(self.timezone), "timezone", "must be an IANA time zone name")
+        _check_entity_ids(self.league_ids, "league_ids")
         self._check_money()
 
     def _check_money(self) -> None:
@@ -534,6 +592,7 @@ class AnalysisQuery:
         else:
             _check(bool(self.scope_ids), "scope_ids", f"choose at least one for {self.scope}")
         _check(len(self.scope_ids) <= MAX_SCOPE_IDS, "scope_ids", f"at most {MAX_SCOPE_IDS}")
+        _check_entity_ids(self.scope_ids, "scope_ids")
         _check(
             self.max_signals is None or 1 <= self.max_signals <= QUERY_MAX_SIGNALS_UPPER,
             "max_signals",
@@ -580,7 +639,12 @@ class AnalysisProgress:
 
 
 type ProgressCallback = Callable[[AnalysisProgress], Awaitable[None]]
-"""Awaited by services between steps. It must not raise: the bot handles its own errors."""
+"""Awaited by services between steps.
+
+A failing callback never aborts the job: services catch and log any ``Exception`` it
+raises and carry on (``asyncio.CancelledError`` still propagates). Services may call it
+once per fixture, so the bot throttles its message edits (Telegram flood limits).
+"""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -591,6 +655,11 @@ class SignalView:
     analysis or the watchlist. ``data_as_of``: set when numbers come from a cache because
     the API reserve is spent ("09:00 holatiga"). ``experimental``: sport not yet
     backtested ("🧪 Test rejimi").
+
+    ``recommended_at``: when the selection first passed the value thresholds of a query
+    (``None`` = never recommended). Once set it never changes and ``no_value`` stays
+    ``False``, whatever later queries say. Only recommended, non-retro signals count in
+    reports, calibration, day summaries and exports; hiding a signal does not change that.
     """
 
     signal_id: SignalId
@@ -619,10 +688,21 @@ class SignalView:
     result: ResultMark | None = None
     version: int = 1
     data_as_of: datetime | None = None
+    source: SignalSource = SignalSource.ANALYSIS
+    recommended_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Guard the invariants the card formatter relies on."""
         _check_utc(self.kickoff, "kickoff")
+        _check(is_valid_entity_id(self.fixture_id), "fixture_id", "invalid entity id")
+        if self.recommended_at is not None:
+            _check_utc(self.recommended_at, "recommended_at")
+            _check(not self.no_value, "no_value", "a recommended signal has value")
+        _check(
+            self.source is not SignalSource.RETRO or self.recommended_at is None,
+            "recommended_at",
+            "retro signals are never recommendations",
+        )
         self.market.require_selection(self.selection)
         _check(self.odds > 1.0, "odds", "decimal odds must be greater than 1")
         _check(0.0 < self.probability <= 1.0, "probability", "must be within (0, 1]")
@@ -644,14 +724,26 @@ class SignalView:
         """True for "❗ Qiymatsiz" signals (plan §6.6)."""
         return self.ev < 0
 
+    @property
+    def retro(self) -> bool:
+        """True for a look-back at a match that had kicked off when analysed."""
+        return self.source is SignalSource.RETRO
+
+    @property
+    def recommended(self) -> bool:
+        """True once the selection has been recommended (it then counts in reports)."""
+        return self.recommended_at is not None
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AnalysisResult:
     """Outcome of :meth:`AnalysisService.analyze`.
 
     ``matched`` counts signals that met the conditions before the ``max_signals`` cap, so
-    the bot can say "3 matched (you asked for 10)". Fixtures that failed are counted in
-    ``failed_fixtures`` and skipped; the rest are still analysed.
+    the bot can say "3 matched (you asked for 10)". Watchlist signals (plan §6.7, "always
+    included") are added on top: they are neither cut by ``max_signals`` nor counted in
+    ``matched``. Fixtures that failed are counted in ``failed_fixtures`` and skipped; the
+    rest are still analysed. ``signals`` is ordered by the query's sort key.
     """
 
     query_id: EntityId
@@ -811,6 +903,20 @@ class FixtureDetail:
 
 # --------------------------------------------------------------------------- catalog
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SportOption:
+    """A sport for the sport picker and the markets the bot may offer for it.
+
+    ``available=False``: not supported yet (show disabled or hide). ``experimental``: no
+    backtest yet, signals carry the "🧪 Test rejimi" flag (plan §5).
+    """
+
+    sport: Sport
+    available: bool
+    experimental: bool
+    supported_markets: frozenset[MarketType]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class LeagueOption:
     """A league for the checkbox picker."""
 
@@ -818,6 +924,10 @@ class LeagueOption:
     sport: Sport
     name: str
     country: str | None = None
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``."""
+        _check(is_valid_entity_id(self.league_id), "league_id", "invalid entity id")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -828,6 +938,10 @@ class TeamOption:
     sport: Sport
     name: str
     league: str
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``."""
+        _check(is_valid_entity_id(self.team_id), "team_id", "invalid entity id")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -841,6 +955,11 @@ class FixtureOption:
     away_team: str
     kickoff: datetime
 
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``; kickoffs are UTC like every instant."""
+        _check(is_valid_entity_id(self.fixture_id), "fixture_id", "invalid entity id")
+        _check_utc(self.kickoff, "kickoff")
+
     @property
     def label(self) -> str:
         """``Home — Away``."""
@@ -849,7 +968,10 @@ class FixtureOption:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FixtureListRequest:
-    """One page of upcoming fixtures, ordered by kickoff (plan §6.2 step 4, §6.3)."""
+    """One page of fixtures, ordered by kickoff (plan §6.2 step 4, §6.3).
+
+    Without league and team filters the user's ``settings.league_ids`` apply (if set).
+    """
 
     dates: DateSpec
     sports: frozenset[Sport] = DEFAULT_SPORTS
@@ -863,6 +985,8 @@ class FixtureListRequest:
         _check(bool(self.sports), "sports", "choose at least one sport")
         _check(self.page >= 0, "page", "must not be negative")
         _check(1 <= self.page_size <= MAX_PAGE_SIZE, "page_size", f"must be 1..{MAX_PAGE_SIZE}")
+        _check_entity_ids(self.league_ids, "league_ids")
+        _check_entity_ids(self.team_ids, "team_ids")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -921,8 +1045,9 @@ class WatchTarget:
     entity_id: EntityId
 
     def __post_init__(self) -> None:
-        """Ids come from the catalog; blank ids are a bot bug."""
+        """Ids come from the catalog; blank or over-long ids are a bot bug."""
         _check(bool(self.entity_id.strip()), "entity_id", "must not be empty")
+        _check(is_valid_entity_id(self.entity_id), "entity_id", "invalid entity id")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1025,22 +1150,48 @@ class DaySummary:
 # --------------------------------------------------------------------------- reports
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReportRequest:
-    """Report period (local dates, inclusive; ``date_from=None`` = all time) and slice."""
+    """Report period (local dates, inclusive) and slice.
 
-    date_to: date
+    ``date_from=None`` = all time; ``date_to=None`` = the user's today as the service sees
+    it. ``recent_days=N`` = the last N days ending today (resolved by the service, so the
+    bot never needs "today"); it excludes explicit dates.
+    """
+
+    date_to: date | None = None
     date_from: date | None = None
     group_by: ReportGroup | None = None
+    recent_days: int | None = None
 
     def __post_init__(self) -> None:
-        """An ordered period."""
-        if self.date_from is not None:
+        """An ordered period; a relative period carries no explicit dates."""
+        if self.date_from is not None and self.date_to is not None:
             _check(self.date_to >= self.date_from, "date_to", "must not be before date_from")
+        if self.recent_days is not None:
+            _check(self.recent_days >= 1, "recent_days", "must be at least 1")
+            no_dates = self.date_from is None and self.date_to is None
+            _check(no_dates, "recent_days", "cannot be combined with explicit dates")
 
     @classmethod
     def last_days(cls, days: int, today: date, group_by: ReportGroup | None = None) -> Self:
         """``days`` days ending ``today`` ("7 kun", "30 kun")."""
         _check(days >= 1, "days", "must be at least 1")
         return cls(date_from=today - timedelta(days=days - 1), date_to=today, group_by=group_by)
+
+    @classmethod
+    def recent(cls, days: int, group_by: ReportGroup | None = None) -> Self:
+        """The last ``days`` days ending on the service's today."""
+        return cls(recent_days=days, group_by=group_by)
+
+    @classmethod
+    def all_time(cls, group_by: ReportGroup | None = None) -> Self:
+        """Everything up to today."""
+        return cls(group_by=group_by)
+
+    def resolve(self, today: date) -> tuple[date | None, date]:
+        """Concrete ``(date_from, date_to)`` for the user's ``today``."""
+        if self.recent_days is not None:
+            return today - timedelta(days=self.recent_days - 1), today
+        return self.date_from, self.date_to or today
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1163,7 +1314,12 @@ class AnalysisService(Protocol):
     async def analyze(
         self, user_id: int, query: AnalysisQuery, *, progress: ProgressCallback | None = None
     ) -> AnalysisResult:
-        """Run the query and store its signals (re-running updates the same signals).
+        """Run the query and store its signals (re-running returns the same signal ids).
+
+        Only fixtures that have not kicked off produce real signals. Finished fixtures in
+        the window produce ``source=retro`` signals (with ``result``) that are never
+        recommendations; in-play fixtures are skipped. ``scope=all`` covers
+        ``settings.league_ids`` (all tracked leagues when empty) plus watched entities.
 
         Raises:
             ValidationFailedError: the window ends beyond the horizon.
@@ -1174,7 +1330,9 @@ class AnalysisService(Protocol):
     async def recalc_signal(self, user_id: int, signal_id: SignalId) -> RecalcDiff:
         """Recalculate one signal with fresh odds; at most once per fixture per cooldown.
 
-        When the API reserve is spent, the numbers stay and ``data_as_of`` is set.
+        When the API reserve is spent, the numbers stay and ``data_as_of`` is set. The
+        verdict compares the new numbers with the thresholds the signal was created with
+        (the query's probability/EV and the odds range in force then), not today's settings.
 
         Raises:
             NotFoundError: unknown signal or not the user's.
@@ -1216,11 +1374,13 @@ class SignalService(Protocol):
     async def list_signals(
         self, user_id: int, dates: DateSpec, *, include_hidden: bool = False
     ) -> tuple[SignalView, ...]:
-        """The user's signals with kickoff in ``dates``, ordered by kickoff."""
+        """The user's non-retro signals with kickoff in ``dates``, ordered by kickoff."""
         ...
 
     async def hide_signal(self, user_id: int, signal_id: SignalId) -> SignalView:
         """Hide a signal ("🙈 Yashirish"); idempotent.
+
+        Hiding is view-only: the signal keeps counting in reports, results and exports.
 
         Raises:
             NotFoundError: unknown signal or not the user's.
@@ -1230,6 +1390,10 @@ class SignalService(Protocol):
 
 class CatalogService(Protocol):
     """Leagues, teams and fixtures for pickers and searches (plan §6.2 step 4, §6.3)."""
+
+    async def list_sports(self) -> tuple[SportOption, ...]:
+        """Every :class:`~app.domain.Sport` with its availability, in enum order."""
+        ...
 
     async def list_leagues(self, sport: Sport) -> tuple[LeagueOption, ...]:
         """Tracked leagues of ``sport``, ordered by name."""
@@ -1258,7 +1422,8 @@ class CatalogService(Protocol):
         """A page of fixtures in the user's time zone; in-play matches are left out.
 
         A page past the end is empty, not an error. When both ``league_ids`` and
-        ``team_ids`` are given, a fixture matches either.
+        ``team_ids`` are given, a fixture matches either; with neither, the user's
+        ``settings.league_ids`` apply (all tracked leagues when empty).
 
         Raises:
             ValidationFailedError: the window ends beyond the horizon.
@@ -1341,7 +1506,7 @@ class BetService(Protocol):
         Raises:
             NotFoundError: unknown signal or not the user's.
             ValidationFailedError: no stake given and none can be derived (no unit set or a
-                zero-stake signal).
+                zero-stake signal), or a retro signal (a look-back, not a bet).
         """
         ...
 
@@ -1360,7 +1525,7 @@ class ResultService(Protocol):
     """Result marking and feedback (plan §6.13 A)."""
 
     async def pending_results(self, user_id: int) -> tuple[SignalView, ...]:
-        """Signals whose match is over but whose result is still unknown (``/natijalar``)."""
+        """Recommended signals (hidden ones too) whose match is over without a result."""
         ...
 
     async def mark_result(self, user_id: int, request: ResultMarkRequest) -> SignalView:
@@ -1368,7 +1533,7 @@ class ResultService(Protocol):
 
         Raises:
             NotFoundError: unknown signal or not the user's.
-            ValidationFailedError: the match has not started yet.
+            ValidationFailedError: the match has not started yet, or a retro signal.
         """
         ...
 
@@ -1382,19 +1547,22 @@ class ResultService(Protocol):
         ...
 
     async def day_summary(self, user_id: int, day: date) -> DaySummary:
-        """Summary of the signals that kicked off on ``day`` (local date)."""
+        """Summary of the recommended signals that kicked off on ``day`` (local date)."""
         ...
 
 
 class ReportService(Protocol):
-    """Performance reports (plan §6.10)."""
+    """Performance reports (plan §6.10) over recommended, non-retro signals.
+
+    Hidden signals count; no-value and retro signals never do (no selection bias).
+    """
 
     async def report(self, user_id: int, request: ReportRequest) -> ReportView:
-        """Metrics, calibration table and the optional slice."""
+        """Metrics, calibration table and the optional slice; ROI uses all the user's bets."""
         ...
 
     async def export(self, user_id: int) -> ExportFile:
-        """All signals with results as CSV (``/eksport``)."""
+        """All recommended signals with results as CSV (``/eksport``)."""
         ...
 
 

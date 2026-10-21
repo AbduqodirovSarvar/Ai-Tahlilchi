@@ -127,6 +127,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 xfail_strict = true
+markers = [
+    "slow: long-running test (seconds to minutes); deselect with -m 'not slow'",
+]
 filterwarnings = ["error"]
 addopts = [
     "-ra",
@@ -208,6 +211,22 @@ type = "forbidden"
 source_modules = ["app.services"]
 forbidden_modules = ["app.models", "app.sports", "app.db", "app.llm", "app.clients"]
 allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+# The in-memory fake is for the bot's development and tests only. List every new real
+# module of app.services here as it is added.
+name = "production code never depends on the fake services"
+type = "forbidden"
+source_modules = [
+    "app.pipeline",
+    "app.services.interfaces",
+    "app.services.errors",
+]
+forbidden_modules = [
+    "app.services.fake",
+    "app.services._fake_world",
+    "app.services._fake_metrics",
+]
 
 [[tool.importlinter.contracts]]
 name = "models are pure (only domain and errors)"

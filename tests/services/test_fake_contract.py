@@ -11,10 +11,12 @@ from tests.services.contract_suite import (
     FixtureDetailContract,
     MutableClock,
     RecalcContract,
+    RecommendationContract,
     ReportContract,
     ResultContract,
     SettingsContract,
     SignalContract,
+    SportsContract,
     StatusContract,
     TemplateContract,
     WatchlistContract,
@@ -81,4 +83,12 @@ class TestReports(ReportContract):
 
 
 class TestStatus(StatusContract):
+    pass
+
+
+class TestRecommendations(RecommendationContract):
+    pass
+
+
+class TestSports(SportsContract):
     pass
