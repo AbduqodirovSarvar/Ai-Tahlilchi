@@ -168,7 +168,6 @@ DEP002 = [
     "aiosqlite",
     "apscheduler",
     "google-genai",
-    "matplotlib",
     "pandas",
     "rapidfuzz",
     "scikit-learn",

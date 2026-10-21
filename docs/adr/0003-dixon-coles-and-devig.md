@@ -83,6 +83,6 @@ Avvalgi "≈ 20 ms" bahosi faqat qisqa tarixli test ligasiga tegishli edi va opt
 - **Kesilgan dumni oxirgi qator/ustunga yig'ish:** ba'zi bozorlarda aniq, lekin "10+" katagi aniq hisob emas bo'lib qoladi. Adaptiv `N` + normallash tanlandi (dum < 1e-10, ta'siri sezilmaydi).
 
 ## Oqibatlar
-- `ξ`, ansambl `w` va EV chegarasi backtestda tanlanadi (F3.7); bu ADR faqat formulalarni qotiradi.
+- `ξ`, ansambl `w` va EV chegarasi backtestda tanlanadi (F3.7); bu ADR faqat formulalarni qotiradi. Domen adapterlari, bozor modeli, ansambl, ishonch darajasi va backtest metodologiyasi: [ADR 0005](0005-backtest-methodology.md) (T3). T3 da qo'shilgan `asian_fair_odds(outcomes) = 1 + (loss + half_loss/2) / (win + half_win/2)` ham `ev.py` da (formulalar bitta joyda).
 - `scipy-stubs` dev bog'liqlik sifatida qo'shilgan (orkestr ruxsati bilan, T2 sharhi): scipy chaqiruvlari `mypy --strict` ostida `type: ignore` siz tekshiriladi.
 - Model funksiyalari sinxron va sof; pipeline ularni `asyncio.to_thread` orqali chaqiradi.

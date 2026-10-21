@@ -8,6 +8,7 @@ from app.models import (
     AsianOutcomeProbabilities,
     ModelInputError,
     asian_expected_value,
+    asian_fair_odds,
     expected_value,
     fair_odds,
 )
@@ -65,3 +66,18 @@ def test_ev_is_monotone_in_odds(probability: float, o1: float, o2: float) -> Non
 def test_invalid_inputs_are_rejected(probability: float, odds: float) -> None:
     with pytest.raises(ModelInputError):
         expected_value(probability, odds)
+
+
+def test_asian_fair_odds_zeroes_ev() -> None:
+    outcomes = AsianOutcomeProbabilities(0.4, 0.1, 0.1, 0.15, 0.25)
+    odds = asian_fair_odds(outcomes)
+    assert odds == pytest.approx(1 + (0.25 + 0.075) / (0.4 + 0.05))
+    assert asian_expected_value(outcomes, odds) == pytest.approx(0.0, abs=1e-12)
+    with pytest.raises(ModelInputError, match="cannot win"):
+        asian_fair_odds(AsianOutcomeProbabilities(0.0, 0.0, 0.5, 0.0, 0.5))
+
+
+@given(st.floats(min_value=0.01, max_value=1.0))
+def test_asian_fair_odds_of_binary_bet_is_one_over_p(probability: float) -> None:
+    binary = AsianOutcomeProbabilities.binary(probability)
+    assert asian_fair_odds(binary) == pytest.approx(fair_odds(probability))
