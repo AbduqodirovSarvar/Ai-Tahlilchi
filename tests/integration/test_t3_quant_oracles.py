@@ -230,7 +230,8 @@ def _quote(
         kind=kind,
         market=market,
         prices=prices,
-        taken_at=fixture.kickoff,
+        # Decision-time prices must predate kickoff (F-3 guard); closing is at kickoff.
+        taken_at=fixture.kickoff - (timedelta(days=1) if kind is OddsKind.OPENING else timedelta()),
     )
 
 
