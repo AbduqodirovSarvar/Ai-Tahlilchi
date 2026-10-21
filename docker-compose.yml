@@ -1,0 +1,36 @@
+# Local / single-host run: `docker compose up -d --build`.
+# Secrets come from .env (optional at parse time; the bot refuses to start without
+# TELEGRAM_BOT_TOKEN and ADMIN_IDS, logs a clear reason and exits with code 2).
+services:
+  bot:
+    build: .
+    image: ai-tahlilchi:local
+    # Bounded retries: a configuration error (exit 2) must not restart forever.
+    restart: on-failure:5
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: prod
+      DB_PATH: /data/app.db
+    volumes:
+      # Named volume: created from the image's /data, so it is owned by the app user (uid 10001)
+      # without any host-side chown.
+      - bot-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  bot-data:

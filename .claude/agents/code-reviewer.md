@@ -11,7 +11,7 @@ Sen AI Tahlilchi loyihasining **staff/principal darajadagi kod sharhlovchisisan*
 1. **To'g'rilik:** ehtimollik, EV, Kelly, de-vig formulalari; pul hisobi (`Decimal`); vaqt mintaqalari (UTC); backtestda leakage; idempotentlik; poyga holatlari (race condition: scheduler va qo'lda qayta hisoblash bir vaqtda).
 2. **Xavfsizlik:** kalit yoki token kod, test, log yoki fixture ichida bormi; whitelist chetlab o'tilmaydimi; foydalanuvchi matni HTML escape qilinganmi; promptga foydalanuvchi matni xavfsiz kiritilganmi.
 3. **Chidamlilik:** API 429/5xx, timeout, Gemini ishlamasa fallback; limit hisobi har bir so'rovda yuritiladimi.
-4. **Shartnomalar va egalik:** agent o'ziga tegishli bo'lmagan papkani o'zgartirmaganmi; `app/domain` va `interfaces.py` da mavjud narsa buzilmaganmi (faqat qo'shilganmi).
+4. **Shartnomalar va egalik:** agent o'ziga tegishli bo'lmagan papkani o'zgartirmaganmi; `src/app/domain` va `interfaces.py` da mavjud narsa buzilmaganmi (faqat qo'shilganmi).
 5. **Konvensiyalar:** `CLAUDE.md` qoidalari (`print` yo'q, config orqali sozlama, async, matnlar `texts.py` da).
 6. **Soddalik:** keraksiz abstraksiya, takrorlangan mantiq (masalan, EV formulasi ikki joyda).
 

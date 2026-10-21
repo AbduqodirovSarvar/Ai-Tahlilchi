@@ -11,7 +11,7 @@ Barcha agentlar va sessiyalar uchun umumiy qoidalar.
 
 ## Til
 - Kod (identifikatorlar, commit xabarlari, kod ichidagi izohlar): **ingliz tili**.
-- Bot foydalanuvchiga ko'rsatadigan matnlar va hujjatlar: **o'zbek tili (lotin)**. Bot matnlari faqat `app/bot/texts.py` da saqlanadi.
+- Bot foydalanuvchiga ko'rsatadigan matnlar va hujjatlar: **o'zbek tili (lotin)**. Bot matnlari faqat `src/app/bot/texts.py` da saqlanadi.
 
 ## Stek
 Python 3.13, `uv`, `aiogram 3`, `httpx` + `tenacity`, `SQLAlchemy 2` (async) + `aiosqlite` + `Alembic`, `pydantic-settings`, `APScheduler`, `numpy/scipy/pandas/scikit-learn`, `google-genai`, `rapidfuzz`, `matplotlib`, `structlog`; testlar: `pytest`, `pytest-asyncio`, `respx`, `hypothesis`. To'liq jadval: `ishlab_chiqish_rejasi.md`, 1-bo'lim.
@@ -24,19 +24,20 @@ uv sync                      # bog'liqliklar
 uv run pytest                # testlar
 uv run ruff check . --fix    # lint
 uv run ruff format .         # format
-uv run mypy app              # tiplar
+uv run mypy src              # tiplar
 uv run alembic upgrade head  # migratsiyalar
 ```
 Vazifa faqat **hammasi yashil** bo'lgandan keyin "bajarildi" deb hisoblanadi.
 
 ## Kod qoidalari
+- **src layout:** barcha dastur kodi `src/app/` da, paket nomi `app` (importlar: `from app.models import ...`). Testlar ildizdagi `tests/` da, o'rnatilgan paketni import qiladi.
 - Har joyda async. Bloklovchi chaqiruvlar (pandas, scipy) og'ir bo'lsa `asyncio.to_thread` orqali bajariladi.
 - Vaqt bazada va kodda **UTC** (`datetime` timezone bilan). `Asia/Tashkent` ga faqat ko'rsatishda o'tkaziladi.
-- Barcha tashqi sozlamalar faqat `app/config.py` orqali olinadi; `os.environ` ni to'g'ridan-to'g'ri o'qish taqiqlanadi.
+- Barcha tashqi sozlamalar faqat `src/app/config.py` orqali olinadi; `os.environ` ni to'g'ridan-to'g'ri o'qish taqiqlanadi.
 - Loglash `structlog` orqali; `print` taqiqlanadi.
 - Pul summalari uchun `Decimal`; koeffitsient va ehtimolliklar uchun `float`.
 - Testlarda tarmoq yo'q: HTTP `respx` bilan, Gemini mock bilan, baza vaqtinchalik SQLite.
-- Testlar `tests/` da `app/` tuzilmasini takrorlaydi (`app/models/poisson.py` → `tests/models/test_poisson.py`).
+- Testlar `tests/` da `src/app/` tuzilmasini takrorlaydi (`src/app/models/poisson.py` → `tests/models/test_poisson.py`).
 
 ## Senior Muhandislik Standarti (barcha agentlar uchun majburiy)
 
@@ -82,12 +83,12 @@ Sifat "iltimos" bilan emas, **avtomatik darvozalar** bilan ta'minlanadi. Quyidag
 
 | Soha | Talab | Vosita |
 |---|---|---|
-| Lint | Qoidalar to'plami: `E, W, F, I, N, UP, B, A, C4, SIM, RET, ARG, PTH, PL, RUF, S, ASYNC, DTZ, T20, ERA, PERF, D` (D: Google uslubi, faqat `app/`) | `ruff check` |
+| Lint | Qoidalar to'plami: `E, W, F, I, N, UP, B, A, C4, SIM, RET, ARG, PTH, PL, RUF, S, ASYNC, DTZ, T20, ERA, PERF, D` (D: Google uslubi, faqat `src/app/`) | `ruff check` |
 | Format | Yagona format, satr uzunligi 100 | `ruff format --check` |
-| Tiplar | `mypy --strict` butun `app/` uchun. Ommaviy signaturalarda `Any` yo'q. `# type: ignore` faqat xato kodi va sabab izohi bilan | `mypy` |
+| Tiplar | `mypy --strict` butun `src/app/` uchun. Ommaviy signaturalarda `Any` yo'q. `# type: ignore` faqat xato kodi va sabab izohi bilan | `mypy` |
 | Murakkablik | Siklomatik murakkablik ≤ 10, funksiya ≤ 50 qator, parametrlar ≤ 5, ichma-ich joylashuv ≤ 3 daraja | `ruff` (C90, PLR) |
 | Qatlam chegaralari | `bot` → faqat `services`; `services` → `pipeline`; `pipeline` → `models`, `sports`, `db`, `llm`; `models` hech narsani import qilmaydi (sof). Teskari importlar taqiqlangan | `import-linter` |
-| Test qamrovi | Umumiy ≥ 85% (branch coverage), `app/models` va `app/pipeline` ≥ 90% | `pytest --cov --cov-fail-under` |
+| Test qamrovi | Umumiy ≥ 85% (branch coverage), `src/app/models` va `src/app/pipeline` ≥ 90% | `pytest --cov --cov-fail-under` |
 | Xavfsizlik | `S` (bandit) qoidalari, bog'liqliklardagi zaifliklar | `ruff`, `pip-audit` |
 | Bog'liqliklar | Ishlatilmagan yoki e'lon qilinmagan bog'liqlik yo'q | `deptry` |
 | Maxfiy ma'lumot | Kalit yoki token commit qilinmaydi | `gitleaks` (pre-commit) |
@@ -99,7 +100,7 @@ Sifat "iltimos" bilan emas, **avtomatik darvozalar** bilan ta'minlanadi. Quyidag
 - **O'zgarmaslik:** domen obyektlari va DTO lar `frozen` dataclass yoki pydantic modellar.
 - **Takrorlash yo'q:** bir formula yoki mantiq faqat bir joyda yoziladi (EV, de-vig, vaqt o'tkazish).
 - **Izohlar** "nima uchun"ni tushuntiradi. O'chirib qo'yilgan (commented-out) kod qoldirilmaydi.
-- **Xatolar:** loyihaning istisnolar ierarxiyasi (`app/errors.py`) ishlatiladi. Yalang'och `except:` va `except Exception: pass` taqiqlanadi.
+- **Xatolar:** loyihaning istisnolar ierarxiyasi (`src/app/errors.py`) ishlatiladi. Yalang'och `except:` va `except Exception: pass` taqiqlanadi.
 - **Commitlar** kichik va mantiqiy bir butun (Conventional Commits). Har bir commit testlardan o'tadi.
 - **Boy-scout qoidasi:** o'z egaligidagi kodga tegilganda, uni topilgan holatidan toza qoldiriladi.
 
@@ -109,7 +110,7 @@ Sifat "iltimos" bilan emas, **avtomatik darvozalar** bilan ta'minlanadi. Quyidag
 
 ## Egalik va shartnomalar
 - Har bir agent faqat o'ziga tegishli papkalarni o'zgartiradi (`agentlar_rejasi.md`, 2-bo'lim).
-- `app/domain/`, `app/sports/base.py`, `app/services/interfaces.py` umumiy **shartnomalar**. Ularni o'zgartirish kerak bo'lsa, faqat yangi narsa qo'shiladi, mavjudi buzilmaydi. O'zgarish `docs/contracts.md` ga yoziladi va hisobotda alohida ko'rsatiladi.
+- `src/app/domain/`, `src/app/sports/base.py`, `src/app/services/interfaces.py` umumiy **shartnomalar**. Ularni o'zgartirish kerak bo'lsa, faqat yangi narsa qo'shiladi, mavjudi buzilmaydi. O'zgarish `docs/contracts.md` ga yoziladi va hisobotda alohida ko'rsatiladi.
 
 ## Hisobot
 Har bir agent ish oxirida `agentlar_rejasi.md` 5-bo'limidagi formatda hisobot qaytaradi va `docs/progress.md` dagi tegishli vazifalarni belgilaydi.

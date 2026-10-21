@@ -1,0 +1,231 @@
+[project]
+name = "ai-tahlilchi"
+version = "0.1.0"
+description = "Sports analytics advisory system: statistical models + Gemini, delivered via a Telegram bot."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "LicenseRef-Proprietary"
+dependencies = [
+    "aiogram>=3.31,<4",
+    "aiosqlite>=0.22",
+    "alembic>=1.20",
+    "apscheduler>=3.11,<4",
+    "google-genai>=2.32,<3",
+    "httpx>=0.28",
+    "matplotlib>=3.11",
+    "numpy>=2.5",
+    "pandas>=3.0,<4",
+    "pydantic>=2.13,<3",
+    "pydantic-settings>=2.16,<3",
+    "rapidfuzz>=3.14",
+    "scikit-learn>=1.9",
+    "scipy>=1.18",
+    "sqlalchemy[asyncio]>=2.1,<3",
+    "structlog>=26.1",
+    "tenacity>=9.1",
+    # zoneinfo has no system tz database on Windows (and minimal containers).
+    "tzdata>=2026.5",
+]
+
+[dependency-groups]
+dev = [
+    "coverage[toml]>=7.16",
+    "deptry>=0.25",
+    "hypothesis>=6.170",
+    "import-linter>=2.15",
+    "mypy>=2.4",
+    "pip-audit>=2.10",
+    "pre-commit>=4.7",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "pytest-cov>=7.1",
+    "respx>=0.23",
+    "ruff>=0.17",
+]
+
+[build-system]
+# Exact pin: the build backend is not covered by uv.lock.
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+# src layout: the importable package is `app`, located in src/app (see docs/adr/0001-tooling.md).
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+# --------------------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+# Markdown is excluded: plan documents embed illustrative, not runnable, Python.
+extend-exclude = ["alembic/versions", "*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "ARG", "PTH", "PL",
+    "RUF", "S", "ASYNC", "DTZ", "T20", "ERA", "PERF", "D", "C90",
+    # Preview rule (enabled explicitly below): max nesting depth.
+    "PLR1702",
+]
+# Only the preview rules listed explicitly in `select` are enabled.
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.per-file-ignores]
+# Docstrings are required only in src/; asserts, literal values and obviously fake
+# credentials (e.g. "42:TEST") are normal in tests.
+"tests/**" = ["D", "S101", "S105", "S106", "PLR2004"]
+"scripts/**" = ["D"]
+# The module name `app.logging` is mandated by the project plan; it never shadows the
+# stdlib because every import in the project is absolute.
+"src/app/logging.py" = ["A005"]
+# CLI quality-gate tool: writing its report to stdout is its purpose.
+"scripts/ops/**" = ["T201"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-positional-args = 5
+# No ruff rule counts physical lines; 50 statements is the closest enforceable proxy.
+max-statements = 50
+max-nested-blocks = 3
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# --------------------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.13"
+files = ["src"]
+mypy_path = "src"
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "redundant-self"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# --------------------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+minversion = "9.1"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true
+filterwarnings = ["error"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+# Overall gate; stricter per-package gates live in scripts/ops/coverage_gate.py.
+fail_under = 85
+skip_empty = true
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "^\\s*\\.\\.\\.$",
+]
+
+# --------------------------------------------------------------------------- deptry
+[tool.deptry]
+known_first_party = ["app"]
+
+[tool.deptry.per_rule_ignores]
+# DEP002 (declared but unused): the CLAUDE.md stack is declared up front so every agent
+# works against one lock file. Remove a name from this list as soon as code imports it.
+# `tzdata` stays: it is loaded implicitly by `zoneinfo`, never imported.
+DEP002 = [
+    "aiosqlite",
+    "alembic",
+    "apscheduler",
+    "google-genai",
+    "httpx",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "rapidfuzz",
+    "scikit-learn",
+    "scipy",
+    "sqlalchemy",
+    "tenacity",
+    "tzdata",
+]
+# DEP004 (dev dependency in non-test code): the CI coverage gate script uses coverage.
+DEP004 = ["coverage"]
+
+# --------------------------------------------------------------------------- import-linter
+[tool.importlinter]
+root_packages = ["app"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (higher layers may import lower ones, never the reverse)"
+type = "layers"
+layers = [
+    "app.main",
+    "app.bot",
+    "app.services",
+    "app.pipeline",
+    "app.models | app.sports | app.db | app.llm",
+    "app.clients",
+    "app.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "bot talks to the system only through services"
+type = "forbidden"
+source_modules = ["app.bot"]
+forbidden_modules = ["app.pipeline", "app.models", "app.sports", "app.db", "app.llm", "app.clients"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "services reach the core only through pipeline"
+type = "forbidden"
+source_modules = ["app.services"]
+forbidden_modules = ["app.models", "app.sports", "app.db", "app.llm", "app.clients"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "models are pure (only domain and errors)"
+type = "forbidden"
+source_modules = ["app.models"]
+forbidden_modules = [
+    "app.main", "app.bot", "app.services", "app.pipeline", "app.sports", "app.db", "app.llm",
+    "app.clients", "app.config", "app.logging",
+    "aiogram", "httpx", "sqlalchemy", "aiosqlite", "apscheduler", "google",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "domain and errors depend on nothing internal"
+type = "forbidden"
+source_modules = ["app.domain", "app.errors"]
+forbidden_modules = [
+    "app.main", "app.bot", "app.services", "app.pipeline", "app.models", "app.sports",
+    "app.db", "app.llm", "app.clients", "app.config", "app.logging",
+]
+allow_indirect_imports = true

@@ -360,7 +360,7 @@ TAJRIBA KONTEKSTI (so'nggi 90 kun):
 
 ```
 ai-tahlilchi/
-├── app/
+├── src/app/
 │   ├── config.py          # .env, standart sozlamalar, risk profillari
 │   ├── clients/           # api_sports.py, odds_api.py, gemini.py
 │   ├── sports/            # base.py (SportAdapter), football.py, hockey.py, basketball.py

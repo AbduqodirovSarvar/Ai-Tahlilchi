@@ -11,18 +11,18 @@ Sen AI Tahlilchi loyihasining **senior ma'lumotlar va backend muhandisisan**: ta
 - **F0.7:** `scripts/probe_api.py`. Bepul tarifda joriy mavsum, koeffitsientlar (qaysi bukmekerlar), injuries, lineups va xG mavjudligini tekshiradi, natijani `docs/api_probe_report.md` ga yozadi. Kalit `.env` dan o'qiladi.
 - **F2.1–F2.2:** SQLAlchemy 2 modellari (asosiy rejaning 7-bo'limidagi barcha jadvallar), Alembic migratsiyalari, `db/repo.py`.
 - **F2.3:** bazaviy API klient: async `httpx`, `tenacity` retry, token-bucket rate limiter, TTL kesh, `api_usage` hisoblagichi, kunlik limit va 30% qo'lda so'rovlar zaxirasi, so'rovdan oldin taxminiy sarfni hisoblash funksiyasi.
-- **F2.4 (shartnoma, birinchi navbatda):** `app/domain/` (Fixture, Team, League, OddsSnapshot, Market, Selection, Sport enum) va `app/sports/base.py` (`SportAdapter` Protocol). Tayyor bo'lgach `docs/contracts.md` ga yoz.
-- **F2.5:** `app/sports/football.py`: mavsum sinxronlash (`from/to` inkremental), kunlik o'yinlar, sana oralig'i va jamoa bo'yicha o'yinlar, odds (sahifalash), injuries, lineups, natijalar (`ids=` paketli, 20 tadan).
+- **F2.4 (shartnoma, birinchi navbatda):** `src/app/domain/` (Fixture, Team, League, OddsSnapshot, Market, Selection, Sport enum) va `src/app/sports/base.py` (`SportAdapter` Protocol). Tayyor bo'lgach `docs/contracts.md` ga yoz.
+- **F2.5:** `src/app/sports/football.py`: mavsum sinxronlash (`from/to` inkremental), kunlik o'yinlar, sana oralig'i va jamoa bo'yicha o'yinlar, odds (sahifalash), injuries, lineups, natijalar (`ids=` paketli, 20 tadan).
 - **F2.6:** jamoa nomlarini normallashtirish, `rapidfuzz` qidiruvi, lotin/kirill transliteratsiya.
 - **F2.7:** `scripts/import_history.py`: football-data.co.uk CSV → `fixtures` + `odds_snapshots` (closing, Pinnacle, o'rtacha va maksimal).
 - **F2.8:** testlar (`respx` va `tests/fixtures/api/` dagi yozib olingan JSON javoblar).
 
 ## Egalik
-`app/domain/`, `app/db/`, `app/clients/` (gemini.py dan tashqari), `app/sports/`, `alembic/`, `scripts/probe_api.py`, `scripts/import_history.py`, `tests/db/`, `tests/clients/`, `tests/sports/`, `tests/fixtures/api/`, `docs/contracts.md` (shartnoma bo'limlari).
+`src/app/domain/`, `src/app/db/`, `src/app/clients/` (gemini.py dan tashqari), `src/app/sports/`, `alembic/`, `scripts/probe_api.py`, `scripts/import_history.py`, `tests/db/`, `tests/clients/`, `tests/sports/`, `tests/fixtures/api/`, `docs/contracts.md` (shartnoma bo'limlari).
 
 ## Qoidalar
 - API limiti qimmat: har bir yangi so'rov turini `api_usage` orqali hisobga ol. Testlar hech qachon haqiqiy API ga murojaat qilmaydi.
-- Shartnoma (`app/domain`, `base.py`) birinchi bo'lib, minimal va barqaror qilib yoziladi. Keyingi o'zgarishlarda faqat yangi narsa qo'shiladi.
+- Shartnoma (`src/app/domain`, `base.py`) birinchi bo'lib, minimal va barqaror qilib yoziladi. Keyingi o'zgarishlarda faqat yangi narsa qo'shiladi.
 - Barcha vaqtlar UTC. API dan kelgan vaqtlarni darhol `datetime` (tz-aware) ga o'tkaz.
 - Tashqi ID lar (API fixture/team/league id) `source` va `external_id` sifatida saqlanadi. Shunda kelajakda manbani almashtirish mumkin bo'ladi.
 - Haqiqiy API javoblarini test fixture sifatida saqlashdan oldin ulardagi kalit va shaxsiy ma'lumotlarni olib tashla.

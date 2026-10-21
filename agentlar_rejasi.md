@@ -20,12 +20,12 @@
 
 | Agent | Fazalar / vazifalar | Egalik qiladigan papkalar |
 |---|---|---|
-| 🏗 `infra-engineer` | F1, F9 | `pyproject.toml`, `Dockerfile`, `.github/`, `app/config.py`, `app/logging.py`, `app/main.py`, `deploy/`, `scripts/ops/`, `README.md`, `RUNBOOK.md` |
-| 🗄 `data-engineer` | F0.7, F2 | `app/domain/`, `app/db/`, `app/clients/` (gemini'dan tashqari), `app/sports/`, `alembic/`, `scripts/probe_api.py`, `scripts/import_history.py` |
-| 📐 `quant-modeler` | F3, F8.5–F8.6 | `app/models/`, `scripts/backtest.py`, `docs/backtest/` |
-| ⚙️ `pipeline-engineer` | F4, servis shartnomasi | `app/services/`, `app/pipeline/`, `app/scheduler.py` |
-| 🤖 `llm-engineer` | F5, F8.3–F8.4, F8.7 | `app/clients/gemini.py`, `app/llm/` |
-| 💬 `bot-engineer` | F6, F7, F8.1–F8.2, F8.8 | `app/bot/`, `docs/test_scenarios.md` |
+| 🏗 `infra-engineer` | F1, F9 | `pyproject.toml`, `Dockerfile`, `.github/`, `src/app/config.py`, `src/app/logging.py`, `src/app/main.py`, `deploy/`, `scripts/ops/`, `README.md`, `RUNBOOK.md` |
+| 🗄 `data-engineer` | F0.7, F2 | `src/app/domain/`, `src/app/db/`, `src/app/clients/` (gemini'dan tashqari), `src/app/sports/`, `alembic/`, `scripts/probe_api.py`, `scripts/import_history.py` |
+| 📐 `quant-modeler` | F3, F8.5–F8.6 | `src/app/models/`, `scripts/backtest.py`, `docs/backtest/` |
+| ⚙️ `pipeline-engineer` | F4, servis shartnomasi | `src/app/services/`, `src/app/pipeline/`, `src/app/scheduler.py` |
+| 🤖 `llm-engineer` | F5, F8.3–F8.4, F8.7 | `src/app/clients/gemini.py`, `src/app/llm/` |
+| 💬 `bot-engineer` | F6, F7, F8.1–F8.2, F8.8 | `src/app/bot/`, `docs/test_scenarios.md` |
 | 🧪 `test-engineer` | Har to'lqin oxirida QA | `tests/integration/`, `tests/e2e/`, `tests/conftest.py`, `docs/qa/` |
 | 🔍 `code-reviewer` | Har to'lqin oxirida sharh (faqat o'qiydi) | — |
 
@@ -41,13 +41,13 @@ Agentlar bir-birini kutmasdan parallel ishlashi uchun avval **interfeyslar** yoz
 
 | Shartnoma | Fayl | Egasi | Kim foydalanadi |
 |---|---|---|---|
-| Domen modellari | `app/domain/*.py` | data-engineer | hamma |
-| Sport adapteri | `app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant |
-| Baza sxemasi | `app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) |
-| Tahlil servisi | `app/services/interfaces.py` (`AnalysisQuery`, `AnalysisService`, `SignalView`, `RecalcDiff`) | pipeline-engineer | bot |
-| Soxta servis | `app/services/fake.py` (`FakeAnalysisService`) | pipeline-engineer | bot (servis tayyor bo'lguncha) |
-| Model API si | `app/models/__init__.py` (`predict_markets`, `compute_ev`, `stake`, `confidence`) | quant-modeler | pipeline |
-| LLM API si | `app/llm/service.py` (`review_candidates`, `postmortem`) | llm-engineer | pipeline |
+| Domen modellari | `src/app/domain/*.py` | data-engineer | hamma |
+| Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant |
+| Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) |
+| Tahlil servisi | `src/app/services/interfaces.py` (`AnalysisQuery`, `AnalysisService`, `SignalView`, `RecalcDiff`) | pipeline-engineer | bot |
+| Soxta servis | `src/app/services/fake.py` (`FakeAnalysisService`) | pipeline-engineer | bot (servis tayyor bo'lguncha) |
+| Model API si | `src/app/models/__init__.py` (`predict_markets`, `compute_ev`, `stake`, `confidence`) | quant-modeler | pipeline |
+| LLM API si | `src/app/llm/service.py` (`review_candidates`, `postmortem`) | llm-engineer | pipeline |
 
 Barcha shartnomalar `docs/contracts.md` da ro'yxatga olinadi. Qotirilgandan keyin ularga **faqat yangi narsa qo'shiladi**. Buzuvchi o'zgarish uchun orkestr ruxsati va barcha foydalanuvchi agentlarni yangilash kerak.
 
@@ -164,8 +164,8 @@ Har bir agent ish oxirida quyidagini qaytaradi:
 ```
 Vazifalar: F2.3, F2.5
 Kontekst: docs/contracts.md (v1), docs/api_probe_report.md
-Kirish: app/domain/, app/db/schema.py (qotirilgan)
-Chiqish: app/clients/api_sports.py, app/sports/football.py + testlar
+Kirish: src/app/domain/, src/app/db/schema.py (qotirilgan)
+Chiqish: src/app/clients/api_sports.py, src/app/sports/football.py + testlar
 Cheklovlar: egalik jadvali; haqiqiy API ga murojaat yo'q
 Bajarildi mezoni: ishlab_chiqish_rejasi.md F2 qabul mezoni
 ```
