@@ -3,7 +3,7 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 + v1.1 qo'shimchalari (orkestr tasdiqlagan, 2026-10-21)**. 6 (model API) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 7 keyingi to'lqinlarda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 + v1.1 qo'shimchalari (orkestr tasdiqlagan, 2026-10-21)**. 6 (model API) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 7 (LLM API) — **frozen v1 taklif (T4, orkestr ko'rib chiqadi)**.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
@@ -13,7 +13,7 @@
 | 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | frozen v1 (orkestr tasdiqlagan, 2026-10-21) |
-| 7 | LLM API si | `src/app/llm/service.py` | llm-engineer | pipeline | hali qotirilmagan |
+| 7 | LLM API si | `src/app/llm/service.py`, `src/app/clients/gemini.py` | llm-engineer | pipeline | frozen v1 taklif (T4) |
 
 ## Platforma (T1 da mavjud, infra-engineer)
 Bular rasmiy shartnoma emas, lekin barcha agentlar ishlatadi; o'zgartirish faqat qo'shish orqali:
@@ -331,8 +331,28 @@ Barcha funksiyalar **sinxron va sof** (I/O yo'q, faqat `app.domain`/`app.errors`
 **Backtest kutubxonasi** `app.models.backtest` (skript va testlar uchun, pipeline emas): `build_dataset(HistoryBatch)`, `walk_forward(...)`, `run_experiment(dataset, ExperimentConfig) -> ExperimentResult`, `render_report(result, RunMetadata)`, `generate_history(SyntheticConfig)`. Skript: `scripts/backtest.py [--synthetic]`.
 
 ## 7. LLM API si — `src/app/llm/service.py`
-**Holat:** hali qotirilmagan · **Versiya:** —
-- `review_candidates`, `postmortem`: (to'ldiriladi)
+**Holat:** frozen v1 taklif (T4, orkestr ko'rib chiqadi) · **Versiya:** 1.0 · **Egasi:** llm-engineer · Qaror: [ADR 0009](adr/0009-llm-integration.md) · **Import:** `from app.llm.service import LlmService, create_llm_service`
+
+LLM qadami **hech qachon istisno ko'tarmaydi** va pipeline'ni to'xtatmaydi: o'chirilgan, kvotasi tugagan, ishlamayotgan yoki yaroqsiz javob bergan LLM `ReviewStatus.FALLBACK` (post-mortem uchun `None`) beradi, signal izohsiz (faqat raqamlar bilan) yuboriladi. LLM ehtimollik, koeffitsient yoki EV'ni qaytarmaydi: sxemada bunday maydon yo'q.
+
+| Element | API | Izoh |
+|---|---|---|
+| Servis | `LlmService(backend: JsonGenerator \| None, *, budget=None, input_token_budget=6000)`; `create_llm_service(settings, budget=None) -> LlmService` | `backend=None` yoki `GEMINI_API_KEY` yo'q → LLM o'chiq (hamma natija fallback, sabab `llm_disabled`) |
+| Tekshiruv | `await service.review_candidates(candidates: Sequence[CandidateInput], context: ExperienceContext \| None = None) -> tuple[LlmReview, ...]` | Natija kirish bilan **bir-bir va bir xil tartibda**. Bitta so'rov (≤ 10 nomzod; ortig'i `omitted_by_token_budget` fallback). Bo'sh kirish → `()`, chaqiruv yo'q |
+| Post-mortem | `await service.postmortem(case: PostmortemInput) -> PostmortemResult \| None` | `category` ∈ {`omadsizlik`, `ma'lumot yetishmadi`, `model xatosi`} + `reason`; `None` = hozir javob yo'q, keyinroq qayta urining (F8) |
+| Hisob | `service.budget` → `LlmBudget`: `snapshot()` (bugungi so'rov/token), `journal()` (oxirgi 500 so'rov: vaqt, maqsad, prompt versiyasi, model, tokenlar, natija; prompt matni yo'q) | UTC kun; kunlik limit: `LlmLimits(max_requests_per_day=100, max_tokens_per_day=250_000)` |
+
+**Kirish DTO lari** (`app.llm.inputs`, frozen pydantic, `extra="forbid"`; pipeline to'ldiradi): `CandidateInput(candidate_id, league, home_team, away_team, kickoff (UTC), market, selection, line, odds, p_model, p_market, ev, confidence_level, confidence_reasons, lineup_known, forms: tuple[TeamForm], absences: tuple[Absence])`; `TeamForm(team, results "WDLWW", goals_for, goals_against)`; `Absence(team, player, status out|doubtful|suspended, reason)`; `ExperienceContext(segment_stats, lessons, user_notes)` (F8 to'ldiradi; ro'yxatlar muhimlik tartibida); `PostmortemInput(candidate, final_score "1-2", xg_summary, match_events)`. `candidate_id` — pipeline bergan noyob kalit (masalan `"<fixture_ref>:<market>:<selection>"`; bir o'yinda bir nechta tanlov bo'lishi mumkin, shuning uchun rejadagi `fixture_id` o'rniga).
+
+**Chiqish** (`app.llm.schemas`): `LlmReview(candidate_id, status: ok|note_dropped|fallback, verdict: Verdict|None, risk_flags: tuple[RiskFlag, ...], note: str|None, flags, fallback_reason, prompt_version, model, input_tokens, output_tokens)`. `Verdict`: `tasdiq | ehtiyot | rad`. `RiskFlag`: `jarohat, diskvalifikatsiya, rotatsiya, motivatsiya, derbi, tarkib_nomalum, malumot_yetarli_emas, ziddiyatli_malumot`. Tokenlar butun so'rovning narxi bo'lib **birinchi** `LlmReview` ga yoziladi (yig'indi to'g'ri chiqishi uchun). `prompt_version` (`context_check.v1`) va `model` har bir natija bilan saqlanadi (pipeline signalga yozadi).
+
+**Fallback sabablari** (`fallback_reason`): `llm_disabled`, `budget_exhausted`, `llm_unavailable` (429/5xx/timeout qayta urinishlardan keyin), `invalid_output` (2 urinishdan keyin ham sxemaga mos emas), `missing_in_response`, `omitted_by_token_budget`, `invalid_input` (masalan, takroriy `candidate_id`), `internal_error`. `note_dropped`: verdict saqlanadi, izoh tashlanadi (`flags`: `unknown_name_in_note` — kirishda yo'q jamoa/o'yinchi nomi; `note_too_long` — > 400 belgi). Izoh 2 gapgacha qisqartiriladi.
+
+**Pipeline qoidalari:** (1) `verdict=rad` bo'lsa ham signalni o'chirish/ko'rsatish siyosati pipeline'niki; LLM maslahatchi. (2) `status=fallback` → "LLM izohi yo'q" deb belgilab yuboring; xato deb hisoblamang. (3) Chaqiruv ~1 so'rov/kun; qayta hisoblashlarda har safar chaqirmang (kvota). (4) `Settings` dan `create_llm_service(get_settings())` bilan yasang; jarayon bo'yicha bitta `LlmService` (budget holati shunda saqlanadi).
+
+**Klient** (`app.clients.gemini`): `GeminiClient.generate_json(system_instruction, contents, response_schema) -> GeminiResponse(text, model, usage, attempts)`, `create_gemini_client(settings)`, `GeminiError` (`ExternalServiceError`), `JsonGenerator` protokoli. Model — `GEMINI_MODEL` (standart `gemini-flash-latest`), `temperature=0.2`, timeout 30 s, 429/5xx/timeout/transport xatosida 3 urinishgacha eksponensial kutish.
+
+**Baholash:** `tests/llm/golden/*.json` (26 holat, 22 tasi jonli), `scripts/llm_eval.py` (faqat qo'lda, kalit bilan; kalitsiz exit 2), natija `docs/llm_eval/<sana>.md`.
 
 ---
 
@@ -348,3 +368,4 @@ Barcha funksiyalar **sinxron va sof** (I/O yo'q, faqat `app.domain`/`app.errors`
 | 2026-10-21 | 6. Model API | v1 taklif yozildi (T3): domen adapterlari, `predict_markets`, bozor modeli (`fair_markets`), ansambl, `assess_confidence`, `asian_fair_odds`, `settle_selection`; backtest kutubxonasi ([ADR 0005](adr/0005-backtest-methodology.md)) | quant-modeler | orkestr (tasdiqlangan) |
 | 2026-10-21 | 6. Model API | v1.1 (T3 fix, faqat qo'shish/aniqlashtirish): `complete_quotes(..., kickoffs=None)` — kickoffdan keyingi qaror vaqti narxlari tashlanadi (QA F-3); ishonch farqi chegarasi qat'iy va 1e-9 gacha yaxlitlangan (QA F-2); backtest: `complete_seasons`, `season_end`, `GateStatus`, `gate_passed`, darvoza qaror #11 bo'yicha | quant-modeler | orkestr (tasdiqlangan) |
 | 2026-10-21 | 4. Servis shartnomasi | v1.1 (qo'shimcha, T3 fix round): `MAX_RETRO_LOOKBACK_DAYS = 90` — retro oynaning orqaga qarash chegarasi (qaror #12); retro oyna uzunligi uchun mavjud `MAX_WINDOW_DAYS` (31) qayta ishlatiladi. Bot kalendari va matnli oraliq shuni ishlatadi; servis tomonida majburlash pipeline-engineer ishi | bot-engineer | orkestr (T3 fix round topshirig'i) |
+| 2026-10-21 | 7. LLM API | v1 taklif yozildi (T4): `LlmService.review_candidates` / `postmortem`, kirish DTO lari, `LlmReview`, fallback sabablari, kunlik limit, golden baholash ([ADR 0009](adr/0009-llm-integration.md)) | llm-engineer | orkestr ko'rib chiqadi |

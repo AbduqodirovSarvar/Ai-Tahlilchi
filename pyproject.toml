@@ -170,7 +170,6 @@ known_first_party = ["app"]
 DEP002 = [
     "aiosqlite",
     "apscheduler",
-    "google-genai",
     "pandas",
     "scikit-learn",
     "tzdata",
