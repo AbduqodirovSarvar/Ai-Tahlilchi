@@ -3,15 +3,15 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 taklif** (T2, orkestr ko'rib chiqadi). 6–7 keyingi to'lqinlarda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)** (T2, orkestr ko'rib chiqadi). 6–7 keyingi to'lqinlarda.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
 | 1 | Domen modellari | `src/app/domain/*.py` | data-engineer | hamma | qotirilgan (v1) |
 | 2 | Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant | qotirilgan (v1) |
 | 3 | Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) | qotirilgan (v1) |
-| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 taklif (orkestr ko'rib chiqadi) |
-| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 taklif (orkestr ko'rib chiqadi) |
+| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
+| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | hali qotirilmagan |
 | 7 | LLM API si | `src/app/llm/service.py` | llm-engineer | pipeline | hali qotirilmagan |
 
@@ -111,7 +111,7 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 - Migratsiya: `uv run alembic upgrade head` (yo'l: `DB_PATH` yoki `-x db_path=...`).
 
 ## 4. Servis shartnomasi — `src/app/services/interfaces.py`
-**Holat:** frozen v1 taklif (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
 
 Bot tizim bilan **faqat** shu modul orqali gaplashadi (domen qiymat turlari `Sport`, `Market`, `MarketType`, `Selection` ham ishlatiladi). Barcha DTO lar `@dataclass(frozen=True, slots=True)`; noto'g'ri kiritma konstruktorda `ValidationFailedError` beradi (noto'g'ri so'rov obyekti umuman yaratilmaydi). Barcha metodlar `async`.
 
@@ -244,7 +244,7 @@ class SystemStatusService(Protocol):
 **Xatolar — `app.services.errors`:** `ServiceError(AppError)` → `ValidationFailedError(field, message)` (+ `ValueError`), `NotFoundError(entity, entity_id)` (+ `LookupError`), `CooldownActiveError(retry_after: timedelta)`, `BudgetExceededError(needed, available)`.
 
 ## 5. Soxta servis — `src/app/services/fake.py`
-**Holat:** frozen v1 taklif (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer
 
 - `create_fake_services(*, clock: Clock = system_clock) -> Services` — barcha protokollarning bitta umumiy xotira holati ustidagi soxta amalga oshirilishi (`FakeAnalysisService`, `FakeSignalService`, `FakeCatalogService`, `FakeSettingsService`, `FakeTemplateService`, `FakeWatchlistService`, `FakeBetService`, `FakeResultService`, `FakeReportService`, `FakeSystemStatusService`). `Clock = Callable[[], datetime]` (UTC).
 - Ma'lumot: hash asosida **deterministik** (tasodif yo'q): APL, La Liga, Seriya A, Bundesliga (futbol) va KHL (xokkey, `experimental=True`), soat bo'yicha "bugun" dan 7 kun oldin — 14 kun keyin, har kuni har ligada bitta o'yin; bozorlar 1X2, ikki natija, Total 2.5, BTTS, Fora −0.5 (xokkey: 1X2, Total 5.5). Tugagan o'yinlarning ~15% ida natija "API dan kelmagan" (`/natijalar` uchun).
