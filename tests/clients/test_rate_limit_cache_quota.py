@@ -224,12 +224,12 @@ async def test_day_key_uses_utc_even_for_offset_clocks(fake_time: FakeTime) -> N
 
 async def test_reconcile_only_raises_the_count(fake_time: FakeTime) -> None:
     quota = guard(fake_time)
-    await quota.charge(AUTO, 2)
-    status = await quota.reconcile(provider_limit=10, provider_remaining=5)
+    key = (await quota.charge(AUTO, 2)).key
+    status = await quota.reconcile(key, provider_limit=10, provider_remaining=5)
     assert status.counts.requests_used == 5
-    status = await quota.reconcile(provider_limit=10, provider_remaining=9)
+    status = await quota.reconcile(key, provider_limit=10, provider_remaining=9)
     assert status.counts.requests_used == 5
-    status = await quota.reconcile(provider_limit=10, provider_remaining=12)
+    status = await quota.reconcile(key, provider_limit=10, provider_remaining=12)
     assert status.counts.requests_used == 5
 
 

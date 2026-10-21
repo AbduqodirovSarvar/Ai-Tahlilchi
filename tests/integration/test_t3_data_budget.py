@@ -264,6 +264,8 @@ def test_expected_goals_for_every_new_result_would_break_the_budget() -> None:
         statistics_fixtures=20,
     )
     assert estimate_requests(with_xg) == estimate_requests(base) + 20 > BUDGET
+    capped = replace(with_xg, max_xg_requests=8)  # the fix: xG is capped and budget-aware
+    assert estimate_requests(capped) == estimate_requests(base) + 8 <= BUDGET
 
 
 async def test_expected_goals_are_one_request_per_finished_fixture(
@@ -274,8 +276,11 @@ async def test_expected_goals_are_one_request_per_finished_fixture(
     finished = [ExternalRef("api-football", str(r["fixture"]["id"])) for r in yesterday_finished()]  # type: ignore[index]
     results = await adapter.fetch_results(finished)
     before = router.calls.call_count
-    await adapter.with_expected_goals(results)
+    await adapter.with_expected_goals(results, max_requests=len(results))
     assert router.calls.call_count - before == len(results)
+    before = router.calls.call_count
+    await adapter.with_expected_goals(results)  # default cap: xG never swamps the budget
+    assert router.calls.call_count - before < len(results)
 
 
 @pytest.mark.parametrize(

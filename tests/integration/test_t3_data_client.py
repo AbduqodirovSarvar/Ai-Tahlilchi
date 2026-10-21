@@ -150,10 +150,6 @@ async def test_cache_hits_are_not_charged(harness: Harness, router: respx.MockRo
     assert (await harness.quota.status()).counts == before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-D1: no single-flight; concurrent identical requests all miss the cache",
-)
 async def test_concurrent_identical_requests_cost_one_request(
     harness: Harness, router: respx.MockRouter
 ) -> None:
@@ -213,9 +209,9 @@ async def test_exhausted_retries_cost_exactly_max_attempts(
 
 @pytest.mark.parametrize(
     ("header", "expected_delay"),
-    [("7", 7.0), ("9999", 120.0), ("0", 0.5), ("-5", 0.5), ("nan", 0.5), ("inf", 120.0)],
+    [("7", 7.0), ("120", 120.0), ("0", 0.5), ("-5", 0.5), ("nan", 0.5)],
 )
-async def test_429_retry_after_is_honoured_and_capped(
+async def test_429_retry_after_is_honoured_up_to_the_cap(
     harness: Harness, router: respx.MockRouter, header: str, expected_delay: float
 ) -> None:
     router.get("/fixtures").mock(
@@ -226,6 +222,17 @@ async def test_429_retry_after_is_honoured_and_capped(
     )
     await harness.api.get_json("fixtures", day_params(1), purpose=AUTO)
     assert harness.sleep.delays == pytest.approx([expected_delay])
+
+
+@pytest.mark.parametrize("header", ["9999", "inf"])
+async def test_429_retry_after_beyond_the_cap_fails_fast(
+    harness: Harness, router: respx.MockRouter, header: str
+) -> None:
+    route = router.get("/fixtures").respond(429, headers={"retry-after": header})
+    with pytest.raises(ProviderUnavailableError):
+        await harness.api.get_json("fixtures", day_params(1), purpose=AUTO)
+    assert route.call_count == 1
+    assert harness.sleep.delays == []
 
 
 @settings(max_examples=60, suppress_health_check=[HealthCheck.function_scoped_fixture])
@@ -298,16 +305,12 @@ async def test_empty_errors_list_and_object_are_success(
         assert await harness.football.fixtures_by_date(date(2030, 1, 2), purpose=AUTO) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-D2: an unparsable 200 body is cached for the full TTL and replayed",
-)
 async def test_unparsable_envelope_is_not_cached(
     harness: Harness, router: respx.MockRouter
 ) -> None:
     route = router.get("/fixtures").mock(
         side_effect=[
-            httpx.Response(200, json={"errors": {"rateLimit": 429}, "response": []}),
+            httpx.Response(200, json={"errors": {"plan": 429}, "response": []}),
             httpx.Response(200, json=load(EMPTY)),
         ]
     )

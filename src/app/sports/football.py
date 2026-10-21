@@ -10,6 +10,9 @@ Fetches and maps only (no storage, no prediction). Request-saving strategy (plan
   of two or more is fetched with ``odds?league&season&date`` (paginated), anything else
   with ``odds?fixture``. Odds for future days are cached 6 hours.
 - **Results:** ``fixtures?ids=`` in batches of 20.
+- **xG:** one ``fixtures/statistics`` request per finished fixture, which plan §9 does not
+  budget: :meth:`FootballAdapter.with_expected_goals` is capped (``max_requests``) and
+  stops while the automatic quota left for the day is small.
 - **History:** ``fixtures?league&season`` per league (one request per league-season).
 
 Every malformed record is logged and skipped. The adapter spends quota as
@@ -62,6 +65,12 @@ logger = get_logger(__name__)
 type UtcClock = Callable[[], datetime]
 
 FUTURE_ODDS_TTL_SECONDS: Final = 6 * 3600.0
+# A closing price must be as fresh as possible: never answered from the cache.
+FRESH_TTL_SECONDS: Final = 0.0
+# xG costs one request per fixture and is a nice-to-have: at most this many per call, and
+# none while fewer than XG_AUTOMATIC_FLOOR automatic requests remain for the rest of the day.
+DEFAULT_MAX_XG_REQUESTS: Final = 8
+XG_AUTOMATIC_FLOOR: Final = 20
 MIN_FIXTURES_FOR_LEAGUE_ODDS: Final = 2
 HOME_AND_AWAY: Final = 2
 # Fixture → (league, season, day) remembered for odds grouping; bounded memory.
@@ -77,6 +86,13 @@ class _OddsGroupKey:
     league_id: int
     season: int
     day: date
+
+
+@dataclass(frozen=True, slots=True)
+class _SeenFixture:
+    group: _OddsGroupKey
+    home_team_id: int
+    away_team_id: int
 
 
 class FootballAdapter:
@@ -99,7 +115,7 @@ class FootballAdapter:
         self._purpose = purpose
         self._clock = clock
         self._convention = handicap_convention
-        self._seen: OrderedDict[int, _OddsGroupKey] = OrderedDict()
+        self._seen: OrderedDict[int, _SeenFixture] = OrderedDict()
 
     def for_purpose(self, purpose: RequestPurpose) -> "FootballAdapter":
         """The same adapter charging ``purpose`` (user actions use ``MANUAL``)."""
@@ -226,7 +242,8 @@ class FootballAdapter:
 
     def _remember(self, item: FixtureItem) -> None:
         kickoff_day = item.fixture.date.astimezone(UTC).date()
-        self._seen[item.fixture.id] = _OddsGroupKey(item.league.id, item.league.season, kickoff_day)
+        group = _OddsGroupKey(item.league.id, item.league.season, kickoff_day)
+        self._seen[item.fixture.id] = _SeenFixture(group, item.teams.home.id, item.teams.away.id)
         self._seen.move_to_end(item.fixture.id)
         while len(self._seen) > MAX_REMEMBERED_FIXTURES:
             self._seen.popitem(last=False)
@@ -236,20 +253,24 @@ class FootballAdapter:
     async def fetch_odds(
         self, fixtures: Sequence[ExternalRef], *, kind: OddsKind
     ) -> list[OddsSnapshot]:
-        """Current prices of ``fixtures`` in the supported markets, tagged with ``kind``."""
+        """Current prices of ``fixtures`` in the supported markets, tagged with ``kind``.
+
+        ``taken_at`` is when the provider was really asked: a price answered from the
+        cache keeps its original time. Closing prices are never taken from the cache.
+        """
         wanted = _provider_ids(fixtures)
         groups: defaultdict[_OddsGroupKey, list[int]] = defaultdict(list)
         singles: list[int] = []
         for fixture_id in wanted:
-            key = self._seen.get(fixture_id)
-            if key is None:
+            seen = self._seen.get(fixture_id)
+            if seen is None:
                 singles.append(fixture_id)
             else:
-                groups[key].append(fixture_id)
+                groups[seen.group].append(fixture_id)
         items = []
         today = self._clock().astimezone(UTC).date()
         for key, members in groups.items():
-            ttl = FUTURE_ODDS_TTL_SECONDS if key.day > today else None
+            ttl = _odds_ttl(kind, key.day > today)
             if len(members) < MIN_FIXTURES_FOR_LEAGUE_ODDS:
                 singles.extend(members)
                 continue
@@ -259,8 +280,8 @@ class FootballAdapter:
                 )
             )
         for fixture_id in singles:
-            key = self._seen.get(fixture_id)
-            ttl = FUTURE_ODDS_TTL_SECONDS if key is not None and key.day > today else None
+            seen = self._seen.get(fixture_id)
+            ttl = _odds_ttl(kind, seen is not None and seen.group.day > today)
             items.extend(
                 await self._client.odds_by_fixture(fixture_id, purpose=self._purpose, cache_ttl=ttl)
             )
@@ -279,6 +300,8 @@ class FootballAdapter:
         items = await self._client.fixtures_by_ids(
             sorted(_provider_ids(fixtures)), purpose=self._purpose
         )
+        for item in items:
+            self._remember(item)  # the teams are needed later to attribute xG correctly
         return [result for item in items if (result := self._result_of(item)) is not None]
 
     def _result_of(self, item: FixtureItem) -> FixtureResult | None:
@@ -288,28 +311,45 @@ class FootballAdapter:
             logger.warning("result_skipped", fixture_id=item.fixture.id, reason=str(exc))
             return None
 
-    async def with_expected_goals(self, results: Sequence[FixtureResult]) -> list[FixtureResult]:
-        """``results`` with xG filled in for finished fixtures (1 request each).
+    async def with_expected_goals(
+        self, results: Sequence[FixtureResult], *, max_requests: int = DEFAULT_MAX_XG_REQUESTS
+    ) -> list[FixtureResult]:
+        """``results`` with xG filled in for finished fixtures (1 request each, capped).
 
-        Plan §4 step 0: call it only for *newly* finished fixtures. A failure for one
-        fixture keeps that result without xG.
+        Plan §4 step 0: call it only for *newly* finished fixtures. At most ``max_requests``
+        fixtures (in the given order) are enriched, and none once the automatic quota left
+        for today drops to :data:`XG_AUTOMATIC_FLOOR`; the rest keep their result without
+        xG. A failure for one fixture keeps that result without xG. Fixtures this adapter
+        has not seen (their teams are unknown) are skipped without spending a request.
         """
+        budget = min(max_requests, await self._xg_allowance())
         enriched: list[FixtureResult] = []
+        skipped = 0
         for result in results:
             fixture_id = _numeric_id(result.fixture)
             if result.status.value != FixtureStatus.FINISHED.value or fixture_id is None:
                 enriched.append(result)
-                continue
-            enriched.append(await self._add_xg(result, fixture_id))
+            elif budget <= 0 or fixture_id not in self._seen:
+                skipped += 1
+                enriched.append(result)
+            else:
+                budget -= 1
+                enriched.append(await self._add_xg(result, fixture_id))
+        if skipped:
+            logger.info("expected_goals_skipped", fixtures=skipped, max_requests=max_requests)
         return enriched
 
+    async def _xg_allowance(self) -> int:
+        status = await self._client.api.quota.status()
+        if self._purpose is RequestPurpose.MANUAL:
+            return status.remaining
+        return max(status.automatic_available - XG_AUTOMATIC_FLOOR, 0)
+
     async def _add_xg(self, result: FixtureResult, fixture_id: int) -> FixtureResult:
+        seen = self._seen[fixture_id]
         items = await self._client.fixture_statistics(fixture_id, purpose=self._purpose)
-        # The provider lists the home team first, then the away team.
-        values = [expected_goals([item]).get(ref(item.team.id)) for item in items]
-        if len(values) != HOME_AND_AWAY:
-            return result
-        home_xg, away_xg = values
+        xg = expected_goals(items)  # keyed by provider team id, never by list position
+        home_xg, away_xg = xg.get(ref(seen.home_team_id)), xg.get(ref(seen.away_team_id))
         if home_xg is None or away_xg is None:
             return result
         return replace(result, home_xg=home_xg, away_xg=away_xg)
@@ -360,6 +400,12 @@ class FootballAdapter:
             return []
         items = await self._client.lineups(fixture_id, purpose=self._purpose)
         return map_lineups(items)
+
+
+def _odds_ttl(kind: OddsKind, future_day: bool) -> float | None:
+    if kind is OddsKind.CLOSING:
+        return FRESH_TTL_SECONDS
+    return FUTURE_ODDS_TTL_SECONDS if future_day else None
 
 
 def _numeric_id(provider_ref: ExternalRef) -> int | None:

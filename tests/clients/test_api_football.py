@@ -138,11 +138,11 @@ async def test_errors_in_body_raise(
 async def test_error_responses_are_not_cached(harness: Harness, router: respx.MockRouter) -> None:
     route = router.get("/fixtures").mock(
         side_effect=[
-            httpx.Response(200, json={"errors": {"rateLimit": "Too many requests"}}),
+            httpx.Response(200, json={"errors": {"plan": "Free plans do not have access"}}),
             httpx.Response(200, json=load("fixtures_empty.json")),
         ]
     )
-    with pytest.raises(ApiFootballError, match="rateLimit"):
+    with pytest.raises(ApiFootballError, match="plan"):
         await harness.football.fixtures_by_date(date(2024, 10, 26), purpose=AUTO)
     assert await harness.football.fixtures_by_date(date(2024, 10, 26), purpose=AUTO) == []
     assert route.call_count == 2

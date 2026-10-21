@@ -41,6 +41,8 @@ class Envelope(_Model):
     paging: Paging = Field(default_factory=Paging)
     # A list of records for every data endpoint; one object for ``/status``.
     response: list[JsonValue] | dict[str, JsonValue] = Field(default_factory=list)
+    # Set by the client, not part of the provider body: when the provider answered.
+    fetched_at: datetime | None = Field(default=None, exclude=True)
 
     @property
     def records(self) -> list[JsonValue]:
@@ -124,12 +126,12 @@ class FixtureItem(_Model):
 class OddValue(_Model):
     """One price: ``value`` names the selection (``Home``, ``Over 2.5``, ``Home -0.5``).
 
-    ``odd`` is kept as sent (a decimal string): one unparsable price must only drop that
-    price during mapping, not the whole fixture record.
+    ``odd`` is kept as sent (a decimal string, possibly ``null``): one unparsable price
+    must only drop that price during mapping, not the whole fixture record.
     """
 
     value: str | int | float
-    odd: str | float
+    odd: str | float | None = None
 
 
 class Bet(_Model):
@@ -169,6 +171,8 @@ class OddsItem(_Model):
     fixture: FixtureRef
     update: datetime | None = None
     bookmakers: list[Bookmaker] = Field(default_factory=list)
+    # Set by the client, not part of the provider body: when this page was fetched.
+    fetched_at: datetime | None = Field(default=None, exclude=True)
 
 
 class InjuryPlayer(_Model):

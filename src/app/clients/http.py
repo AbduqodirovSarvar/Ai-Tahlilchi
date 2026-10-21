@@ -4,12 +4,16 @@ Every provider request goes through :meth:`ApiClient.get_json`, which in order:
 
 1. answers from the TTL cache when the same endpoint+params was fetched recently (no quota
    spent; plan §9 "the same data is not requested twice within 10 minutes");
-2. waits for a token of the per-provider :class:`~app.clients.rate_limit.TokenBucket`;
-3. charges the daily :class:`~app.clients.quota.QuotaGuard` (refuses *before* sending);
-4. sends the request with a per-request timeout;
-5. retries 429, 5xx, timeouts and transport errors with jittered exponential backoff that
-   honours ``Retry-After`` (every attempt is a real request and is charged);
-6. reconciles the quota with the provider's remaining-requests headers when present.
+2. joins an identical request that is already in flight (single-flight: concurrent callers
+   share one request and one charge);
+3. waits for a token of the per-provider :class:`~app.clients.rate_limit.TokenBucket`
+   (manual requests go before queued automatic ones);
+4. charges the daily :class:`~app.clients.quota.QuotaGuard` (refuses *before* sending);
+5. sends the request with a per-request timeout;
+6. retries 429, 5xx, timeouts, transport errors and provider-flagged rate-limit bodies with
+   jittered exponential backoff that honours ``Retry-After`` (every attempt is a real
+   request and is charged); a ``Retry-After`` beyond the cap fails fast instead;
+7. reconciles the quota with the provider's remaining-requests headers when present.
 
 Authentication is a header set once on the ``httpx.AsyncClient`` (see
 :func:`create_http_client`); URLs and parameters, which are logged, never contain the key.
@@ -21,6 +25,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from functools import partial
 from http import HTTPStatus
 from typing import Final
 
@@ -29,7 +34,7 @@ from pydantic import JsonValue
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception_type, stop_after_attempt
 
 from app.clients.cache import QueryParams, TtlCache, cache_key
-from app.clients.quota import QuotaGuard, RequestPurpose
+from app.clients.quota import QuotaGuard, RequestPurpose, UsageKey
 from app.clients.rate_limit import Sleep, TokenBucket
 from app.errors import ExternalServiceError
 from app.logging import get_logger
@@ -37,6 +42,9 @@ from app.logging import get_logger
 logger = get_logger(__name__)
 
 DEDUPE_TTL_SECONDS: Final = 10 * 60.0
+
+type UtcClock = Callable[[], datetime]
+type BodyRetryCheck = Callable[[JsonValue], str | None]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -57,6 +65,9 @@ class ProviderConfig:
     # Daily-quota headers (API-Sports: x-ratelimit-requests-limit / -remaining).
     limit_header: str | None = None
     remaining_header: str | None = None
+    # Some providers report a rate limit inside an HTTP 200 body; the check returns the
+    # reason to retry (like a 429) or ``None`` when the body is not such a case.
+    retryable_body: BodyRetryCheck | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +77,14 @@ class JsonResponse:
     status_code: int
     payload: JsonValue
     from_cache: bool = False
+    # When the provider answered (for a cached body: when it originally answered).
+    fetched_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedBody:
+    payload: JsonValue
+    fetched_at: datetime
 
 
 class ProviderHttpError(ExternalServiceError):
@@ -88,6 +107,10 @@ class _RetryableError(Exception):
         self.reason = reason
         self.retry_after = retry_after
         super().__init__(reason)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def create_http_client(config: ProviderConfig, api_key: str) -> httpx.AsyncClient:
@@ -130,9 +153,10 @@ class ApiClient:
         http: httpx.AsyncClient,
         quota: QuotaGuard,
         limiter: TokenBucket | None = None,
-        cache: TtlCache[JsonValue] | None = None,
+        cache: TtlCache[_CachedBody] | None = None,
         sleep: Sleep = asyncio.sleep,
         jitter: Callable[[], float] = random.random,  # noqa: S311 - backoff jitter, not crypto
+        clock: UtcClock = _utc_now,
     ) -> None:
         """Wire the client; ``sleep``/``jitter`` are injectable so tests never wait."""
         self._config = config
@@ -141,9 +165,11 @@ class ApiClient:
         self._limiter = limiter or TokenBucket(
             config.requests_per_minute, capacity=config.burst, sleep=sleep
         )
-        self._cache: TtlCache[JsonValue] = cache if cache is not None else TtlCache()
+        self._cache: TtlCache[_CachedBody] = cache if cache is not None else TtlCache()
         self._sleep = sleep
         self._jitter = jitter
+        self._clock = clock
+        self._inflight: dict[str, asyncio.Future[JsonResponse]] = {}
 
     @property
     def config(self) -> ProviderConfig:
@@ -178,7 +204,8 @@ class ApiClient:
             params: query parameters (also the cache key).
             purpose: charged against the automatic or the manual part of the quota.
             cache_ttl: seconds to cache the body; ``None`` = the provider default,
-                ``0`` = do not cache.
+                ``0`` = always ask the provider (the cache is neither read nor written;
+                use it when a price must be fresh, e.g. closing odds).
 
         Raises:
             QuotaExceededError: today's quota for ``purpose`` is spent (nothing sent).
@@ -186,13 +213,41 @@ class ApiClient:
             ProviderUnavailableError: retries were exhausted.
         """
         key = cache_key(path, params)
-        cached = self._cache.get(key)
-        if cached is not None:
-            logger.debug("provider_cache_hit", provider=self._config.name, request=key)
-            return JsonResponse(HTTPStatus.OK, cached, from_cache=True)
+        if cache_ttl is None or cache_ttl > 0:
+            cached = self._cache.get(key)
+            if cached is not None:
+                logger.debug("provider_cache_hit", provider=self._config.name, request=key)
+                return JsonResponse(
+                    HTTPStatus.OK, cached.payload, from_cache=True, fetched_at=cached.fetched_at
+                )
+        flight = self._inflight.get(key)
+        if flight is None:
+            flight = asyncio.ensure_future(self._fetch(key, path, params, purpose, cache_ttl))
+            self._inflight[key] = flight
+            flight.add_done_callback(partial(self._landed, key))
+        else:
+            logger.debug("provider_single_flight", provider=self._config.name, request=key)
+        # Shielded: a cancelled caller must not cancel the request other callers wait for.
+        return await asyncio.shield(flight)
+
+    def _landed(self, key: str, flight: "asyncio.Future[JsonResponse]") -> None:
+        if self._inflight.get(key) is flight:
+            del self._inflight[key]
+        if not flight.cancelled():
+            flight.exception()  # mark retrieved: callers re-raise it themselves
+
+    async def _fetch(
+        self,
+        key: str,
+        path: str,
+        params: QueryParams,
+        purpose: RequestPurpose,
+        cache_ttl: float | None,
+    ) -> JsonResponse:
         response = await self._get_with_retries(path, params, purpose)
         ttl = self._config.default_cache_ttl_seconds if cache_ttl is None else cache_ttl
-        self._cache.set(key, response.payload, ttl=ttl)
+        fetched_at = response.fetched_at or self._clock()
+        self._cache.set(key, _CachedBody(response.payload, fetched_at), ttl=ttl)
         return response
 
     async def _get_with_retries(
@@ -227,8 +282,9 @@ class ApiClient:
     async def _send_once(
         self, path: str, params: QueryParams, purpose: RequestPurpose
     ) -> JsonResponse:
-        await self._limiter.acquire()
-        await self._quota.charge(purpose)
+        await self._limiter.acquire(urgent=purpose is RequestPurpose.MANUAL)
+        # The charge's key is the quota day this request belongs to, whenever it is answered.
+        usage_key = (await self._quota.charge(purpose)).key
         try:
             response = await self._http.get(path, params=dict(params))
         except httpx.TimeoutException as exc:
@@ -243,13 +299,21 @@ class ApiClient:
             status=response.status_code,
             purpose=purpose.value,
         )
-        await self._reconcile_quota(response.headers)
+        await self._reconcile_quota(usage_key, response.headers)
         return self._decode(response)
 
     def _decode(self, response: httpx.Response) -> JsonResponse:
         status = response.status_code
         if status == HTTPStatus.TOO_MANY_REQUESTS or status >= HTTPStatus.INTERNAL_SERVER_ERROR:
             retry_after = parse_retry_after(response.headers.get("retry-after"))
+            cap = self._config.max_retry_after_seconds
+            if retry_after is not None and retry_after > cap:
+                # Waiting that long inside a request is useless to the caller: fail fast.
+                msg = (
+                    f"{self._config.name}: HTTP {status} asks to retry after "
+                    f"{retry_after:.0f} s (more than the {cap:.0f} s limit)"
+                )
+                raise ProviderUnavailableError(msg)
             raise _RetryableError(f"HTTP {status}", retry_after)
         if status >= HTTPStatus.BAD_REQUEST:
             raise ProviderHttpError(self._config.name, status, response.reason_phrase)
@@ -257,14 +321,20 @@ class ApiClient:
             payload: JsonValue = response.json()
         except ValueError as exc:
             raise ProviderHttpError(self._config.name, status, "body is not JSON") from exc
-        return JsonResponse(status, payload)
+        check = self._config.retryable_body
+        reason = None if check is None else check(payload)
+        if reason is not None:
+            raise _RetryableError(reason)
+        return JsonResponse(status, payload, fetched_at=self._clock())
 
-    async def _reconcile_quota(self, headers: httpx.Headers) -> None:
+    async def _reconcile_quota(self, key: UsageKey, headers: httpx.Headers) -> None:
         limit = _int_header(headers, self._config.limit_header)
         remaining = _int_header(headers, self._config.remaining_header)
         if limit is None or remaining is None:
             return
-        status = await self._quota.reconcile(provider_limit=limit, provider_remaining=remaining)
+        status = await self._quota.reconcile(
+            key, provider_limit=limit, provider_remaining=remaining
+        )
         logger.debug(
             "provider_quota",
             provider=self._config.name,

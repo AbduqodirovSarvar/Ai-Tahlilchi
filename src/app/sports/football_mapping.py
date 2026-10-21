@@ -206,12 +206,14 @@ def map_odds(
     """Snapshots for every supported market of every bookmaker in ``items``.
 
     The first price of a (fixture, bookmaker, market, selection) wins; unsupported bets
-    (correct score, first half...) and invalid prices are skipped and counted.
+    (correct score, first half...) and invalid prices (including ``null``) are skipped and
+    counted. ``taken_at`` is the default capture time; an item that carries its own
+    ``fetched_at`` (a price served from cache) keeps the time it was really fetched.
     """
     snapshots: dict[tuple[ExternalRef, str, Market, Selection], OddsSnapshot] = {}
     unknown: set[str] = set()
     invalid = 0
-    for fixture_ref, slug, bet in _bets(items):
+    for fixture_ref, slug, bet, fetched_at in _bets(items):
         quotes, bad = _bet_quotes(bet, convention)
         invalid += bad
         if quotes is None:
@@ -228,7 +230,7 @@ def map_odds(
                     market=market,
                     selection=selection,
                     odds=price,
-                    taken_at=taken_at,
+                    taken_at=fetched_at or taken_at,
                     kind=kind,
                 )
             except DomainValidationError:
@@ -236,13 +238,13 @@ def map_odds(
     return list(snapshots.values()), OddsMappingStats(frozenset(unknown), invalid)
 
 
-def _bets(items: Iterable[OddsItem]) -> Iterator[tuple[ExternalRef, str, Bet]]:
+def _bets(items: Iterable[OddsItem]) -> Iterator[tuple[ExternalRef, str, Bet, datetime | None]]:
     for item in items:
         fixture_ref = ref(item.fixture.id)
         for bookmaker in item.bookmakers:
             slug = bookmaker_slug(bookmaker.name)
             for bet in bookmaker.bets:
-                yield fixture_ref, slug, bet
+                yield fixture_ref, slug, bet, item.fetched_at
 
 
 type _Quote = tuple[Market, Selection, float]
@@ -300,7 +302,9 @@ def _handicap_quote(
     return Market.asian_handicap(home_line), Selection(side)
 
 
-def _parse_price(odd: str | float) -> float | None:
+def _parse_price(odd: str | float | None) -> float | None:
+    if odd is None:
+        return None
     try:
         return float(odd)
     except ValueError:
