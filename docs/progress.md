@@ -70,12 +70,12 @@
 - [ ] F4.6 `pipeline/settle.py`
 - [ ] F4.7 APScheduler (persistent, idempotent)
 - [ ] F4.8 "Soxta kun" integratsion testi
-- [ ] F5.1 `clients/gemini.py`
-- [ ] F5.2 Prompt shablonlari
-- [ ] F5.3 Kirish JSON yig'uvchi
-- [ ] F5.4 Validatsiya, qayta urinish, fallback
-- [ ] F5.5 Bepul tarif limitlari nazorati
-- [ ] F5.6 Gemini testlari
+- [x] F5.1 `clients/gemini.py` (async `google-genai` o'rami, `response_schema`, retry, token metrikasi; ADR 0009)
+- [x] F5.2 Prompt shablonlari (`context_check.v1`, `postmortem.v1`, paket ma'lumoti, keshlangan yuklovchi)
+- [x] F5.3 Kirish JSON yig'uvchi (delimitlangan ma'lumot bloki, deterministik token byudjeti, "Tajriba konteksti")
+- [x] F5.4 Validatsiya, qayta urinish, fallback (`LlmService`; gallyutsinatsiya qo'rig'i; `postmortem` minimal)
+- [x] F5.5 Bepul tarif limitlari nazorati (kunlik so'rov/token byudjeti, xotiradagi jurnal)
+- [x] F5.6 Gemini testlari (mock; 26 golden holat, `scripts/llm_eval.py` jonli faqat qo'lda; jonli baholash kalit kelgach bajariladi)
 - [ ] F6.7 Qayta hisoblash
 - [ ] F6.8 Bugungi signallar va kunlik xabar
 - [ ] F6.9 `/holat`

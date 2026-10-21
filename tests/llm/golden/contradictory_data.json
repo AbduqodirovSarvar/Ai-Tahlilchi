@@ -1,0 +1,63 @@
+{
+  "id": "contradictory_data",
+  "description": "Model va bozor keskin farq qiladi; forma modelga zid.",
+  "candidates": [
+    {
+      "candidate_id": "g05",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Arsenal",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "away",
+      "odds": 3.4,
+      "p_model": 0.41,
+      "ev": 0.394,
+      "confidence_level": "Past",
+      "confidence_reasons": [
+        "model va bozor farqi 15 p.p. dan katta"
+      ],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Arsenal",
+          "results": "LLLDL",
+          "goals_for": 2,
+          "goals_against": 9
+        }
+      ],
+      "absences": [],
+      "p_market": 0.24
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g05": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "ziddiyatli_malumot"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g05",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "ziddiyatli_malumot"
+        ],
+        "izoh": "Model bahosi bozordan ancha yuqori, Arsenal formasi esa yomon. Ma'lumotlar bir-biriga zid."
+      }
+    ]
+  }
+}

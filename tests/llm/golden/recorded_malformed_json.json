@@ -1,0 +1,44 @@
+{
+  "id": "recorded_malformed_json",
+  "description": "Yozib olingan javob buzilgan JSON: fallback.",
+  "candidates": [
+    {
+      "candidate_id": "g24",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.7,
+      "p_model": 0.63,
+      "ev": 0.071,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g24": {
+      "status": "fallback"
+    }
+  },
+  "recorded_raw": "{\"reviews\": [{\"candidate_id\": \"g24\", \"verdict\": \"tasdiq\", ",
+  "recorded_only": true
+}
