@@ -13,7 +13,8 @@ so the real services can run it against any seeded database with fixtures from a
 to two weeks ahead.
 """
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -21,10 +22,16 @@ from decimal import Decimal
 import pytest
 
 from app.domain import MarketType, Sport
-from app.services.errors import CooldownActiveError, NotFoundError, ValidationFailedError
+from app.services.errors import (
+    BusyError,
+    CooldownActiveError,
+    NotFoundError,
+    ValidationFailedError,
+)
 from app.services.interfaces import (
     BALANCED_PRESET,
     MAX_FUTURE_DAYS,
+    MAX_RETRO_LOOKBACK_DAYS,
     RECALC_COOLDOWN,
     AnalysisProgress,
     AnalysisQuery,
@@ -58,15 +65,27 @@ OTHER_USER = 999_999
 
 @dataclass
 class MutableClock:
-    """Injected "now" that tests move forward explicitly (no real sleeping)."""
+    """Injected "now" that tests move forward explicitly (no real sleeping).
+
+    ``advance_async`` is what the contract tests call: it moves the clock and then awaits
+    ``after_advance``, a hook an implementation under test sets to let its world catch up
+    (the real services' harness marks the matches that have kicked off as finished). The
+    in-memory fake needs no hook.
+    """
 
     now: datetime = START
+    after_advance: Callable[[datetime], Awaitable[None]] | None = None
 
     def __call__(self) -> datetime:
         return self.now
 
     def advance(self, delta: timedelta) -> None:
         self.now += delta
+
+    async def advance_async(self, delta: timedelta) -> None:
+        self.advance(delta)
+        if self.after_advance is not None:
+            await self.after_advance(self.now)
 
 
 @dataclass
@@ -126,7 +145,7 @@ async def settled_recommendations(
     """Recommend signals for the next three days, then let the matches finish."""
     result = await analyze_week(services, user_id, dates=DateSpec.next_days(3))
     assert result.signals, "the seeded data must yield recommendations"
-    clock.advance(SETTLE_DELAY)
+    await clock.advance_async(SETTLE_DELAY)
     return tuple([await services.signals.get_signal(user_id, s.signal_id) for s in result.signals])
 
 
@@ -289,7 +308,9 @@ class AnalysisContract:
     async def test_kicked_off_fixtures_never_become_real_signals(
         self, services: Services, user_id: int, clock: MutableClock
     ) -> None:
-        clock.advance(timedelta(hours=14))  # 01:00 next day in Tashkent: yesterday's are over
+        await clock.advance_async(
+            timedelta(hours=14)
+        )  # 01:00 next day in Tashkent: yesterday's are over
         result = await analyze_week(services, user_id, dates=DateSpec.between(*_two_days(clock)))
 
         assert any(signal.retro for signal in result.signals)
@@ -338,6 +359,58 @@ class AnalysisContract:
         assert result.signals
         assert {signal.league for signal in result.signals} == {league.name}
         assert {item.league for item in page.items} == {league.name}
+
+    async def test_second_concurrent_analysis_of_a_user_is_refused(
+        self, services: Services, user_id: int
+    ) -> None:
+        started, gate = asyncio.Event(), asyncio.Event()
+
+        async def blocking(_progress: AnalysisProgress) -> None:
+            started.set()
+            await gate.wait()
+
+        first = asyncio.create_task(
+            services.analysis.analyze(
+                user_id, AnalysisQuery(dates=DateSpec.next_days(2)), progress=blocking
+            )
+        )
+        await started.wait()
+        try:
+            with pytest.raises(BusyError):
+                await services.analysis.analyze(user_id, AnalysisQuery(dates=DateSpec.today()))
+            other = await services.analysis.analyze(
+                OTHER_USER, AnalysisQuery(dates=DateSpec.today())
+            )
+            assert other.query_id
+        finally:
+            gate.set()
+        await first
+        again = await services.analysis.analyze(user_id, AnalysisQuery(dates=DateSpec.today()))
+        assert again.query_id
+
+    async def test_retro_window_starting_too_long_ago_is_rejected(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        today = local_today(await services.settings.get_settings(user_id), clock)
+        too_old = AnalysisQuery(
+            dates=DateSpec.between(
+                today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS + 5),
+                today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS + 1),
+            )
+        )
+        with pytest.raises(ValidationFailedError):
+            await services.analysis.estimate_cost(user_id, too_old)
+        with pytest.raises(ValidationFailedError):
+            await services.analysis.analyze(user_id, too_old)
+
+        oldest_allowed = AnalysisQuery(
+            dates=DateSpec.between(
+                today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS),
+                today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS - 3),
+            )
+        )
+        estimate = await services.analysis.estimate_cost(user_id, oldest_allowed)
+        assert estimate.window.date_from == today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS)
 
     async def test_failing_progress_callback_does_not_abort(
         self, services: Services, user_id: int
@@ -391,7 +464,7 @@ class RecommendationContract:
         assert not candidate.recommended
         assert candidate.signal_id not in await _exported_ids(services, user_id)
 
-        clock.advance(timedelta(minutes=5))
+        await clock.advance_async(timedelta(minutes=5))
         normal = await analyze_week(
             services,
             user_id,
@@ -520,7 +593,7 @@ class RecalcContract:
             await services.analysis.recalc_signal(user_id, signal.signal_id)
         assert timedelta(0) < excinfo.value.retry_after <= RECALC_COOLDOWN
 
-        clock.advance(RECALC_COOLDOWN)
+        await clock.advance_async(RECALC_COOLDOWN)
         again = await services.analysis.recalc_signal(user_id, signal.signal_id)
         assert again.before == diff.after
 
@@ -555,6 +628,34 @@ class RecalcContract:
             s.signal_id for s in result.signals
         }
         assert recorder.events[-1].stage is AnalysisStage.FINISHED
+
+    async def test_recalc_window_needs_no_query_id(self, services: Services, user_id: int) -> None:
+        result = await analyze_week(services, user_id, max_signals=4)
+        recorder = ProgressRecorder()
+
+        batch = await services.analysis.recalc_window(
+            user_id, DateSpec.next_days(7), progress=recorder
+        )
+
+        handled = {d.signal.signal_id for d in batch.diffs}
+        handled |= set(batch.skipped_cooldown) | set(batch.skipped_started) | set(batch.failed)
+        assert handled == {s.signal_id for s in result.signals}
+        assert recorder.events[-1].stage is AnalysisStage.FINISHED
+        again = await services.analysis.recalc_window(user_id, DateSpec.next_days(7))
+        assert again.diffs == ()
+        assert set(again.skipped_cooldown) | set(again.skipped_started) == handled
+
+    async def test_recalc_signals_skips_unknown_and_foreign_ids(
+        self, services: Services, user_id: int
+    ) -> None:
+        first = (await analyze_week(services, user_id)).signals[0]
+
+        batch = await services.analysis.recalc_signals(
+            user_id, [first.signal_id, first.signal_id, 10**9]
+        )
+        assert [d.signal.signal_id for d in batch.diffs] == [first.signal_id]
+        foreign = await services.analysis.recalc_signals(OTHER_USER, [first.signal_id])
+        assert foreign.diffs == () and not foreign.failed
 
     async def test_recalc_query_ownership(self, services: Services, user_id: int) -> None:
         result = await analyze_week(services, user_id, max_signals=1)
@@ -601,6 +702,18 @@ class SignalContract:
         )
         assert signal.signal_id not in {s.signal_id for s in visible}
         assert signal.signal_id in {s.signal_id for s in everything}
+
+    async def test_get_signals_keeps_order_and_omits_unknown_ids(
+        self, services: Services, user_id: int
+    ) -> None:
+        signals = (await analyze_week(services, user_id)).signals[:3]
+        ids = [signal.signal_id for signal in reversed(signals)]
+
+        found = await services.signals.get_signals(user_id, [*ids, 10**9])
+
+        assert [signal.signal_id for signal in found] == ids
+        assert await services.signals.get_signals(OTHER_USER, ids) == ()
+        assert await services.signals.get_signals(user_id, []) == ()
 
     async def test_foreign_signals_are_invisible(self, services: Services, user_id: int) -> None:
         signal = (await analyze_week(services, user_id)).signals[0]
@@ -768,6 +881,42 @@ class BetContract:
         assert bank.open_bets == 1
         assert not bank.loss_limit_reached
 
+    async def test_placing_with_the_same_token_twice_records_one_bet(
+        self, services: Services, user_id: int
+    ) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        draft = BetDraft(signal_id=signal.signal_id, stake=Decimal(5), client_token="tap-1")
+
+        first = await services.bets.place_bet(user_id, draft)
+        second = await services.bets.place_bet(user_id, draft)
+        other = await services.bets.place_bet(user_id, replace(draft, client_token="tap-2"))
+
+        assert second == first
+        assert other.bet_id != first.bet_id
+        assert len(await services.bets.list_bets(user_id)) == 2
+
+    async def test_balance_is_the_starting_bank_plus_settled_profit(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        await services.settings.update_settings(
+            user_id, replace(settings, bank=Decimal(1000), unit=Decimal(10))
+        )
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
+        )
+        assert (await services.bets.bank_summary(user_id)).balance == Decimal(1000)
+
+        await clock.advance_async(SETTLE_DELAY)
+
+        (bet,) = await services.bets.list_bets(user_id)
+        bank = await services.bets.bank_summary(user_id)
+        assert bank.balance == Decimal(1000) + (bet.profit or Decimal(0))
+        assert bank.open_bets == (1 if bet.outcome is None else 0)
+        if bet.profit is not None:
+            assert bank.history[-1].balance == bank.balance
+
     async def test_settled_bet_has_profit(
         self, services: Services, user_id: int, clock: MutableClock
     ) -> None:
@@ -775,7 +924,7 @@ class BetContract:
         await services.bets.place_bet(
             user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
         )
-        clock.advance(SETTLE_DELAY)
+        await clock.advance_async(SETTLE_DELAY)
 
         settled = await services.signals.get_signal(user_id, signal.signal_id)
         (bet,) = await services.bets.list_bets(user_id)
@@ -877,7 +1026,7 @@ class ReportContract:
         await services.bets.place_bet(
             user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
         )
-        clock.advance(SETTLE_DELAY)
+        await clock.advance_async(SETTLE_DELAY)
         (bet,) = await services.bets.list_bets(user_id)
 
         report = await services.reports.report(user_id, ReportRequest.recent(14))

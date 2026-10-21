@@ -18,7 +18,7 @@ Conventions:
 """
 
 import math
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -68,6 +68,8 @@ MAX_ODDS_LIMIT: Final = 100.0
 PREMATCH_MINUTE_CHOICES: Final = frozenset({30, 60, 90})
 MAX_NOTE_LENGTH: Final = 500
 MAX_TEMPLATE_NAME_LENGTH: Final = 64
+MAX_BET_TOKEN_LENGTH: Final = 64
+"""Longest ``BetDraft.client_token`` (a Telegram update or callback id fits easily)."""
 MIN_SEARCH_LENGTH: Final = 2
 MAX_SEARCH_RESULTS: Final = 20
 DEFAULT_PAGE_SIZE: Final = 8
@@ -299,6 +301,23 @@ class DateWindow:
             "date_to",
             f"must be within {MAX_FUTURE_DAYS} days from today (today included)",
         )
+
+    def ensure_within_lookback(self, today: date) -> None:
+        """Reject windows starting more than :data:`MAX_RETRO_LOOKBACK_DAYS` before ``today``."""
+        _check(
+            self.date_from >= today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS),
+            "date_from",
+            f"must not be more than {MAX_RETRO_LOOKBACK_DAYS} days in the past",
+        )
+
+    def ensure_allowed(self, today: date) -> None:
+        """Every window rule that depends on "today": horizon and retro look-back (v1.2).
+
+        The length limit (:data:`MAX_WINDOW_DAYS`) holds by construction. Services call this
+        once per request, with their own clock, before touching data.
+        """
+        self.ensure_within_horizon(today)
+        self.ensure_within_lookback(today)
 
     def is_retro(self, today: date) -> bool:
         """True when the whole window is in the past (results already known)."""
@@ -1067,17 +1086,25 @@ class WatchItem:
 # --------------------------------------------------------------------------- bets and bank
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BetDraft:
-    """A bet placed on a signal ("✅ Stavka qildim"); ``None`` odds/stake take the signal's."""
+    """A bet placed on a signal ("✅ Stavka qildim"); ``None`` odds/stake take the signal's.
+
+    ``client_token`` (v1.2) makes placing idempotent: the same user sending the same token
+    again (a double tap, a retried callback) gets the bet that was recorded the first time
+    instead of a duplicate. Use something unique per user action, e.g. the callback query id.
+    """
 
     signal_id: SignalId
     odds_taken: float | None = None
     stake: Decimal | None = None
+    client_token: str | None = None
 
     def __post_init__(self) -> None:
-        """Odds above 1, positive stake."""
+        """Odds above 1, positive stake, a short non-blank token."""
         if self.odds_taken is not None:
             _check_range(self.odds_taken, "odds_taken", MIN_ODDS_LIMIT, MAX_ODDS_LIMIT)
         _check_positive(self.stake, "stake")
+        if self.client_token is not None:
+            _check_text(self.client_token, "client_token", MAX_BET_TOKEN_LENGTH)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1106,7 +1133,14 @@ class BankPoint:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BankView:
-    """``/bank`` (plan §6.9). ``balance`` is ``None`` until the user sets a bank."""
+    """``/bank`` (plan §6.9). ``balance`` is ``None`` until the user sets a bank.
+
+    Bank semantics (v1.2): ``UserSettingsView.bank`` is the **starting bank**. ``balance`` =
+    starting bank + the profit of every *settled* bet of the user (open stakes do not reduce
+    it). Editing the bank therefore re-bases the whole history: ``history`` is recomputed
+    from the new starting bank, no balance snapshots are kept. Days are the local dates of
+    the bets' matches; ``loss_today``/``loss_this_week`` are net losses over those days.
+    """
 
     balance: Decimal | None
     unit: Decimal | None
@@ -1303,7 +1337,162 @@ class SystemStatus:
     recent_errors: tuple[ErrorEntry, ...]
 
 
+# --------------------------------------------------------------------------- notifications
+class UpdateKind(StrEnum):
+    """Which automatic recalculation produced a :class:`SignalUpdate` (plan §4 step 5)."""
+
+    BEFORE_24H = "before_24h"
+    PREMATCH = "prematch"
+
+
+class CancelReason(StrEnum):
+    """Why a signal stopped being valid without any odds movement."""
+
+    POSTPONED = "postponed"
+    CANCELLED = "cancelled"
+    ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True, slots=True)
+class MessageRef:
+    """Handle of a message the notifier sent, kept so a later update can reply to or edit it."""
+
+    chat_id: int
+    message_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryKey:
+    """Idempotency key ``(job, day, user_id, subject)`` of one outgoing notification.
+
+    ``day`` is the user's local date for user-facing jobs; ``subject`` is the signal id (as
+    text) or another stable id of what is being announced. The pipeline records every key
+    it delivers and never delivers the same key twice; the notifier receives it for logging.
+    """
+
+    job: str
+    day: date
+    user_id: int
+    subject: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DailyDigest:
+    """The morning message (plan §4 step 5): today's candidates, preceded by yesterday's tally."""
+
+    day: date
+    result: AnalysisResult
+    yesterday: DaySummary | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SignalUpdate:
+    """A scheduled recalculation: "✅ Kuchda" / "⚠️ Chegaradan pastga tushdi" (plan §4, §6.4)."""
+
+    kind: UpdateKind
+    diff: RecalcDiff
+    lineups_confirmed: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SignalCancelled:
+    """A signal that can no longer be played (match postponed, cancelled or abandoned)."""
+
+    signal: SignalView
+    reason: CancelReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WatchlistEvent:
+    """An optional watchlist notification (plan §6.7); ``signal`` is set when one exists."""
+
+    kind: WatchNotification
+    fixture: FixtureOption
+    detail: str | None = None
+    signal: SignalView | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SettledNotice:
+    """A signal that was just settled; ``profit_units`` is in the signal's own units."""
+
+    signal: SignalView
+    profit_units: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AdminAlert:
+    """A system error for the administrators (plan §6.12); already scrubbed of secrets."""
+
+    component: str
+    message: str
+    at: datetime
+
+    def __post_init__(self) -> None:
+        """Instants are UTC like everywhere else."""
+        _check_utc(self.at, "at")
+
+
 # --------------------------------------------------------------------------- protocols
+class Notifier(Protocol):
+    """Pipeline → bot channel for messages nobody asked for (contract v1.2).
+
+    The bot side implements it (Telegram send / edit); the pipeline calls it from scheduled
+    jobs. **Quiet hours are applied by the caller, not here:** the pipeline holds back or
+    drops notifications that fall into the user's quiet hours (``UserSettingsView
+    .quiet_hours``; the daily digest is delayed until they end, update and watchlist
+    messages are dropped) and calls the notifier only when sending is allowed. Admin alerts
+    are never quiet. A method returns the sent message's :class:`MessageRef`, or ``None`` when
+    the message could not be delivered (user blocked the bot); it must not raise for that.
+    Idempotency is the caller's job too (see :class:`DeliveryKey`), but implementations
+    should tolerate a repeated key.
+    """
+
+    async def send_daily_digest(
+        self, user_id: int, digest: DailyDigest, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """Send the morning message."""
+        ...
+
+    async def send_signal_update(
+        self,
+        user_id: int,
+        update: SignalUpdate,
+        *,
+        key: DeliveryKey,
+        reply_to: MessageRef | None = None,
+    ) -> MessageRef | None:
+        """Send a recalculation result, replying to the signal's earlier message if known."""
+        ...
+
+    async def send_signal_cancelled(
+        self,
+        user_id: int,
+        cancelled: SignalCancelled,
+        *,
+        key: DeliveryKey,
+        reply_to: MessageRef | None = None,
+    ) -> MessageRef | None:
+        """Tell the user a signal was cancelled."""
+        ...
+
+    async def send_watchlist_event(
+        self, user_id: int, event: WatchlistEvent, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """Send a watchlist notification (line-ups, odds move, result)."""
+        ...
+
+    async def send_result_settled(
+        self, user_id: int, notice: SettledNotice, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """Announce a settled signal."""
+        ...
+
+    async def alert_admin(self, alert: AdminAlert) -> None:
+        """Report a system error to the administrators."""
+        ...
+
+
 class AnalysisService(Protocol):
     """Analysis and recalculation (plan §6.2-6.4, §6.8)."""
 
@@ -1326,8 +1515,11 @@ class AnalysisService(Protocol):
         ``settings.league_ids`` (all tracked leagues when empty) plus watched entities.
 
         Raises:
-            ValidationFailedError: the window ends beyond the horizon.
+            ValidationFailedError: the window ends beyond the horizon or starts before the
+                retro look-back (:meth:`DateWindow.ensure_allowed`).
             BudgetExceededError: the manual API reserve cannot cover the request.
+            BusyError: the user's previous ``analyze`` has not finished (v1.2).
+            ServiceUnavailableError: the data provider or the database is down (v1.2).
         """
         ...
 
@@ -1355,6 +1547,34 @@ class AnalysisService(Protocol):
         """
         ...
 
+    async def recalc_window(
+        self, user_id: int, dates: DateSpec, *, progress: ProgressCallback | None = None
+    ) -> RecalcBatch:
+        """Recalculate the user's recommended signals with kickoff in ``dates`` (v1.2).
+
+        The query-less ``/qayta``: no ``query_id`` is needed, so it survives a restart. The
+        batch's ``query_id`` is a descriptive id of the window. Same skipping rules as
+        :meth:`recalc_query`; hidden signals are included, retro ones never are.
+
+        Raises:
+            ValidationFailedError: the window ends beyond the horizon.
+        """
+        ...
+
+    async def recalc_signals(
+        self,
+        user_id: int,
+        signal_ids: Sequence[SignalId],
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> RecalcBatch:
+        """Recalculate the given signals (v1.2); unknown or foreign ids are skipped.
+
+        Same skipping rules as :meth:`recalc_query`. Signals of one fixture share one
+        recalculation. The batch's ``query_id`` is a descriptive id of the selection.
+        """
+        ...
+
     async def fixture_detail(self, fixture_id: EntityId) -> FixtureDetail:
         """The detail card of a fixture.
 
@@ -1372,6 +1592,16 @@ class SignalService(Protocol):
 
         Raises:
             NotFoundError: unknown signal or not the user's.
+        """
+        ...
+
+    async def get_signals(
+        self, user_id: int, signal_ids: Sequence[SignalId]
+    ) -> tuple[SignalView, ...]:
+        """Several signals in one call, in the order of ``signal_ids`` (v1.2).
+
+        Unknown ids and other users' signals are omitted rather than failing the batch, so
+        a list of stale buttons still renders what exists.
         """
         ...
 
@@ -1506,6 +1736,9 @@ class BetService(Protocol):
 
     async def place_bet(self, user_id: int, draft: BetDraft) -> BetView:
         """Record a bet on a signal.
+
+        Idempotent per ``(user, draft.client_token)`` (v1.2): repeating a token returns the
+        bet recorded first and creates nothing. Without a token every call is a new bet.
 
         Raises:
             NotFoundError: unknown signal or not the user's.

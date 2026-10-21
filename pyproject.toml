@@ -223,7 +223,6 @@ source_modules = [
 forbidden_modules = [
     "app.services.fake",
     "app.services._fake_world",
-    "app.services._fake_metrics",
 ]
 
 [[tool.importlinter.contracts]]

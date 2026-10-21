@@ -1,7 +1,8 @@
-"""Report arithmetic of the fake services (private to ``fake``).
+"""Report arithmetic shared by the fake and the real services.
 
-The real numbers will come from the pipeline and models; these simple versions only have to
-be self-consistent so the bot's report screens can be built and tested against them.
+One definition of the metrics (wins, yield, losing streak, calibration, segments), computed
+from :class:`SignalOutcome` rows: a signal card plus its profit and closing-line value. Only
+recommended, non-retro signals are fed in (contract ``docs/contracts.md`` §4).
 """
 
 import itertools
