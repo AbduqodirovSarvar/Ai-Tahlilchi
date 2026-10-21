@@ -1,0 +1,52 @@
+# ADR 0005: Bozor modeli, ansambl, ishonch darajasi va backtest metodologiyasi
+
+- **Holat:** qabul qilingan (orkestr ko'rib chiqadi)
+- **Sana:** 2026-10-21
+- **Muallif:** quant-modeler (T3)
+- **Kod:** `src/app/models/` (`adapters.py`, `outcomes.py`, `market.py`, `ensemble.py`, `confidence.py`), `src/app/models/backtest/`, `scripts/backtest.py`
+- **Bog'liq:** [ADR 0003](0003-dixon-coles-and-devig.md) (DC, de-vig, EV, staking formulalari)
+
+## Kontekst
+F3 darvozasi "model bozordan yaxshimi?" degan savolga halol javob talab qiladi. Eng katta xavf: ma'lumot sizib chiqishi (look-ahead) va ko'p sinov (grid) natijasini bo'rttirish. Haqiqiy football-data tarixini bu mashinada yuklab bo'lmaydi (qarorlar jurnali #7), shuning uchun vosita sintetik, ta'rifiga ko'ra samarali bozorda tekshiriladi: u yerda hech qanday strategiya yutmasligi kerak.
+
+## 1. Domen ⇄ model konvensiyalari (`adapters.py`)
+- **Jamoa kaliti** `str(team.ref)` (`source:external_id`): nomlar manbalar orasida to'qnashadi. Manbalararo moslash ma'lumot qatlamining ishi (F2.6).
+- **O'yin sanasi** = kickoff ning **UTC kalendar sanasi**. `fit(as_of=d)` UTC sanasi `< d` bo'lgan o'yinlarni oladi; bashorat sanasi ham shu konvensiyada, shuning uchun Amerikadagi kech o'yinlar ham izchil.
+- **Noma'lum jamoa** (`UnknownTeamError`): chaqiruvchi o'yinni o'tkazib yuboradi va loglaydi (backtestda `SkipReason.UNKNOWN_TEAM`).
+- **Narx to'plami** (`MarketQuote`): bitta (o'yin, bukmeker, `kind`, bozor) uchun **barcha** tanlovlar; to'liq bo'lmasa tashlanadi; takror narxdan eng yangi `taken_at` olinadi (QA T2 F-1 dagi takroriy closing narxlarga chidamli).
+
+## 2. Model chiqishi (`outcomes.py`)
+Har bir tanlov besh natijali taqsimot (`win, half_win, push, half_loss, loss`) bilan ifodalanadi; oddiy bozor — ikkilik holat. Bitta ko'rinish EV, Kelly, ansambl va hisob-kitobni (chorak chiziqlar bilan) bitta yo'lda qiladi. "Partition" bozorlar (1X2, BTTS, x.5 chiziqlar) — aynan bitta tanlov to'liq yutadi; proper scoring va kalibratsiya faqat ularda hisoblanadi. Ikki natija (DC) tanlovlari ustma-ust tushadi (yig'indi 2).
+
+## 3. Bozor modeli (`market.py`, F3.3)
+- Ustuvorlik: `priority = (pinnacle,)`, zaxira `fallback = (market_avg,)` → `wide_uncertainty=True` (ishonchni pasaytiradi). Boshqa bukmekerlar (masalan `market_max`, marjasi manfiy) e'tiborsiz.
+- De-vig: standart Shin (ADR 0003). DC: implied ehtimolliklar yig'indisi **2** ga proporsional normallanadi (Shin ustma-ust tanlovlarga taalluqli emas); DC narxi bo'lmasa 1X2 dan hosil qilinadi (`derived=True`).
+- **Osiyo butun/chorak chiziqlari.** Ikki narx besh natijani aniqlay olmaydi. Reference taqsimotdan (amalda DC) faqat **o'rta** massalar (`push`, `half_win`, `half_loss`) olinadi; qaror qiluvchi `win/loss` bo'linishi narxlardan yechiladi. Birinchi tomon uchun `a = win + half_win/2`, `b = loss + half_loss/2`; adolatli koeffitsient `o = 1 + b/a`, ya'ni `1/o = a/(a+b)`. Ikkinchi tomon uchun `1/o' = b/(a+b)`, demak `1/o + 1/o' = 1` **avtomatik** bajariladi: ikki tomonli de-vig (`p₁ + p₂ = 1`) bilan to'liq mos. `a + b = 1 − push − (half_win + half_loss)/2 = S` bo'lgani uchun `win = p₁·S − half_win/2`, `loss = p₂·S − half_loss/2`. Narx juda ekstremal bo'lib manfiy massa chiqsa, o'rta massa minimal kerakli `t ∈ (0, 1]` ko'paytuvchiga kichraytiriladi. Butun chiziqda bu aniq formula (`win = (1 − push)·p₁`). Test: haqiqiy taqsimotning adolatli narxidan taqsimot 1e-12 aniqlikda tiklanadi.
+- Muqobil (rad etildi hozircha): bozor narxlaridan "implied" (λ, μ) Poisson'ni fit qilish. Kuchli, lekin to'g'ridan-to'g'ri de-vig dan uzoqlashadi va 1X2 ni aniq qaytarmaydi; F8 da qayta ko'rish mumkin.
+
+## 4. Ansambl (`ensemble.py`, F3.4)
+`p = w·p_DC + (1 − w)·p_bozor` har bir tanlovning **to'liq taqsimotiga** qo'llanadi (qavariq kombinatsiya → yana taqsimot; ikkilik bozorda aynan tanlov formulasi). Partition bozorlar yig'indisi 1 ga qayta normallanadi; ikki tomonli chiziqlarda ikkinchi tomon birinchisining ko'zgusi. Xossa (test): chiziqli aralashma hisob matritsalarining aralashmasidan olingan bozor bilan bir xil. Bozor bahosi yo'q bozor ansamblga kirmaydi (modelning yolg'iz raqami "langarsiz", ishonch past). `w` backtestda tanlanadi.
+
+## 5. Ishonch darajasi (`confidence.py`, F3.6)
+HIGH dan boshlanadi, har bir zaiflik bir pog'ona tushiradi (LOW gacha): kam ma'lumot (`< 15` o'yin), na xG na tarkib, bozor bahosi yo'q yoki zaxira bukmekerdan, `|p_model − p_bozor| > 0.08`, kalibratsiya og'ishi `> 0.05`, kickoff gacha `> 3` kun. Majburiy LOW: `< 6` o'yin yoki farq `> 0.15` (+ `sanity_flag`: CLAUDE.md senior qoidasi — bunday farq avval xato deb tekshiriladi). Sabablar `ConfidenceReason` kodlari (matn botda). Daraja nomlari servis `ConfidenceLevel` bilan bir xil; pipeline **nom bo'yicha** o'tkazadi (test bor), models servisni import qilmaydi.
+
+## 6. Backtest metodologiyasi (`app.models.backtest`, F3.7)
+- **Sof kutubxona:** fayl/baza/tarmoq yo'q; skript ma'lumotni yuklab `HistoryBatch` beradi.
+- **Walk-forward:** har liga alohida; o'yinlar sana bo'yicha; `refit_days` (standart 7) o'tganda qayta fit, `as_of` = o'sha o'yin sanasi, tarix `[as_of − 1100 kun, as_of)`. Bashorat vaqtida faqat `opening` narxlari; `closing` faqat baza, CLV va "yopilishdagi ROI" uchun (config `prediction_kind == closing_kind` ni rad etadi). Jamoada fit oynasida `< 6` o'yin bo'lsa o'tkaziladi.
+- **Sizib chiqish testlari:** (1) fit funksiyasi instrumentlanib, har bir fitdagi eng yangi o'yin `< as_of` va `as_of ≤ o'yin sanasi` tekshiriladi; (2) kesish sanasidan keyingi barcha hisoblar o'zgartirilsa, undan oldingi bashoratlar bit-bit bir xil qoladi; (3) closing narxlar olib tashlansa, stavka qarorlari o'zgarmaydi; (4) DC fitteri `as_of` va undan keyingi o'yinni xato bilan rad etadi (ADR 0003).
+- **Stavkalar:** narx — `pinnacle opening` (sozlanadi); har o'yindan filtrdan o'tgan eng yuqori EV li **bitta** tanlov (servis semantikasi bilan bir xil); `probability` = foyda bilan yopilish ehtimolligi (`win + half_win`). Flat 1 birlik va Kelly × 0.25 (maks 2%) **o'zgarmas** 100 birlik bankdan (kun ichidagi tartibga bog'liq emas). Birliklar statistik `float`; haqiqiy pul `Decimal` (`stake_amount`).
+- **Ko'rsatkichlar:** ROI = foyda / aylanma (yield); hit rate; maksimal pasayish; CLV = `log(olingan koeff / de-vig qilingan yopilish adolatli koeff)` va yopilishni yutgan ulush; yopilish taqsimotidagi kutilgan EV; yopilish narxidagi ROI; log-loss va Brier (ansambl, DC, yopilish bozori) har bozor guruhi bo'yicha; 10 oraliqli kalibratsiya; ROI/CLV uchun seed bilan percentile bootstrap 95% CI (o'yin boshiga bitta stavka → stavkalar mustaqil); liga va bozor kesimlari.
+- **Bo'linish va tanlash:** mavsumlar train (faqat tarix) / validatsiya (oxiridan oldingi) / hold-out (oxirgi **tugagan**; DB da o'ynalmagan o'yini bor mavsum hold-out bo'lmaydi). Grid `xi × w × min_ev × min_p` (standart 3×4×4×3 = 144) to'liq validatsiyada baholanadi va soni hisobotga yoziladi. Tanlash ikki bosqichli: `(xi, w)` — validatsiya log-loss (proper scoring) minimumi; chegaralar — validatsiya ROI maksimumi (≥ 50 stavka; bo'lmasa eng ko'p stavkali, `underpowered` bayrog'i). Hold-out tanlangan konfiguratsiya bilan **bir marta**.
+- **F3 darvozasi** (hisobotda avtomatik): kalibratsiya og'ishi ≤ 5 p.p. (n ≥ 100 oraliqlar), yopilish narxida ≥ 500 signal va ROI ≥ 0, EV ≥ 5% filtrida ROI > 0 (tanlangan `min_ev < 5%` bo'lsa "tekshirilmagan" = ❌), ≥ 3 ligada ROI ≥ −2%.
+- **Reproducibility:** seed, ma'lumot izi (domen ma'lumotining tartibga bog'liq bo'lmagan SHA-256), barcha parametrlar va `git commit` (o'zgarishlar bo'lsa `-dirty`).
+
+## 7. Sintetik samarali bozor (vositani tekshirish)
+Dixon-Coles jarayoni, kuchlar mavsumlar orasida drift qiladi; har o'yinda model hech qachon bila olmaydigan zarba (`match_shock_sd = 0.15`, log-tezlikda). Bozor shu o'yinning **haqiqiy** taqsimotini biladi; narxlar Shin uslubida marja bilan (Pinnacle opening 3%, closing 2.5%, o'rtacha 5.5%/5%), 2 xonagacha yaxlitlanadi; natijalar ham aynan shu taqsimotdan. Demak har bir stavkaning kutilgan daromadi manfiy.
+- **Asosiy sanity testi** (`test_backtest_finds_no_edge_on_an_efficient_market`): 4 liga × 10 jamoa × 3 mavsum, sof model (`w = 1`), istalgan musbat EV ga stavka (~700 stavka). Talab: yopilish taqsimotidagi kutilgan EV ≈ −marja oralig'ida, haqiqiy ROI CI uni o'z ichiga oladi, CI ning pastki chegarasi < 0, o'rtacha CLV < 0, yopilishni yutish ulushi < 5%. Seedlar 11/12/13 da ROI +6.3% / +3.6% / −11.1% (kutilgan ≈ −4.4%): uzoq koeffitsientlar tufayli tebranish katta, lekin CLV har doim ≈ −4.5% va CI kutilganni qamraydi — sizib chiqish belgisi yo'q.
+- Natija: [docs/backtest/2026-10-21-synthetic.md](../backtest/2026-10-21-synthetic.md).
+
+## Oqibatlar
+- **Haqiqiy ma'lumotdagi F3 darvozasi kutilmoqda** (#7): serverda `scripts/import_history.py`, so'ng `scripts/backtest.py`. Bo'sh bazada skript `no history in DB - run scripts/import_history.py first` bilan 2-kod qaytaradi.
+- Sintetik hisobot vositani tekshiradi, modelni emas: u yerdagi ❌ darvoza kutilgan natija (samarali bozorda yutib bo'lmaydi).
+- Ishlash: standart sintetik ishga tushirish (3 liga × 20 jamoa × 5 mavsum, 144 konfiguratsiya, haftalik refit) ≈ 50 s. Haqiqiy 10 liga uchun taxminan 3–5 daqiqa kutiladi.
+- Ma'lum cheklovlar: (1) Osiyo butun/chorak chiziqlarida bozor taqsimotining o'rta massasi DC dan olinadi (ikki model biroz bog'lanadi); (2) bitta narx manbai (`pinnacle opening`) — football-data "opening" vaqti taxminiy (ADR 0002); (3) mavsum ichidagi ko'tarilgan jamoalar fit oynasida 6 o'yin to'plamaguncha o'tkaziladi.
