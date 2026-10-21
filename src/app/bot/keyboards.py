@@ -33,13 +33,14 @@ from app.bot.callbacks import (
     SortCb,
     SportCb,
 )
-from app.domain import MarketType, Sport
+from app.domain import MarketType
 from app.services.interfaces import (
-    MAX_FUTURE_DAYS,
     RISK_PRESETS,
     RiskProfile,
     ScopeKind,
     SortKey,
+    SportOption,
+    horizon_end,
 )
 
 type Rows = list[list[InlineKeyboardButton]]
@@ -171,7 +172,7 @@ def _shift_month(key: int, delta: int) -> int:
 
 def calendar_bounds(today: date) -> tuple[date, date]:
     """First and last selectable day."""
-    return today - timedelta(days=CALENDAR_PAST_DAYS), today + timedelta(days=MAX_FUTURE_DAYS)
+    return today - timedelta(days=CALENDAR_PAST_DAYS), horizon_end(today)
 
 
 def _day_button(day: date, today: date, start: date | None) -> InlineKeyboardButton:
@@ -214,9 +215,17 @@ def calendar_keyboard(month: int, today: date, start: date | None) -> InlineKeyb
     return _markup([header, weekdays, *weeks, nav_row()])
 
 
-def sports_keyboard(sports: Sequence[Sport]) -> InlineKeyboardMarkup:
-    """Step 2: one sport or all of them."""
-    buttons = [_button(texts.SPORT_LABELS[sport], SportCb(sport=sport.value)) for sport in sports]
+def sport_label(option: SportOption) -> str:
+    """``⚽ Futbol``, with "🧪" for sports still in test mode."""
+    label = texts.SPORT_LABELS[option.sport]
+    return label + texts.EXPERIMENTAL_MARK if option.experimental else label
+
+
+def sports_keyboard(options: Sequence[SportOption]) -> InlineKeyboardMarkup:
+    """Step 2: one available sport or all of them."""
+    buttons = [
+        _button(sport_label(option), SportCb(sport=option.sport.value)) for option in options
+    ]
     rows = _chunks(buttons, 2)
     rows.append([_button(texts.ALL_SPORTS, SportCb(sport="all"))])
     return _markup([*rows, nav_row()])
@@ -323,12 +332,15 @@ def count_keyboard(default: int, *, per_day: bool) -> InlineKeyboardMarkup:
     )
 
 
-def markets_keyboard(selected: Iterable[MarketType]) -> InlineKeyboardMarkup:
-    """Step 6: market multi-select."""
-    chosen = set(selected)
+def markets_keyboard(
+    selected: Iterable[MarketType], offered: Iterable[MarketType]
+) -> InlineKeyboardMarkup:
+    """Step 6: multi-select over the markets the chosen sports are priced in."""
+    chosen, available = set(selected), set(offered)
     buttons = [
         _button(_checked(label, on=market in chosen), MarketCb(market=market.value))
         for market, label in texts.MARKET_LABELS.items()
+        if market in available
     ]
     return _markup(
         [
@@ -379,8 +391,17 @@ def edit_keyboard() -> InlineKeyboardMarkup:
 
 
 # --------------------------------------------------------------------------- results
-def card_keyboard(signal_id: int) -> InlineKeyboardMarkup:
-    """Buttons under every signal card."""
+def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarkup:
+    """Buttons under a signal card; a retro look-back cannot be recalculated or bet on."""
+    if retro:
+        return _markup(
+            [
+                [
+                    _button(texts.BTN_DETAIL, CardCb(action="detail", signal_id=signal_id)),
+                    _button(texts.BTN_HIDE, CardCb(action="hide", signal_id=signal_id)),
+                ]
+            ]
+        )
     return _markup(
         [
             [

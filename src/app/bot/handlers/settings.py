@@ -32,7 +32,7 @@ from app.bot.parsing import (
     parse_timezone,
 )
 from app.bot.states import SETTINGS_FIELD_KEY, SettingsFlow
-from app.bot.wizard import available_sports, high_probability
+from app.bot.wizard import high_probability, sport_options, supported_markets
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
     MIN_EV_LOWER,
@@ -182,16 +182,18 @@ async def _toggle_options(
 ) -> tuple[list[str], list[str], frozenset[str]]:
     """``(values, labels, selected values)`` of a multi-select field."""
     if field == "sports":
-        sports = await available_sports(services)
+        options = await sport_options(services)
         return (
-            [sport.value for sport in sports],
-            [texts.SPORT_LABELS[sport] for sport in sports],
+            [option.sport.value for option in options],
+            [keyboards.sport_label(option) for option in options],
             frozenset(sport.value for sport in settings.sports),
         )
     if field == "markets":
+        offered = supported_markets(await sport_options(services), settings.sports)
+        markets = [market for market in MarketType if market in offered]
         return (
-            [market.value for market in MarketType],
-            [texts.MARKET_LABELS[market] for market in MarketType],
+            [market.value for market in markets],
+            [texts.MARKET_LABELS[market] for market in markets],
             frozenset(market.value for market in settings.markets),
         )
     values: list[str] = []

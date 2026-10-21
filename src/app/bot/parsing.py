@@ -9,7 +9,7 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, time, timedelta
+from datetime import date, time
 from decimal import Decimal, InvalidOperation
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -25,6 +25,7 @@ from app.services.interfaces import (
     MIN_ODDS_LIMIT,
     QUERY_MAX_SIGNALS_UPPER,
     DateSpec,
+    horizon_end,
 )
 
 PERCENT: Final = 100
@@ -274,7 +275,7 @@ def check_window(start: date, end: date, today: date) -> DateSpec:
         raise InputError(texts.PARSE_REVERSED_RANGE)
     if (end - start).days + 1 > MAX_WINDOW_DAYS:
         raise InputError(texts.PARSE_WINDOW_TOO_LONG.format(max_window=MAX_WINDOW_DAYS))
-    if end > today + timedelta(days=MAX_FUTURE_DAYS):
+    if end > horizon_end(today):
         raise InputError(texts.PARSE_TOO_FAR.format(max_future=MAX_FUTURE_DAYS))
     return DateSpec.between(start, end)
 

@@ -30,7 +30,7 @@ from app.bot.keyboards import PickerRow
 from app.bot.notices import OnceNotices
 from app.bot.parsing import InputError
 from app.bot.states import AnalysisFlow
-from app.domain import Sport
+from app.domain import MarketType, Sport
 from app.services.interfaces import (
     HIGH_PROBABILITY_WARNING,
     MAX_FUTURE_DAYS,
@@ -46,6 +46,7 @@ from app.services.interfaces import (
     FixtureListRequest,
     ScopeKind,
     Services,
+    SportOption,
     TeamOption,
 )
 
@@ -163,14 +164,30 @@ class Screen:
         return STEP_STATES[self.step]
 
 
-async def available_sports(services: Services) -> tuple[Sport, ...]:
-    """Sports offered in the wizard.
+async def sport_options(services: Services) -> tuple[SportOption, ...]:
+    """Sports the system can analyse now (unavailable ones are not offered at all)."""
+    return tuple(option for option in await services.catalog.list_sports() if option.available)
 
-    Seam for ``CatalogService.list_sports()`` (announced additive contract change): until
-    it lands every declared sport is offered and the service reports empty results.
-    """
-    del services
-    return tuple(Sport)
+
+def supported_markets(
+    options: Sequence[SportOption], sports: frozenset[Sport]
+) -> frozenset[MarketType]:
+    """Markets priced for at least one of ``sports``."""
+    return frozenset(
+        market
+        for option in options
+        if option.sport in sports
+        for market in option.supported_markets
+    )
+
+
+def fit_markets(
+    markets: Sequence[str], options: Sequence[SportOption], sports: frozenset[Sport]
+) -> tuple[str, ...]:
+    """Keep the chosen markets the sports support; if none remain, offer all supported."""
+    supported = supported_markets(options, sports)
+    kept = [market for market in MarketType if market.value in markets and market in supported]
+    return tuple(market.value for market in (kept or sorted(supported)))
 
 
 def high_probability(value: float) -> bool:
@@ -209,8 +226,8 @@ async def _calendar(draft: WizardDraft, ctx: WizardContext) -> Screen:
 
 
 async def _sport(draft: WizardDraft, ctx: WizardContext) -> Screen:
-    sports = await available_sports(ctx.services)
-    return Screen("sport", texts.WIZARD_SPORT, keyboards.sports_keyboard(sports), draft)
+    options = await sport_options(ctx.services)
+    return Screen("sport", texts.WIZARD_SPORT, keyboards.sports_keyboard(options), draft)
 
 
 def _default(draft: WizardDraft, key: str, fallback: float) -> float:
@@ -344,10 +361,9 @@ async def _count_input(draft: WizardDraft, ctx: WizardContext) -> Screen:
 
 
 async def _markets(draft: WizardDraft, ctx: WizardContext) -> Screen:
-    del ctx
-    return Screen(
-        "markets", texts.WIZARD_MARKETS, keyboards.markets_keyboard(draft.market_set), draft
-    )
+    offered = supported_markets(await sport_options(ctx.services), draft.sport_set)
+    markup = keyboards.markets_keyboard(draft.market_set, offered)
+    return Screen("markets", texts.WIZARD_MARKETS, markup, draft)
 
 
 async def _sort(draft: WizardDraft, ctx: WizardContext) -> Screen:

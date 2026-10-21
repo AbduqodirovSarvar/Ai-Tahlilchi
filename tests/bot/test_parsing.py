@@ -140,7 +140,7 @@ def test_parse_date_range_rejects_text() -> None:
 
 
 def test_check_window_rules() -> None:
-    assert check_window(TODAY, TODAY + timedelta(days=14), TODAY).mode is DateMode.RANGE
+    assert check_window(TODAY, TODAY + timedelta(days=13), TODAY).mode is DateMode.RANGE
     retro = check_window(TODAY - timedelta(days=10), TODAY - timedelta(days=5), TODAY)
     assert retro.date_to == TODAY - timedelta(days=5)
     with pytest.raises(InputError, match="oldin"):
@@ -148,7 +148,7 @@ def test_check_window_rules() -> None:
     with pytest.raises(InputError, match="uzun"):
         check_window(TODAY - timedelta(days=40), TODAY, TODAY)
     with pytest.raises(InputError, match="uzoqda"):
-        check_window(TODAY, TODAY + timedelta(days=15), TODAY)
+        check_window(TODAY, TODAY + timedelta(days=14), TODAY)  # horizon: today + 13
 
 
 # --------------------------------------------------------------------------- /tahlil

@@ -113,7 +113,11 @@ async def send_result_page(
 ) -> None:
     """Day headers and cards of one page, then "➡️ Yana N ta" while more remain."""
     for item in result_page(signals, zone, page, RESULTS_PAGE_SIZE):
-        markup = None if item.signal is None else keyboards.card_keyboard(item.signal.signal_id)
+        markup = (
+            None
+            if item.signal is None
+            else keyboards.card_keyboard(item.signal.signal_id, retro=item.signal.retro)
+        )
         await send_html(message, item.text, markup)
     shown = min((page + 1) * RESULTS_PAGE_SIZE, len(signals))
     remaining = len(signals) - shown

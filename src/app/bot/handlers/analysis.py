@@ -47,11 +47,13 @@ from app.bot.states import AnalysisFlow, drop_draft
 from app.bot.wizard import (
     BACK,
     add_teams,
-    available_sports,
+    fit_markets,
     high_probability,
     lookup_teams,
     next_step,
+    sport_options,
     step_of,
+    supported_markets,
 )
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
@@ -164,15 +166,20 @@ async def on_dates_text(message: Message, session: WizardSession) -> None:
 async def on_sport(callback: CallbackQuery, callback_data: SportCb, session: WizardSession) -> None:
     """One sport or 🌐 Hammasi."""
     del callback
-    offered = await available_sports(session.ctx.services)
+    options = await sport_options(session.ctx.services)
+    offered = [option.sport.value for option in options]
     if callback_data.sport == "all":
-        sports = tuple(sport.value for sport in offered)
+        sports = tuple(offered)
+    elif callback_data.sport in offered:
+        sports = (callback_data.sport,)
     else:
-        sports = (Sport(callback_data.sport).value,)
+        raise StaleDraftError
     draft = session.draft
     changed = set(sports) != set(draft.sports)
-    # Leagues/teams/fixtures of another sport make no sense any more.
-    draft = replace(draft, sports=sports)
+    chosen = frozenset(Sport(value) for value in sports)
+    # Leagues/teams/fixtures of another sport make no sense any more; markets must be
+    # ones the chosen sports are priced in.
+    draft = replace(draft, sports=sports, markets=fit_markets(draft.markets, options, chosen))
     if changed:
         draft = draft.with_scope(ScopeKind.ALL)
     await session.go(next_step("sport", draft), draft)
@@ -310,6 +317,9 @@ async def on_market(
             return
         await session.go(next_step("markets", draft), draft)
         return
+    offered = supported_markets(await sport_options(session.ctx.services), draft.sport_set)
+    if callback_data.market not in {market.value for market in offered}:
+        raise StaleDraftError
     market = MarketType(callback_data.market).value
     chosen = set(draft.markets) ^ {market}
     ordered = tuple(item.value for item in MarketType if item.value in chosen)

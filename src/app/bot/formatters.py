@@ -30,6 +30,7 @@ from app.services.interfaces import (
     MIN_SEARCH_LENGTH,
     AnalysisResult,
     DateWindow,
+    SignalSource,
     SignalState,
     SignalView,
     UserSettingsView,
@@ -162,6 +163,8 @@ def _flag_lines(signal: SignalView, zone: ZoneInfo) -> list[str]:
 def _value_flags(signal: SignalView) -> list[str]:
     """Flags about the signal's value and origin."""
     lines: list[str] = []
+    if signal.retro:
+        lines.append(texts.CARD_RETRO)
     if signal.preliminary:
         lines.append(texts.CARD_PRELIMINARY)
     if signal.negative_ev:
@@ -239,26 +242,46 @@ def format_hidden_card(signal: SignalView) -> str:
 # --------------------------------------------------------------------------- results
 @dataclass(frozen=True, slots=True)
 class DayGroup:
-    """Signals of one local calendar day, in the order the service sorted them."""
+    """Signals shown under one header, in the order the service sorted them.
 
-    day: date
+    ``day=None`` is the "⭐ Sevimlilar" block: watchlist signals the service adds on top of
+    the requested count (contract v1.1), shown after the regular days.
+    """
+
+    day: date | None
     signals: tuple[SignalView, ...]
 
 
+def is_watchlist_extra(signal: SignalView) -> bool:
+    """A watchlist signal added outside ``max_signals``."""
+    return signal.source is SignalSource.WATCHLIST
+
+
 def group_by_day(signals: Iterable[SignalView], zone: ZoneInfo) -> tuple[DayGroup, ...]:
-    """Group by local kickoff date (days ascending, service order kept inside a day)."""
+    """Group by local kickoff date, then the watchlist block.
+
+    Days are ascending; inside a day the service's sort order is kept.
+    """
 
     def local_day(signal: SignalView) -> date:
         return signal.kickoff.astimezone(zone).date()
 
-    ordered = sorted(signals, key=local_day)  # stable: keeps the service's order per day
-    return tuple(
-        DayGroup(day=day, signals=tuple(items)) for day, items in groupby(ordered, key=local_day)
-    )
+    items = list(signals)
+    regular = sorted((s for s in items if not is_watchlist_extra(s)), key=local_day)
+    groups = [
+        DayGroup(day=day, signals=tuple(group)) for day, group in groupby(regular, key=local_day)
+    ]
+    watched = tuple(s for s in items if is_watchlist_extra(s))
+    if watched:
+        groups.append(DayGroup(day=None, signals=watched))
+    return tuple(groups)
 
 
 def day_header(group: DayGroup, *, continued: bool = False) -> str:
-    """``📅 Shanba, 25.10 — 3 ta signal``."""
+    """``📅 Shanba, 25.10 — 3 ta signal`` (or the "⭐ Sevimlilar" block header)."""
+    if group.day is None:
+        template = texts.WATCHLIST_HEADER_CONTINUED if continued else texts.WATCHLIST_HEADER
+        return template.format(count=len(group.signals))
     template = texts.DAY_HEADER_CONTINUED if continued else texts.DAY_HEADER
     return template.format(
         weekday=weekday_name(group.day), day=short_date(group.day), count=len(group.signals)
@@ -268,16 +291,21 @@ def day_header(group: DayGroup, *, continued: bool = False) -> str:
 def format_results_summary(result: AnalysisResult) -> str:
     """Header of an analysis result, with shortfall/failure/retro notes or the empty state."""
     window = window_label(result.window)
-    if not result.signals:
-        return texts.RESULTS_EMPTY.format(window=window, fixtures=result.fixtures_analyzed)
-    lines = [
-        texts.RESULTS_HEADER.format(
-            window=window, count=len(result.signals), fixtures=result.fixtures_analyzed
-        )
-    ]
+    watched = sum(1 for signal in result.signals if is_watchlist_extra(signal))
+    regular = len(result.signals) - watched
+    if regular == 0:
+        lines = [texts.RESULTS_EMPTY.format(window=window, fixtures=result.fixtures_analyzed)]
+    else:
+        lines = [
+            texts.RESULTS_HEADER.format(
+                window=window, count=regular, fixtures=result.fixtures_analyzed
+            )
+        ]
+    if watched:
+        lines.append(texts.RESULTS_WATCHLIST.format(count=watched))
     if result.retro:
         lines.append(texts.RESULTS_RETRO)
-    if result.shortfall and result.requested is not None:
+    if regular and result.shortfall and result.requested is not None:
         lines.append(
             texts.RESULTS_SHORTFALL.format(matched=result.matched, requested=result.requested)
         )
@@ -288,7 +316,7 @@ def format_results_summary(result: AnalysisResult) -> str:
 
 @dataclass(frozen=True, slots=True)
 class PageItem:
-    """One message of a result page: a day header (``signal`` is ``None``) or a card."""
+    """One message of a result page: a header (``signal`` is ``None``) or a card."""
 
     text: str
     signal: SignalView | None = None
@@ -299,24 +327,24 @@ def result_page(
 ) -> tuple[PageItem, ...]:
     """Messages of result page ``page``: day headers interleaved with cards.
 
-    A day that started on an earlier page gets a "(davomi)" header.
+    A group that started on an earlier page gets a "(davomi)" header.
     """
     groups = group_by_day(signals, zone)
     flat = [(group, signal) for group in groups for signal in group.signals]
     chunk = flat[page * page_size : (page + 1) * page_size]
     items: list[PageItem] = []
-    previous_day: date | None = None
+    previous: DayGroup | None = None
     for position, (group, signal) in enumerate(chunk):
-        if group.day != previous_day:
+        if group is not previous:
             continued = position == 0 and group.signals[0] is not signal
             items.append(PageItem(text=day_header(group, continued=continued)))
-            previous_day = group.day
+            previous = group
         items.append(PageItem(text=format_signal_card(signal, zone), signal=signal))
     return tuple(items)
 
 
 def ordered_for_display(signals: Sequence[SignalView], zone: ZoneInfo) -> tuple[SignalView, ...]:
-    """Signals in display order (by day, then the service order)."""
+    """Signals in display order (by day, then the service order; watchlist block last)."""
     return tuple(signal for group in group_by_day(signals, zone) for signal in group.signals)
 
 

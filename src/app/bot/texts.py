@@ -143,6 +143,7 @@ SPORT_ICONS: Final[dict[Sport, str]] = {
     Sport.TENNIS: "🎾",
 }
 ALL_SPORTS: Final = "🌐 Hammasi"
+EXPERIMENTAL_MARK: Final = " 🧪"
 MARKET_LABELS: Final[dict[MarketType, str]] = {
     MarketType.MATCH_RESULT: "1X2",
     MarketType.DOUBLE_CHANCE: "Ikki natija",
@@ -216,6 +217,7 @@ CARD_EV: Final = "💹 EV: {ev}   🛡 Ishonch: {confidence}"
 CARD_STAKE: Final = "💰 Tavsiya: {stake} unit"
 CARD_NO_STAKE: Final = "💰 Tavsiya: stavka qilinmaydi"
 CARD_NOTE: Final = "📝 {note}"
+CARD_RETRO: Final = "🕰 Retro: model o'sha paytda shuni bergan bo'lardi (tavsiya emas)"
 CARD_PRELIMINARY: Final = "⏳ Dastlabki tahlil (tarkib va jarohatlar hali noma'lum)"
 CARD_NEGATIVE_EV: Final = "❗ Qiymatsiz: EV manfiy, tavsiya etilmaydi"
 CARD_NO_VALUE: Final = "❗ Qiymatsiz: chegaralaringizdan past"
@@ -234,6 +236,12 @@ BTN_HIDE: Final = "🙈 Yashirish"
 HIDDEN_ALERT: Final = "🙈 Signal yashirildi"
 
 # --------------------------------------------------------------------------- results
+WATCHLIST_HEADER: Final = "⭐ <b>Sevimlilar</b> — {count} ta (har doim ko'rsatiladi)"
+WATCHLIST_HEADER_CONTINUED: Final = "⭐ <b>Sevimlilar</b> (davomi)"
+RESULTS_WATCHLIST: Final = (
+    "⭐ Sevimli jamoa/ligalaringizdan yana {count} ta o'yin alohida ko'rsatiladi "
+    "(so'ralgan sondan tashqari)."
+)
 DAY_HEADER: Final = "📅 <b>{weekday}, {day}</b> — {count} ta signal"
 DAY_HEADER_CONTINUED: Final = "📅 <b>{weekday}, {day}</b> (davomi)"
 RESULTS_HEADER: Final = "📊 <b>Natijalar</b>: {window} · {count} ta signal · {fixtures} ta o'yin"
