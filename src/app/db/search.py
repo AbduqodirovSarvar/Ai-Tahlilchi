@@ -16,10 +16,11 @@ The pure functions (:func:`to_latin`, :func:`to_cyrillic`, :func:`search_key`,
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from rapidfuzz import fuzz, process
-from sqlalchemy import or_, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.schema import FixtureRow, LeagueRow, TeamRow
@@ -162,22 +163,32 @@ async def search_teams(
 
 
 async def _latest_leagues(session: AsyncSession, team_ids: Iterable[int]) -> dict[int, str]:
-    """Name of the league of each team's most recent fixture (one query)."""
+    """Name of the league of each team's most recent fixture (one grouped query).
+
+    Aggregates in SQL (latest kick-off per team and league) instead of loading the whole
+    fixture history of the teams.
+    """
     ids = list(team_ids)
     if not ids:
         return {}
+    appearances = union_all(
+        select(
+            FixtureRow.home_team_id.label("team_id"),
+            FixtureRow.league_id.label("league_id"),
+            FixtureRow.kickoff_at.label("kickoff_at"),
+        ).where(FixtureRow.home_team_id.in_(ids)),
+        select(FixtureRow.away_team_id, FixtureRow.league_id, FixtureRow.kickoff_at).where(
+            FixtureRow.away_team_id.in_(ids)
+        ),
+    ).subquery()
+    latest = func.max(appearances.c.kickoff_at)
     rows = await session.execute(
-        select(FixtureRow.home_team_id, FixtureRow.away_team_id, LeagueRow.name)
-        .join(LeagueRow, FixtureRow.league_id == LeagueRow.id)
-        .where(or_(FixtureRow.home_team_id.in_(ids), FixtureRow.away_team_id.in_(ids)))
-        .order_by(FixtureRow.kickoff_at.desc())
+        select(appearances.c.team_id, LeagueRow.name, latest)
+        .join(LeagueRow, appearances.c.league_id == LeagueRow.id)
+        .group_by(appearances.c.team_id, LeagueRow.id, LeagueRow.name)
     )
-    wanted = set(ids)
-    leagues: dict[int, str] = {}
-    for home_id, away_id, league in rows:
-        for team_id in (home_id, away_id):
-            if team_id in wanted:
-                leagues.setdefault(team_id, league)
-        if len(leagues) == len(wanted):
-            break
-    return leagues
+    newest: dict[int, tuple[datetime, str]] = {}
+    for team_id, league, kickoff in rows:
+        if team_id not in newest or kickoff > newest[team_id][0]:
+            newest[team_id] = (kickoff, league)
+    return {team_id: league for team_id, (_, league) in newest.items()}

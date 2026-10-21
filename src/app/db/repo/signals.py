@@ -15,10 +15,11 @@ view preference, not a selection decision).
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, func, select, update
+from sqlalchemy import ColumnElement, func, inspect, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.db._sql import dialect_insert, table_of
 from app.db.enums import ResultSource, SignalSource, SignalStatus, SignalVersionReason
 from app.db.mappers import line_to_db, market_from_db
 from app.db.repo.fixtures import to_record
@@ -30,6 +31,9 @@ from app.db.repo.records import (
     Thresholds,
 )
 from app.db.schema import FixtureRow, SignalResultRow, SignalRow, SignalVersionRow, utcnow
+from app.errors import DataError
+
+_VERSION_ATTEMPTS = 3
 
 _EAGER = (
     joinedload(SignalRow.fixture).joinedload(FixtureRow.league),
@@ -47,9 +51,29 @@ async def upsert_signal(
     """Create or update the signal for ``draft`` and record a new version of its numbers.
 
     A new signal always gets version 1 with reason ``initial``. Runs in the caller's
-    transaction (flushes, does not commit).
+    transaction (flushes, does not commit). When another transaction creates the same
+    signal first (a double tap, two workers), the unique key rejects our insert; we then
+    update that row and become its next version instead of failing.
     """
-    row = await session.scalar(
+    row = await _find(session, draft)
+    if row is None:
+        row = await _insert_new(session, draft)
+        if row is not None:
+            await _add_version(session, row.id, draft, SignalVersionReason.INITIAL)
+            return await _require(session, row.id)
+        row = await _find(session, draft)  # the winner's row: update it
+        if row is None:  # pragma: no cover - the unique key fired, so the row exists
+            msg = "signal insert conflicted but the existing signal cannot be found"
+            raise DataError(msg)
+    if row.source is not SignalSource.RETRO and draft.source is SignalSource.RETRO:
+        return await _require(session, row.id)
+    _update_row(row, draft)
+    await _add_version(session, row.id, draft, reason)
+    return await _require(session, row.id)
+
+
+async def _find(session: AsyncSession, draft: SignalDraft) -> SignalRow | None:
+    return await session.scalar(
         select(SignalRow).where(
             SignalRow.user_id == draft.user_id,
             SignalRow.fixture_id == draft.fixture_id,
@@ -58,28 +82,63 @@ async def upsert_signal(
             SignalRow.line == line_to_db(draft.market),
         )
     )
-    if row is None:
-        row = _new_row(draft)
-        session.add(row)
-        await session.flush()
-        version, reason = 1, SignalVersionReason.INITIAL
-    elif row.source is not SignalSource.RETRO and draft.source is SignalSource.RETRO:
-        return await _require(session, row.id)
-    else:
-        _update_row(row, draft)
-        version = await _latest_version(session, row.id) + 1
-    session.add(
-        SignalVersionRow(
-            signal_id=row.id,
-            version=version,
-            odds=draft.odds,
-            p_model=draft.p_model,
-            ev=draft.ev,
-            reason=reason,
-        )
+
+
+async def _insert_new(session: AsyncSession, draft: SignalDraft) -> SignalRow | None:
+    """Insert the signal; ``None`` if the unique key says someone else just did.
+
+    ``ON CONFLICT DO NOTHING`` instead of catching ``IntegrityError``: no savepoint is
+    needed (SQLite's driver does not support them reliably) and the caller's transaction
+    is never poisoned.
+    """
+    transient = _new_row(draft)
+    values = {
+        attribute.key: getattr(transient, attribute.key)
+        for attribute in inspect(SignalRow).column_attrs
+        if getattr(transient, attribute.key) is not None
+    }
+    new_id = await _insert_ignoring_conflict(
+        session, SignalRow, values, ["user_id", "fixture_id", "market", "selection", "line"]
     )
-    await session.flush()
-    return await _require(session, row.id)
+    return None if new_id is None else await session.get(SignalRow, new_id)
+
+
+async def _insert_ignoring_conflict(
+    session: AsyncSession,
+    model: type[SignalRow] | type[SignalVersionRow],
+    values: dict[str, object],
+    unique_columns: list[str],
+) -> int | None:
+    table = table_of(model)
+    statement = (
+        dialect_insert(session, table)
+        .values(**values)
+        .on_conflict_do_nothing(index_elements=unique_columns)
+        .returning(table.c.id)
+    )
+    new_id: int | None = await session.scalar(statement)
+    return new_id
+
+
+async def _add_version(
+    session: AsyncSession, signal_id: int, draft: SignalDraft, reason: SignalVersionReason
+) -> None:
+    """Append the next version; losing a race for the number just takes the one after."""
+    for _ in range(_VERSION_ATTEMPTS):
+        values: dict[str, object] = {
+            "signal_id": signal_id,
+            "version": await _latest_version(session, signal_id) + 1,
+            "odds": draft.odds,
+            "p_model": draft.p_model,
+            "ev": draft.ev,
+            "reason": reason,
+        }
+        if await _insert_ignoring_conflict(
+            session, SignalVersionRow, values, ["signal_id", "version"]
+        ):
+            return
+    msg = f"could not append a version to signal {signal_id}: version numbers kept colliding"
+    raise DataError(msg)
 
 
 def _new_row(draft: SignalDraft) -> SignalRow:
@@ -292,10 +351,20 @@ async def settle_signal(
     return _result_record(row)
 
 
-async def set_result_note(session: AsyncSession, signal_id: int, note: str) -> bool:
-    """Attach the user's note to a settled signal; ``False`` if it is not settled yet."""
+async def set_result_note(
+    session: AsyncSession, signal_id: int, note: str, *, user_id: int
+) -> bool:
+    """Attach the user's note to their own settled signal; ``False`` if there is none.
+
+    The update is scoped by ``user_id``: another user's signal is simply unknown.
+    """
     result = await session.execute(
-        update(SignalResultRow).where(SignalResultRow.signal_id == signal_id).values(user_note=note)
+        update(SignalResultRow)
+        .where(
+            SignalResultRow.signal_id == signal_id,
+            SignalResultRow.signal_id.in_(select(SignalRow.id).where(SignalRow.user_id == user_id)),
+        )
+        .values(user_note=note)
     )
     return bool(getattr(result, "rowcount", 0))
 

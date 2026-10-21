@@ -42,6 +42,7 @@ from app.db.repo import (
     get_fixtures,
     list_bets,
     list_user_signals,
+    release_recalc,
     report_signals,
     set_signal_status,
     settle_bet,
@@ -171,7 +172,7 @@ async def test_lease_boundary_and_stale_claimer(
     _, task_ids = await seed_signals(factory, 1)
     lease = timedelta(minutes=15)
     async with factory() as session, session.begin():
-        assert len(await claim_due_recalcs(session, now=NOW, lease=lease)) == 1
+        (first_claim,) = await claim_due_recalcs(session, now=NOW, lease=lease)
     async with factory() as session, session.begin():
         # Exactly at the lease limit the first claim is still valid ...
         assert await claim_due_recalcs(session, now=NOW + lease, lease=lease) == []
@@ -182,7 +183,17 @@ async def test_lease_boundary_and_stale_claimer(
         )
         assert [task.id for task in taken] == task_ids
     async with factory() as session, session.begin():
-        assert await complete_recalc(session, task_ids[0], now=NOW + 2 * lease)
+        # The slow first worker no longer owns the job: it can neither finish nor release it.
+        assert first_claim.claimed_at is not None
+        stale = first_claim.claimed_at
+        assert not await complete_recalc(
+            session, task_ids[0], now=NOW + 2 * lease, claimed_at=stale
+        )
+        assert not await release_recalc(session, task_ids[0], claimed_at=stale)
+        assert taken[0].claimed_at is not None
+        assert await complete_recalc(
+            session, task_ids[0], now=NOW + 2 * lease, claimed_at=taken[0].claimed_at
+        )
         assert await claim_due_recalcs(session, now=NOW + 10 * lease, lease=lease) == []
 
 
@@ -191,8 +202,9 @@ async def test_completed_jobs_are_never_claimed_again(
 ) -> None:
     _, task_ids = await seed_signals(factory, 4)
     async with factory() as session, session.begin():
-        for task_id in task_ids:
-            assert await complete_recalc(session, task_id, now=NOW)
+        for task in await claim_due_recalcs(session, now=NOW):
+            assert task.claimed_at is not None
+            assert await complete_recalc(session, task.id, now=NOW, claimed_at=task.claimed_at)
     async with factory() as session, session.begin():
         assert await claim_due_recalcs(session, now=NOW + 365 * DAY) == []
 
@@ -200,11 +212,6 @@ async def test_completed_jobs_are_never_claimed_again(
 # --------------------------------------------------------------------------- signals
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-R2: two sessions creating the same signal at once: the loser gets a raw "
-    "IntegrityError instead of becoming version 2 (no retry / ON CONFLICT in upsert_signal)",
-)
 async def test_two_simultaneous_first_analyses_become_one_signal_with_two_versions(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -359,7 +366,12 @@ async def test_money_stays_decimal_end_to_end_and_is_stored_as_text(
                 placed_at=placed,
             )
         await settle_bet(
-            session, bet.id, outcome=Outcome.WIN, profit=Decimal("0.0910"), settled_at=placed
+            session,
+            bet.id,
+            user_id=USER,
+            outcome=Outcome.WIN,
+            profit=Decimal("0.0910"),
+            settled_at=placed,
         )
     async with factory() as session:
         bets = await bets_placed_between(session, USER, start=placed, end=placed + DAY)
@@ -533,11 +545,6 @@ async def test_only_finished_scored_matches_feed_the_model(
     assert [r.fixture.ref.external_id for r in rows] == ["a"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-R1: finished_fixtures de-duplicates on (league, season, home, away); a "
-    "pairing that is played twice in one season (Belgian play-offs, id 144) loses a match",
-)
 async def test_a_pairing_played_twice_in_one_season_is_not_collapsed(
     factory: async_sessionmaker[AsyncSession],
 ) -> None:
