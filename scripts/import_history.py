@@ -26,12 +26,13 @@ from typing import Final
 
 import httpx
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.db.engine import create_engine, create_session_factory
 from app.db.history import season_coverage, upsert_batch
-from app.errors import AppError, ConfigurationError
+from app.errors import AppError, ConfigurationError, ExternalServiceError
 from app.logging import configure_logging, get_logger
 from app.sports.history.download import (
     cache_path,
@@ -141,9 +142,17 @@ async def obtain_file(
     """Local path of the season file (downloading it if allowed and needed), else None."""
     path = cache_path(options.cache_dir, league, season)
     stale = options.refresh or needs_download(path, season=season, now=datetime.now(UTC))
-    if client is not None and stale and not await download_season(client, league, season, path):
-        return None
-    return path if path.is_file() else None
+    if client is None or not stale:
+        return path if path.is_file() else None
+    try:
+        published = await download_season(client, league, season, path)
+    except ExternalServiceError as exc:
+        if not path.is_file():
+            raise
+        # Better an older copy than nothing: every row in it is still a valid upsert.
+        logger.warning("using_stale_cache", league=league, season=season, error=str(exc))
+        return path
+    return path if published else None
 
 
 async def import_file(
@@ -198,8 +207,16 @@ async def import_one(
             )
             return FileReport(league=league, season=season, status="missing")
         return await import_file(sessions, path, league, season)
-    except AppError as exc:
-        logger.error("season_import_failed", league=league, season=season, error=str(exc))
+    except (AppError, SQLAlchemyError, OSError) as exc:
+        # One broken file, database hiccup or disk error must not stop the other seasons;
+        # the transaction of this file was rolled back, so nothing half-written remains.
+        logger.error(
+            "season_import_failed",
+            league=league,
+            season=season,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         return FileReport(league=league, season=season, status="failed")
 
 
