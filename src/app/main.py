@@ -16,9 +16,12 @@ from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.utils.token import TokenValidationError
 
 from app.bot.dispatcher import build_dispatcher
+from app.bot.messaging import install_flood_control
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 from app.logging import configure_logging, get_logger
+from app.services.fake import create_fake_services
+from app.services.interfaces import Services
 
 # Not `__name__`: under `python -m app.main` that would be "__main__".
 logger = get_logger("app.main")
@@ -53,6 +56,12 @@ async def connect_bot(token: str) -> Bot:
     return bot
 
 
+def build_services(settings: Settings) -> Services:
+    """The service implementation selected by ``APP_SERVICES`` (only ``fake`` until T4)."""
+    logger.warning("services_backend", backend=settings.app_services, sample_data=True)
+    return create_fake_services()
+
+
 async def run_bot(settings: Settings) -> None:
     """Validate bot settings and poll Telegram until the process is asked to stop.
 
@@ -61,8 +70,9 @@ async def run_bot(settings: Settings) -> None:
     """
     token = settings.require_secret("telegram_bot_token")
     admin_ids = settings.require_admin_ids()
-    dispatcher = build_dispatcher(admin_ids)
+    dispatcher = build_dispatcher(admin_ids, build_services(settings))
     bot = await connect_bot(token)
+    install_flood_control(bot)
     logger.info("bot_starting", app_env=settings.app_env, admin_count=len(admin_ids))
     await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     logger.info("bot_stopped")
