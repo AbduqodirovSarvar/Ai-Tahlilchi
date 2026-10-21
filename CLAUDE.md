@@ -14,9 +14,11 @@ Barcha agentlar va sessiyalar uchun umumiy qoidalar.
 - Bot foydalanuvchiga ko'rsatadigan matnlar va hujjatlar: **o'zbek tili (lotin)**. Bot matnlari faqat `app/bot/texts.py` da saqlanadi.
 
 ## Stek
-Python 3.12, `uv`, `aiogram 3`, `httpx` + `tenacity`, `SQLAlchemy 2` (async) + `aiosqlite` + `Alembic`, `pydantic-settings`, `APScheduler`, `numpy/scipy/pandas/scikit-learn`, `google-genai`, `rapidfuzz`, `matplotlib`, `structlog`; testlar: `pytest`, `pytest-asyncio`, `respx`, `hypothesis`. To'liq jadval: `ishlab_chiqish_rejasi.md`, 1-bo'lim.
+Python 3.13, `uv`, `aiogram 3`, `httpx` + `tenacity`, `SQLAlchemy 2` (async) + `aiosqlite` + `Alembic`, `pydantic-settings`, `APScheduler`, `numpy/scipy/pandas/scikit-learn`, `google-genai`, `rapidfuzz`, `matplotlib`, `structlog`; testlar: `pytest`, `pytest-asyncio`, `respx`, `hypothesis`. To'liq jadval: `ishlab_chiqish_rejasi.md`, 1-bo'lim.
 
 ## Buyruqlar
+> Bu mashinada `uv` PATH da yo'q: barcha `uv ...` buyruqlari **`python -m uv ...`** shaklida ishga tushiriladi (masalan, `python -m uv run pytest`). CI va Docker da oddiy `uv` ishlatiladi.
+
 ```
 uv sync                      # bog'liqliklar
 uv run pytest                # testlar

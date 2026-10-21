@@ -39,7 +39,7 @@ F9 (deploy) ni F6 dan keyin erta qilish ham mumkin, shunda bot serverda sinovdan
 
 | Soha | Tanlov | Sabab |
 |---|---|---|
-| Til | Python 3.12 | Statistika, AI SDK, bot kutubxonalari |
+| Til | Python 3.13 | Statistika, AI SDK, bot kutubxonalari |
 | Paket boshqaruvi | `uv` | Tez, lock-fayl, virtual muhit |
 | Bot | `aiogram 3.x` | Async, FSM (bosqichli oqimlar), router tizimi |
 | HTTP | `httpx` (async) + `tenacity` (retry) | Limitlar va qayta urinish nazorati |
@@ -71,7 +71,7 @@ F9 (deploy) ni F6 dan keyin erta qilish ham mumkin, shunda bot serverda sinovdan
 | F0.3 | Google AI Studio: **Gemini API kalit** olish | Siz |
 | F0.4 | *(Ixtiyoriy)* The Odds API kaliti | Siz |
 | F0.5 | Private GitHub repozitoriy yaratish | Siz |
-| F0.6 | Lokal muhit: Python 3.12, `uv`, Git, Docker Desktop | Siz / birga |
+| F0.6 | Lokal muhit: Python 3.13, `uv`, Git, Docker Desktop | Siz / birga |
 | F0.7 | **Tekshiruv skripti** (`scripts/probe_api.py`): bepul tarifda joriy mavsum ochiqmi; kerakli ligalar uchun `odds` bormi, qaysi bukmekerlar (1xBet, Pinnacle) mavjud; `injuries`, `lineups` va `fixtures/statistics` da xG bormi; bitta so'rov qancha limit sarflaydi | Men |
 | F0.8 | Kuzatiladigan **ligalar ro'yxati**ni kelishish (boshlanishda 8–10 ta) | Birga |
 | F0.9 | Backtest uchun tarixiy ma'lumot: **football-data.co.uk** CSV (natijalar va yopilish koeffitsientlari, jumladan Pinnacle), so'nggi 3–5 mavsum | Men |

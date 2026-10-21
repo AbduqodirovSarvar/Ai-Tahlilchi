@@ -25,6 +25,11 @@
       "Bash(git stash:*)",
       "Bash(git worktree:*)",
       "Bash(git rev-parse:*)",
+      "Bash(git push origin:*)",
+      "Bash(git push -u origin:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git remote:*)",
       "Bash(docker build:*)",
       "Bash(docker compose:*)",
       "Bash(docker images:*)",
@@ -43,7 +48,6 @@
       "Bash(echo:*)"
     ],
     "ask": [
-      "Bash(git push:*)",
       "Bash(git reset --hard:*)",
       "Bash(ssh:*)",
       "Bash(scp:*)",

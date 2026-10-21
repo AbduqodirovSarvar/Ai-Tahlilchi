@@ -23,7 +23,7 @@ Foydalanuvchi Telegram bot orqali **sana oralig'ini, sport turini, ligalarni, o'
 
 ## 2. Texnologik Stek
 
-* **Dasturlash tili:** **Python 3.12+** (yagona tanlov: `pandas`, `scipy` kabi statistik kutubxonalar va Gemini SDK shu tilda eng qulay).
+* **Dasturlash tili:** **Python 3.13** (yagona tanlov: `pandas`, `scipy` kabi statistik kutubxonalar va Gemini SDK shu tilda eng qulay).
   * `httpx` (async API so'rovlar), `python-telegram-bot` yoki `aiogram`, `APScheduler`, `pydantic` (sxema validatsiyasi), `SQLAlchemy`.
 * **Statistik model:** Poisson / Dixon-Coles (gollar modeli) + bozor koeffitsientlaridan margin olib tashlangan ehtimollik.
 * **AI Model:** Google Gemini Flash (joriy versiya). `response_schema` orqali qat'iy JSON, `temperature` ≈ 0.2.
