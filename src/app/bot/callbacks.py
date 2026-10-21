@@ -97,9 +97,13 @@ class CardCb(CallbackData, prefix="sc"):
 
 
 class ResultsCb(CallbackData, prefix="rp"):
-    """Next page of an analysis result (``page`` is zero-based)."""
+    """Next page of an analysis result (``page`` is zero-based).
+
+    ``token`` names the result the button belongs to (see ``StoredResults``).
+    """
 
     page: int
+    token: int = 0
 
 
 class SettingsCb(CallbackData, prefix="st"):
@@ -118,3 +122,24 @@ class SettingsCb(CallbackData, prefix="st"):
 
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
+
+
+WIZARD_CALLBACKS: tuple[type[CallbackData], ...] = (
+    NavCb,
+    DateCb,
+    CalendarCb,
+    SportCb,
+    ProbabilityCb,
+    EvCb,
+    ScopeCb,
+    PickCb,
+    CountCb,
+    MarketCb,
+    SortCb,
+    ConfirmCb,
+    EditCb,
+)
+"""Every button of the 📊 Tahlil wizard (not cards, result paging or settings)."""
+WIZARD_CALLBACK_PREFIXES: tuple[str, ...] = tuple(
+    f"{callback.__prefix__}{callback.__separator__}" for callback in WIZARD_CALLBACKS
+)

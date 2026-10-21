@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from app.bot import keyboards, texts
 from app.bot.callbacks import CalendarCb
 from app.bot.keyboards import PickerRow
+from app.bot.states import RESULTS_TOKEN_MODULUS
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
     MAX_RETRO_LOOKBACK_DAYS,
@@ -72,10 +73,13 @@ def test_static_keyboards_fit_callback_limit() -> None:
     page=st.integers(min_value=0, max_value=10**6),
     count=st.integers(min_value=1, max_value=100),
     retro=st.booleans(),
+    token=st.integers(min_value=0, max_value=RESULTS_TOKEN_MODULUS - 1),
 )
-def test_result_keyboards_fit(signal_id: int, page: int, count: int, retro: bool) -> None:
+def test_result_keyboards_fit(
+    signal_id: int, page: int, count: int, retro: bool, token: int
+) -> None:
     assert_fits(keyboards.card_keyboard(signal_id, retro=retro))
-    assert_fits(keyboards.more_results_keyboard(page, count))
+    assert_fits(keyboards.more_results_keyboard(page, count, token))
 
 
 @given(

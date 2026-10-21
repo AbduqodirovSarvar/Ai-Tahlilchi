@@ -106,11 +106,6 @@ async def test_concurrent_double_tap_on_start_runs_once_in_sequence() -> None:
     assert answers(second)[0].text in {texts.STALE_BUTTON, texts.ALREADY_RUNNING}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-1: two ▶️ taps handled concurrently (aiogram polls with handle_as_tasks=True) "
-    "both pass StateFilter(confirm) before run_analysis sets `running`: analysis runs twice",
-)
 async def test_concurrent_double_tap_on_start_runs_analysis_once() -> None:
     session = YieldingSession()
     bot = Bot(token="42:TEST", session=session)

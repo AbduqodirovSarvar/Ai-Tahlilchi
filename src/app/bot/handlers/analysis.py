@@ -16,6 +16,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot import keyboards, texts
 from app.bot.callbacks import (
+    WIZARD_CALLBACK_PREFIXES,
     CalendarCb,
     ConfirmCb,
     CountCb,
@@ -34,6 +35,7 @@ from app.bot.draft import StaleDraftError, WizardDraft
 from app.bot.formatters import escape
 from app.bot.handlers.analysis_run import run_analysis
 from app.bot.handlers.filters import TYPED_INPUT
+from app.bot.jobs import BackgroundJobs
 from app.bot.notices import HIGH_PROBABILITY
 from app.bot.parsing import (
     PERCENT,
@@ -342,13 +344,16 @@ async def on_sort(callback: CallbackQuery, callback_data: SortCb, session: Wizar
 
 # --------------------------------------------------------------------------- confirmation
 async def on_confirm(
-    callback: CallbackQuery, callback_data: ConfirmCb, session: WizardSession
+    callback: CallbackQuery,
+    callback_data: ConfirmCb,
+    session: WizardSession,
+    jobs: BackgroundJobs,
 ) -> None:
     """▶️ Boshlash / ✏️ O'zgartirish / 💾 Shablon sifatida saqlash."""
     del callback
     match callback_data.action:
         case "start":
-            await run_analysis(session)
+            await run_analysis(session, jobs)
         case "edit":
             await session.go("edit", session.draft)
         case _:
@@ -381,7 +386,10 @@ async def on_running(callback: CallbackQuery, session: WizardSession) -> None:
 # --------------------------------------------------------------------------- router
 def _register_callbacks(router: Router) -> None:
     flow = AnalysisFlow
-    router.callback_query.register(on_running, StateFilter(flow.running))
+    # Only the wizard's own buttons: cards and result paging keep working during a run.
+    router.callback_query.register(
+        on_running, StateFilter(flow.running), F.data.startswith(WIZARD_CALLBACK_PREFIXES)
+    )
     router.callback_query.register(on_nav, NavCb.filter(), StateFilter(*_WIZARD_STATES))
     router.callback_query.register(on_date, DateCb.filter(), StateFilter(flow.dates))
     router.callback_query.register(on_calendar, CalendarCb.filter(), StateFilter(flow.calendar))

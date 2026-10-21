@@ -1,8 +1,6 @@
-"""QA findings pinned as strict xfails (see docs/qa/T3-bot.md); fixing one turns it XPASS."""
+"""QA findings F-5, F-7 and F-8 (see docs/qa/T3-bot.md), pinned as regression tests."""
 
 from typing import Any
-
-import pytest
 
 from app.bot import texts
 from app.bot.wizard import MAX_TEAM_NAMES_PER_MESSAGE
@@ -24,11 +22,6 @@ class ResultSpy:
         return result
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-5: ➡️ Yana carries only the page number; after a newer analysis an old "
-    "button pages through the *newer* result set",
-)
 async def test_old_more_button_does_not_page_through_a_newer_result(
     admin: Client, services: Services
 ) -> None:

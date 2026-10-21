@@ -29,7 +29,7 @@ from app.bot.dispatcher import build_dispatcher
 from app.bot.middleware import RateLimitMiddleware
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
-from tests.bot.fakes import FIXED_NOW, RecordingSession, fixed_clock
+from tests.bot.fakes import FIXED_NOW, RecordingSession, feed, fixed_clock
 
 CALLBACK_DATA_LIMIT = 64
 TELEGRAM_TEXT_LIMIT = 4096
@@ -130,7 +130,7 @@ class Client:
     async def _feed(self, update: Update) -> list[TelegramMethod[Any]]:
         before = len(self.session.requests)
         bound = Update.model_validate(update.model_dump(), context={"bot": self.bot})
-        await self.dispatcher.feed_update(self.bot, bound)
+        await feed(self.dispatcher, self.bot, bound)
         # With concurrent clients other users' calls may interleave: keep ours only.
         new = [
             (index, method)

@@ -25,7 +25,8 @@ Bot (F6.1–F6.6, F6.10) real pipeline (T4) tayyor bo'lishidan oldin quriladi va
 FSM `MemoryStorage` da (bitta jarayon, shaxsiy bot). Draft va natijalar JSON-xavfsiz (`WizardDraft.to_data/from_data`, `StoredResults`), barcha kirish `states.py` helperlari orqali — persistent storage (Redis/SQLite) ni `build_dispatcher(storage=...)` ga berish kifoya. **Oqibat:** restartdan keyin wizard holati yo'qoladi; bu ataylab ishlangan:
 - holat filtri mos kelmagan har qanday tugma `fallback` routeriga tushadi → "⌛ Bu tugma eskirgan, qaytadan boshlang" alerti;
 - wizard tugmasi faqat draftdagi `message_id` ga tegishli xabarda ishlaydi (eski xabardagi tugma ham eskirgan);
-- ▶️ Boshlash ikki marta bosilsa — `running` holatida "⏳ allaqachon bajarilmoqda";
+- ▶️ Boshlash ikki marta bosilsa — `running` holatida "⏳ allaqachon bajarilmoqda" (kafolat 10-bo'limda: bir foydalanuvchining updatelari ketma-ket ishlanadi va `running` qulf ichida tekshiriladi va qo'yiladi);
+- eski tahlil natijasining "➡️ Yana" tugmasi yangi natijani varaqlamaydi: tugma natija tokenini (`ResultsCb.token`) va sahifa raqamini olib yuradi, mos kelmasa — "eskirgan" alerti, sahifa allaqachon ko'rsatilgan bo'lsa (ikki marta bosish) — jim e'tiborsiz;
 - buzilgan/eski formatdagi draft `StaleDraftError` → foydalanuvchiga qayta boshlash taklifi.
 Agent qoidasi persistent storage ni talab qiladi; u keyingi to'lqinda (F9 deploy bilan) qo'shilishi tavsiya etiladi — kod tayyor.
 
@@ -44,6 +45,17 @@ Tezkor buyruq wizard bilan bir xil draftni quradi va to'g'ridan-to'g'ri tasdiqla
 
 ### 9. Shartnoma v1.1 ga moslashuv
 Sport qadami va bozorlar `CatalogService.list_sports()` dan (mavjud bo'lmagan sport ko'rsatilmaydi, eksperimental — "🧪"); kalendar oxirgi kuni `horizon_end(today)`; retro signal kartasi natija bilan, stavka/qayta hisob tugmasisiz; watchlist signallari alohida "⭐ Sevimlilar" blokida, `shortfall` hisobiga kirmaydi.
+
+### 10. Bir vaqtdagi updatelar va fon tahlili (T3 fix round)
+Dastlabki variantdagi "ikki marta bosish himoyasi" faqat ketma-ket ishlov berishda ishlardi: aiogram polling updatelarni alohida task sifatida ishlatadi (`handle_as_tasks=True`), `events_isolation` berilmagani uchun ikki ▶️ bir vaqtda `analyze` ni ikki marta ishga tushirar, tez ketma-ket tugmalar (bozorlar, sozlamalar) bir-birining o'zgarishini yo'qotar edi (QA F-1).
+- `Dispatcher(events_isolation=SimpleEventIsolation())`: bir foydalanuvchi/chat updatelari navbat bilan ishlanadi (har bir handler FSM ma'lumotini o'z navbatida o'qiydi va yozadi).
+- Uzoq `analyze` qulf ichida bajarilmaydi (butun tahlil davomida foydalanuvchining barcha tugmalari qotib qolardi). ▶️ handleri qulf ichida holatni tekshiradi va `running` ni qo'yadi (check-and-set), progress xabarini yuboradi va tahlilni `BackgroundJobs` (`app/bot/jobs.py`) orqali fon vazifasi sifatida ishga tushirib qaytadi. Vazifa natijani progress xabari orqali xabar qiladi va faqat qisqa holat o'zgarishlari uchun (`draft`ni yopish, natijani saqlash, tasdiqlashni tiklash) o'sha qulfni qayta oladi.
+- Vazifa har qanday yakunda (muvaffaqiyat, `ServiceError`, kutilmagan xato) foydalanuvchini `running` da qoldirmaydi: progress xabari yopiladi, tasdiqlash ekrani qaytariladi, xato xabari yuboriladi. Foydalanuvchi shu orada yangi wizard boshlagan bo'lsa (draftdagi `message_id` boshqa) — yangi wizardga tegilmaydi.
+- `running` paytida faqat wizard tugmalari "allaqachon bajarilmoqda" oladi; eski natija kartalari va "➡️ Yana" ishlaydi.
+- Cheklov: `/bekor` tahlilni to'xtatmaydi (faqat wizard holatini yopadi); natija baribir yuboriladi. Tahlilni bekor qilish alohida funksiya bo'ladi.
+- Bot to'xtaganda fon vazifalari bekor qilinadi (`dispatcher.shutdown`).
+- Callback allaqachon javob olgan bo'lsa (`AnswerTracker`, har update uchun `ErrorMiddleware` o'rnatadi), keyingi xato foydalanuvchiga xabar sifatida yetkaziladi.
+- Sozlamalardagi ko'p tanlovli tugmalar elementni nomi bilan ko'rsatadi (sport/bozor — enum qiymati, liga — indeks + `crc32` hex), shuning uchun o'zgargan ro'yxat boshqa elementni almashtirmaydi.
 
 ## Oqibatlar
 - Bot fake ustida to'liq qo'lda sinovdan o'tkazilishi mumkin (`docs/test_scenarios.md`).

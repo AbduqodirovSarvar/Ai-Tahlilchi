@@ -420,9 +420,11 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
     )
 
 
-def more_results_keyboard(next_page: int, count: int) -> InlineKeyboardMarkup:
-    """The ➡️ Yana N ta button under a result page."""
-    return _markup([[_button(texts.BTN_MORE.format(count=count), ResultsCb(page=next_page))]])
+def more_results_keyboard(next_page: int, count: int, token: int) -> InlineKeyboardMarkup:
+    """The ➡️ Yana N ta button under a result page (``token``: the result it belongs to)."""
+    return _markup(
+        [[_button(texts.BTN_MORE.format(count=count), ResultsCb(page=next_page, token=token))]]
+    )
 
 
 # --------------------------------------------------------------------------- settings

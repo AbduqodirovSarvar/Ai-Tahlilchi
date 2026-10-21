@@ -124,12 +124,6 @@ async def test_unexpected_error_during_analysis_gets_generic_message(
     assert "db down" not in " ".join(shown(methods))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-2: an unexpected (non-ServiceError) failure in analyze leaves FSM state "
-    "`running`; the analysis router then answers every later card/pagination button "
-    "with 'eskirgan' until /start, /bekor or a new wizard",
-)
 async def test_unexpected_error_does_not_leave_the_user_stuck(
     admin: Client, services: Services
 ) -> None:
@@ -145,11 +139,6 @@ async def test_unexpected_error_does_not_leave_the_user_stuck(
     assert answers(methods)[0].text == texts.HIDDEN_ALERT
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-2: the progress message stays '⏳ Tahlil qilinmoqda… 0/…' forever after an "
-    "unexpected failure (only ServiceError closes it)",
-)
 async def test_unexpected_error_closes_the_progress_message(
     admin: Client, services: Services
 ) -> None:

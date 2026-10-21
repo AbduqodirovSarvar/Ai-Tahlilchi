@@ -10,10 +10,11 @@ from datetime import UTC, datetime
 
 from aiogram import Dispatcher
 from aiogram.fsm.storage.base import BaseStorage
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 from aiogram.types import ErrorEvent
 
 from app.bot.handlers import analysis, fallback, quick, settings, signals, start
+from app.bot.jobs import BackgroundJobs
 from app.bot.middleware import (
     ErrorMiddleware,
     RateLimitMiddleware,
@@ -58,12 +59,19 @@ def build_dispatcher(
     keep wizard state across restarts. ``rate_limit`` defaults to the standard per-user
     token bucket.
     """
+    # One update of a user/chat at a time: concurrent taps would otherwise start the
+    # analysis twice and lose each other's read-modify-write of drafts and settings.
+    isolation = SimpleEventIsolation()
+    jobs = BackgroundJobs(isolation)
     dispatcher = Dispatcher(
         storage=storage or MemoryStorage(),
+        events_isolation=isolation,
         services=services,
         clock=clock,
         notices=OnceNotices(),
+        jobs=jobs,
     )
+    dispatcher.shutdown.register(jobs.cancel_all)
     dispatcher.update.outer_middleware(WhitelistMiddleware(admin_ids))
     dispatcher.update.outer_middleware(UserContextMiddleware())
     dispatcher.update.outer_middleware(rate_limit or RateLimitMiddleware())
