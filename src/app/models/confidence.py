@@ -7,14 +7,19 @@ starts at HIGH and every weakness found lowers it by one step, down to LOW:
 - thin data: fewer than ``GOOD_TEAM_MATCHES`` matches for the weaker-covered team;
 - limited information: neither xG nor confirmed lineups are available;
 - weak market anchor: no market estimate, or one from a fallback bookmaker;
-- moderate model-market disagreement: ``|p_model - p_market| > MODERATE_DISAGREEMENT``;
+- moderate model-market disagreement: ``|p_model - p_market| > MODERATE_DISAGREEMENT``
+  (strict: a gap of exactly 8 p.p. does not count; the gap is rounded to 1e-9 first);
 - calibration history: the bucket's past bias exceeds ``MAX_CALIBRATION_BIAS``;
 - far from kickoff: more than ``PRELIMINARY_DAYS`` ahead (prices and news still move).
 
 Two conditions force LOW outright: fewer than ``MIN_TEAM_MATCHES`` matches (the pipeline
-skips such fixtures anyway), and a disagreement above ``SANITY_DISAGREEMENT``, which also
+skips such fixtures anyway), and a disagreement strictly above ``SANITY_DISAGREEMENT``
+(exactly 15 p.p. is MEDIUM-level disagreement, not a sanity case), which also
 raises the sanity flag: per the senior rules a gap that large is treated as a probable
 bug or data error before it is ever treated as value.
+
+HIGH needs xG *or* confirmed lineups. football-data history has no xG, so until lineups are
+published (about an hour before kickoff) the best reachable level is MEDIUM.
 
 The service layer has its own ``ConfidenceLevel`` with the same member names; the pipeline
 maps by name (models do not import services).
@@ -34,6 +39,9 @@ MODERATE_DISAGREEMENT: Final = 0.08
 SANITY_DISAGREEMENT: Final = 0.15
 PRELIMINARY_DAYS: Final = 3.0
 MAX_CALIBRATION_BIAS: Final = 0.05
+# The gap is rounded to 1e-9 before the (strict) comparisons, so an exact 15 p.p. gap such as
+# 0.50 - 0.35 (= 0.15000000000000002 in floats) is judged like 0.25 - 0.10.
+_DISAGREEMENT_DECIMALS: Final = 9
 
 
 class ConfidenceLevel(StrEnum):
@@ -117,7 +125,9 @@ def assess_confidence(inputs: ConfidenceInputs) -> ConfidenceAssessment:
     disagreement = (
         None
         if inputs.market_probability is None
-        else abs(inputs.model_probability - inputs.market_probability)
+        else round(
+            abs(inputs.model_probability - inputs.market_probability), _DISAGREEMENT_DECIMALS
+        )
     )
     reasons = (
         *_data_reasons(inputs),

@@ -721,11 +721,6 @@ def _two_decimal_pairs(gap_hundredths: int) -> list[tuple[float, float]]:
     return [(low / 100, (low + gap_hundredths) / 100) for low in range(101 - gap_hundredths)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-2: |p_model - p_market| is compared in raw floats, so an exact 15 p.p. gap is "
-    "a sanity flag for some probability pairs and not for others",
-)
 def test_an_exact_fifteen_point_gap_is_judged_the_same_for_every_pair() -> None:
     levels = {
         pair: _confidence(model_probability=pair[1], market_probability=pair[0])
@@ -735,10 +730,6 @@ def test_an_exact_fifteen_point_gap_is_judged_the_same_for_every_pair() -> None:
     assert len(set(levels.values())) == 1, levels
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-2: same float-boundary issue for the 8 p.p. moderate-disagreement threshold",
-)
 def test_an_exact_eight_point_gap_is_judged_the_same_for_every_pair() -> None:
     levels = {
         pair: _confidence(model_probability=pair[1], market_probability=pair[0])
