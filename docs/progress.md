@@ -53,13 +53,13 @@
 - [~] F3.8 Backtest hisoboti: sintetik samarali bozorda [docs/backtest/2026-10-21-synthetic.md](backtest/2026-10-21-synthetic.md) (vosita tekshirildi: ustunlik yo'q, CLV ≈ −3%). **Haqiqiy ma'lumotdagi hisobot serverda** (qarorlar jurnali #7)
 - [x] F3.9 Model unit testlari: adapterlar, bozor modeli, ansambl, ishonch, backtest (instrumentlangan leakage testlari, samarali bozor sanity testi, hypothesis); `src/app/models` qamrovi 99.7% (T3)
 - [ ] 🚦 F3 darvozasi: **kutilmoqda** — haqiqiy football-data tarixi bilan serverda `scripts/import_history.py` + `scripts/backtest.py` (#7)
-- [ ] F6.1 Bot karkasi: routerlar, middleware
-- [ ] F6.2 Asosiy menyu, `/start`, `/yordam`
-- [ ] F6.3 Sozlamalar
-- [ ] F6.4 Tahlil oqimi (FSM)
-- [ ] F6.5 `/tahlil` tezkor buyrug'i parseri
-- [ ] F6.6 Signal kartasi formatteri
-- [ ] F6.10 Telegram cheklovlari
+- [x] F6.1 Bot karkasi: routerlar (factory), middleware (whitelist, user konteksti, token-bucket rate limit, servis xatolari → o'zbekcha xabar), `Services` DI, `APP_SERVICES=fake` ([ADR 0006](adr/0006-bot-architecture.md)) (bot-engineer)
+- [x] F6.2 Asosiy menyu (§6.1), `/start`, `/yordam`, `/bekor`; keyingi to'lqin bandlari "tez orada" bilan ulangan
+- [x] F6.3 Sozlamalar: §6.5 dagi barcha maydonlar, risk profillari, 80%+ ogohlantirishi (jarayon xotirasida "bir marta")
+- [x] F6.4 Tahlil oqimi (FSM): sana tugmalari + inline kalendar + matn, sport (`list_sports`), ehtimollik/EV, qamrov (ligalar/jamoalar/sahifalangan o'yinlar), son, bozorlar, saralash, tasdiqlash + `estimate_cost`, progress, shablon saqlash. FSM: MemoryStorage (persistent storage seam tayyor, eskirgan tugmalar ishlangan)
+- [x] F6.5 `/tahlil` parseri (sof funksiya, unit + hypothesis testlar) → tasdiqlash ekrani
+- [x] F6.6 Signal kartasi (§6.2, HTML escape, ⏳/❗/🧪/🕰 retro), kunlar bo'yicha guruhlash, ⭐ Sevimlilar bloki, sahifalash, shortfall va "Value topilmadi"; 🙈 Yashirish ishlaydi, 🔄/📋/✅ F6.7/F7 da
+- [x] F6.10 Telegram cheklovlari: 4096 bo'lish, `callback_data` ≤ 64 (indekslar, property test), flood control (bir marta qayta urinish), har callbackga `answer()`. Qo'lda sinov: [test_scenarios.md](test_scenarios.md) (jonli sinov token qo'shilgandan keyin)
 
 ## T4 — Tizimni birlashtirish
 - [ ] F4.1 `pipeline/refresh.py`
