@@ -162,14 +162,12 @@ DEP002 = [
     "aiosqlite",
     "apscheduler",
     "google-genai",
-    "httpx",
     "matplotlib",
     "numpy",
     "pandas",
     "rapidfuzz",
     "scikit-learn",
     "scipy",
-    "tenacity",
     "tzdata",
 ]
 # DEP004 (dev dependency in non-test code): the CI coverage gate script uses coverage.
