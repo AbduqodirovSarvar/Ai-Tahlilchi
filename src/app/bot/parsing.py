@@ -9,7 +9,7 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,6 +20,7 @@ from app.domain import Sport
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
     MAX_ODDS_LIMIT,
+    MAX_RETRO_LOOKBACK_DAYS,
     MAX_SCOPE_IDS,
     MAX_WINDOW_DAYS,
     MIN_ODDS_LIMIT,
@@ -245,7 +246,8 @@ def parse_date(text: str, today: date) -> date:
 def parse_date_range(text: str, today: date) -> tuple[date, date]:
     """``25.10 - 31.10``, ``25.10.2026-31.10.2026`` or a single date (one-day window).
 
-    A year-less end before its start rolls into the next year (``28.12-03.01``).
+    A year-less end before its start rolls into the next year (``28.12-03.01``), but only
+    when that gives a window the service accepts: ``25.10-24.10`` is a typo, not a year.
     """
     stripped = text.strip()
     match = _RANGE_RE.match(stripped)
@@ -258,7 +260,9 @@ def parse_date_range(text: str, today: date) -> tuple[date, date]:
     start = _build_date(groups[:3], today, stripped)
     end = _build_date(groups[3:], today, stripped)
     if end < start and groups[5] is None:
-        end = _next_year(end)
+        rolled = _next_year(end)
+        if (rolled - start).days + 1 <= MAX_WINDOW_DAYS:
+            end = rolled
     return start, end
 
 
@@ -275,6 +279,8 @@ def check_window(start: date, end: date, today: date) -> DateSpec:
         raise InputError(texts.PARSE_REVERSED_RANGE)
     if (end - start).days + 1 > MAX_WINDOW_DAYS:
         raise InputError(texts.PARSE_WINDOW_TOO_LONG.format(max_window=MAX_WINDOW_DAYS))
+    if start < today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS):
+        raise InputError(texts.PARSE_TOO_OLD.format(max_lookback=MAX_RETRO_LOOKBACK_DAYS))
     if end > horizon_end(today):
         raise InputError(texts.PARSE_TOO_FAR.format(max_future=MAX_FUTURE_DAYS))
     return DateSpec.between(start, end)
@@ -371,10 +377,25 @@ def _take_numbers(builder: _QuickBuilder, text: str) -> str:
         if builder.max_signals is not None:
             raise _duplicate(match.group(0), texts.QUICK_WHAT_COUNT)
         builder.max_signals = parse_count(match.group(1), 1, QUERY_MAX_SIGNALS_UPPER)
-    stray = _QUICK_NUMBER_RE.search(rest)
+    stray = _stray_number(rest)
     if stray is not None:
-        raise InputError(texts.QUICK_AMBIGUOUS_NUMBER.format(value=_quoted(stray.group(1))))
+        raise InputError(texts.QUICK_AMBIGUOUS_NUMBER.format(value=_quoted(stray)))
     return rest
+
+
+def _stray_number(text: str) -> str | None:
+    """A bare number no token claimed, e.g. ``60`` in ``futbol 60``.
+
+    A number in a comma segment that also has letters belongs to a team name
+    (``Schalke 04``, ``Bayer 04 Leverkusen``), so only letterless segments are checked.
+    """
+    for segment in text.split(","):
+        if any(char.isalpha() for char in segment):
+            continue
+        found = _QUICK_NUMBER_RE.search(segment)
+        if found is not None:
+            return found.group(1)
+    return None
 
 
 def _team_names(text: str) -> tuple[str, ...]:

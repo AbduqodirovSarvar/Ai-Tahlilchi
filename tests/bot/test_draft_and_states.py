@@ -11,10 +11,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.bot.draft import StaleDraftError, WizardDraft
 from app.bot.states import (
+    RESULTS_TOKEN_MODULUS,
     StoredResults,
     drop_draft,
     load_draft,
     load_results,
+    next_results,
     save_draft,
     save_results,
 )
@@ -94,7 +96,36 @@ async def test_fsm_helpers_keep_results_when_draft_is_dropped() -> None:
     assert (await load_results(state)).signal_ids == (3, 1, 2)
 
 
-@pytest.mark.parametrize("data", [None, {}, {"signal_ids": "1"}, {"signal_ids": [1, "x"]}])
+async def test_a_newer_result_gets_a_new_token_and_restarts_paging() -> None:
+    state = make_state()
+    first = await next_results(state, (1, 2, 3))
+    served = first.advanced()
+    await save_results(state, served)
+
+    second = await next_results(state, (4, 5))
+
+    assert (first.token, first.next_page) == (1, 1)
+    assert served.next_page == 2
+    assert (second.token, second.next_page, second.signal_ids) == (2, 1, (4, 5))
+    assert await load_results(state) == second
+
+
+def test_result_tokens_cycle_without_repeating_the_previous_one() -> None:
+    last = StoredResults((1,), RESULTS_TOKEN_MODULUS - 1)
+    assert last.following((2,)).token == 0
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        {},
+        {"signal_ids": "1"},
+        {"signal_ids": [1, "x"]},
+        {"signal_ids": [1], "token": "x"},
+        {"signal_ids": [1], "next_page": None},
+    ],
+)
 def test_corrupt_results_are_stale(data: object) -> None:
     with pytest.raises(StaleDraftError):
         StoredResults.from_data(data)

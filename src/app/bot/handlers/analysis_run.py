@@ -5,7 +5,8 @@ stored result.
 """
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -13,19 +14,28 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import Message
 
 from app.bot import keyboards, texts
+from app.bot.draft import WizardDraft
 from app.bot.formatters import (
     format_results_summary,
     ordered_for_display,
     result_page,
     window_label,
 )
+from app.bot.jobs import BackgroundJobs
 from app.bot.messaging import edit_html, send_html
+from app.bot.middleware import user_message_for
 from app.bot.session import WizardSession
-from app.bot.states import AnalysisFlow, StoredResults, drop_draft, load_draft, save_results
+from app.bot.states import AnalysisFlow, drop_draft, load_draft, next_results
 from app.bot.wizard import render, summary_fields
 from app.logging import get_logger
 from app.services.errors import ServiceError
-from app.services.interfaces import AnalysisProgress, AnalysisStage, SignalView
+from app.services.interfaces import (
+    AnalysisProgress,
+    AnalysisQuery,
+    AnalysisResult,
+    AnalysisStage,
+    SignalView,
+)
 
 logger = get_logger(__name__)
 
@@ -66,11 +76,36 @@ class ProgressReporter:
         self._last_text, self._last_edit = text, now
 
 
-async def run_analysis(session: WizardSession) -> None:
-    """▶️ Boshlash: run the query with live progress, then show the results."""
+@dataclass(frozen=True, slots=True)
+class _Run:
+    """What the background analysis needs; everything else is looked up under the lock."""
+
+    session: WizardSession
+    jobs: BackgroundJobs
+    query: AnalysisQuery
+    draft: WizardDraft
+    progress_message: Message
+
+    @property
+    def wizard_message(self) -> Message:
+        """The message the wizard is shown in (results are answered to its chat)."""
+        return self.session.message
+
+
+async def run_analysis(session: WizardSession, jobs: BackgroundJobs) -> None:
+    """▶️ Boshlash: mark the user as running, then analyse in the background.
+
+    Runs inside the user's update lock, so check-and-set of ``running`` is atomic: a second
+    tap queues behind this handler and then finds the user already running. The analysis
+    itself must not hold the lock (a long run would freeze every other button), so it is a
+    background job that reports through the progress message.
+    """
     draft = session.draft
     query = draft.to_query()
     await session.answer()
+    if await session.state.get_state() == AnalysisFlow.running.state:
+        await session.answer(texts.ALREADY_RUNNING, alert=True)
+        return
     await session.state.set_state(AnalysisFlow.running)
     wizard_message = session.message
     summary = texts.WIZARD_RUN_SUMMARY.format(
@@ -78,40 +113,93 @@ async def run_analysis(session: WizardSession) -> None:
     )
     await edit_html(wizard_message, f"{summary}\n{texts.WIZARD_STARTED}")
     progress_message = await send_html(wizard_message, texts.PROGRESS.format(done=0, total="…"))
-    services, user_id = session.ctx.services, session.ctx.user_id
-    reporter = ProgressReporter(progress_message)
+    run = _Run(session, jobs, query, draft, progress_message)
+    jobs.spawn(_execute(run), name=f"analysis:{session.ctx.user_id}")
+
+
+async def _execute(run: _Run) -> None:
+    """The analysis job: run, then show the results or explain the failure."""
+    session = run.session
+    reporter = ProgressReporter(run.progress_message)
     try:
-        result = await services.analysis.analyze(user_id, query, progress=reporter)
-    except ServiceError:
-        # Back to the confirmation so the user can narrow the query; the error middleware
-        # then explains what went wrong.
-        await edit_html(progress_message, texts.CANCELLED)
-        await session.show(await render("confirm", draft, session.ctx))
-        raise
-    await _finish_wizard(session, draft.message_id)
+        result = await session.ctx.services.analysis.analyze(
+            session.ctx.user_id, run.query, progress=reporter
+        )
+        await _deliver(run, result, reporter)
+    except ServiceError as error:
+        logger.info("analysis_rejected", error_type=type(error).__name__, detail=str(error))
+        await _abort(run, user_message_for(error), progress_text=texts.CANCELLED)
+    except Exception:
+        # Whatever it was, the user must not stay "running" under a frozen progress message.
+        logger.exception("analysis_failed")
+        await _abort(run, texts.UNEXPECTED_ERROR, progress_text=texts.UNEXPECTED_ERROR)
+
+
+async def _deliver(run: _Run, result: AnalysisResult, reporter: ProgressReporter) -> None:
+    """Close the wizard, remember the result for paging and send summary and first page."""
+    session = run.session
+    ordered = ordered_for_display(result.signals, session.ctx.zone)
+    async with run.jobs.lock(session.state.key):
+        await _finish_wizard(session, run.draft.message_id)
+        stored = await next_results(session.state, tuple(s.signal_id for s in ordered))
     done = result.fixtures_analyzed
     # No-op when the service already reported the final stage.
     await reporter(AnalysisProgress(stage=AnalysisStage.FINISHED, done=done, total=done))
-    await send_html(wizard_message, format_results_summary(result))
-    ordered = ordered_for_display(result.signals, session.ctx.zone)
-    await save_results(session.state, StoredResults(tuple(s.signal_id for s in ordered)))
-    await send_result_page(wizard_message, ordered, session.ctx.zone, 0)
+    await send_html(run.wizard_message, format_results_summary(result))
+    await send_result_page(run.wizard_message, ordered, session.ctx.zone, 0, stored.token)
+
+
+async def _abort(run: _Run, message: str, *, progress_text: str) -> None:
+    """Close the progress message, give the user back the confirmation, explain the error."""
+    await _quietly(edit_html(run.progress_message, progress_text))
+    session = run.session
+    async with run.jobs.lock(session.state.key):
+        # A wizard the user started meanwhile is theirs now: leave it alone.
+        if await _is_current_wizard(session, run.draft.message_id):
+            await _restore_confirmation(run)
+    await _quietly(send_html(run.wizard_message, message))
+
+
+async def _restore_confirmation(run: _Run) -> None:
+    """Show the confirmation again so the user can narrow the query and retry."""
+    session = run.session
+    try:
+        await session.show(await render("confirm", run.draft, session.ctx))
+    except Exception:
+        logger.exception("confirmation_restore_failed")
+        await drop_draft(session.state)
+
+
+async def _quietly(action: Awaitable[object]) -> None:
+    """Best-effort Telegram call for the failure path (the user may have blocked the bot)."""
+    try:
+        await action
+    except TelegramAPIError as error:
+        logger.warning("analysis_cleanup_failed", error=error.message)
+
+
+async def _is_current_wizard(session: WizardSession, message_id: int | None) -> bool:
+    """The stored draft is the one shown in ``message_id`` (no newer wizard replaced it)."""
+    try:
+        current = await load_draft(session.state)
+    except LookupError:
+        return False
+    return current.message_id == message_id
 
 
 async def _finish_wizard(session: WizardSession, message_id: int | None) -> None:
     """Drop the draft unless the user already started a new wizard meanwhile."""
-    try:
-        current = await load_draft(session.state)
-    except LookupError:
-        return
-    if current.message_id == message_id:
+    if await _is_current_wizard(session, message_id):
         await drop_draft(session.state)
 
 
 async def send_result_page(
-    message: Message, signals: Sequence[SignalView], zone: ZoneInfo, page: int
+    message: Message, signals: Sequence[SignalView], zone: ZoneInfo, page: int, token: int
 ) -> None:
-    """Day headers and cards of one page, then "➡️ Yana N ta" while more remain."""
+    """Day headers and cards of one page, then "➡️ Yana N ta" while more remain.
+
+    ``token`` is put on the "➡️ Yana" button so it can only continue this very result.
+    """
     for item in result_page(signals, zone, page, RESULTS_PAGE_SIZE):
         markup = (
             None
@@ -125,7 +213,7 @@ async def send_result_page(
         await send_html(
             message,
             texts.RESULTS_MORE.format(shown=shown, total=len(signals)),
-            keyboards.more_results_keyboard(page + 1, min(RESULTS_PAGE_SIZE, remaining)),
+            keyboards.more_results_keyboard(page + 1, min(RESULTS_PAGE_SIZE, remaining), token),
         )
     elif page > 0:
         await send_html(message, texts.RESULTS_END.format(total=len(signals)))

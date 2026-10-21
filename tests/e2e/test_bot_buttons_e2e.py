@@ -84,15 +84,7 @@ async def test_result_card_and_more_buttons_answer_once(admin: Client) -> None:
     assert_fits(datas)
 
 
-DOUBLE_ANSWER = pytest.mark.xfail(
-    strict=True,
-    reason="F-4: settings multi-select toggle answers the callback twice "
-    "(handlers/settings.py on_settings: '✅ Saqlandi' then a bare answer)",
-)
-SETTINGS_FIELDS = [
-    pytest.param(field, marks=DOUBLE_ANSWER) if field in {"sports", "leagues", "markets"} else field
-    for field in texts.SETTINGS_BUTTONS
-]
+SETTINGS_FIELDS = list(texts.SETTINGS_BUTTONS)
 
 
 @pytest.mark.parametrize("field", SETTINGS_FIELDS)

@@ -18,7 +18,14 @@ from aiogram.types import CallbackQuery, Chat, Message, TelegramObject, Update, 
 from app.bot import texts
 from app.bot.draft import StaleDraftError
 from app.bot.formatters import budget_message, cooldown_message, validation_message
-from app.bot.messaging import CALLBACK_ALERT_LIMIT, answer_callback, callback_message, send_html
+from app.bot.messaging import (
+    CALLBACK_ALERT_LIMIT,
+    AnswerTracker,
+    answer_callback,
+    callback_message,
+    send_html,
+    track_answers,
+)
 from app.bot.parsing import InputError
 from app.logging import get_logger
 from app.services.errors import (
@@ -179,25 +186,26 @@ class ErrorMiddleware(BaseMiddleware):
 
     async def __call__(self, handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
         """Run the handler and report its failure to the user."""
+        tracker = data["answer_tracker"] = track_answers()
         try:
             return await handler(event, data)
         except (InputError, StaleDraftError, ServiceError) as error:
             logger.info("handler_rejected", error_type=type(error).__name__, detail=str(error))
-            await self._report(event, user_message_for(error), data)
+            await self._report(event, user_message_for(error), tracker)
         except Exception:
             logger.exception("handler_failed", event_type=type(event).__name__)
-            await self._report(event, texts.UNEXPECTED_ERROR, data)
+            await self._report(event, texts.UNEXPECTED_ERROR, tracker)
         return None
 
-    async def _report(self, event: TelegramObject, text: str, data: dict[str, Any]) -> None:
+    async def _report(self, event: TelegramObject, text: str, tracker: AnswerTracker) -> None:
         try:
             if isinstance(event, Message):
                 await send_html(event, text)
             elif isinstance(event, CallbackQuery):
-                # A wizard handler may have answered already (e.g. ▶️ Boshlash answers
-                # before the long run); a second answer is rejected, so use a message.
-                answered = bool(getattr(data.get("session"), "answered", False))
-                await self._report_callback(event, text, answered=answered)
+                # A handler may have answered before it failed (e.g. a toggle answers
+                # "Saqlandi" and then edits the message); a second answer is rejected by
+                # Telegram, so the error has to go out as a message.
+                await self._report_callback(event, text, answered=tracker.answered)
         except TelegramAPIError:
             logger.warning("error_report_failed", exc_info=True)
 

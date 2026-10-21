@@ -1,6 +1,7 @@
 """Keyboard builders (pure: data in, aiogram markup out) and the preset choices they offer."""
 
 import calendar
+import zlib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, time, timedelta
@@ -35,6 +36,8 @@ from app.bot.callbacks import (
 )
 from app.domain import MarketType
 from app.services.interfaces import (
+    MAX_RETRO_LOOKBACK_DAYS,
+    MAX_WINDOW_DAYS,
     RISK_PRESETS,
     RiskProfile,
     ScopeKind,
@@ -54,8 +57,6 @@ CUSTOM: Final = -1
 """Button value meaning "let me type it"."""
 COUNT_ALL: Final = 0
 COUNT_TOGGLE_PER_DAY: Final = -2
-CALENDAR_PAST_DAYS: Final = 90
-"""How far back the calendar goes (retro analysis of finished matches)."""
 
 SETTINGS_MAX_SIGNALS_CHOICES: Final = (3, 5, 10, 15, 20, 30)
 SETTINGS_PROBABILITY_CHOICES: Final = (0.30, 0.40, 0.45, 0.50, 0.55, 0.60, 0.70, 0.80, 0.90)
@@ -172,12 +173,15 @@ def _shift_month(key: int, delta: int) -> int:
 
 def calendar_bounds(today: date) -> tuple[date, date]:
     """First and last selectable day."""
-    return today - timedelta(days=CALENDAR_PAST_DAYS), horizon_end(today)
+    return today - timedelta(days=MAX_RETRO_LOOKBACK_DAYS), horizon_end(today)
 
 
 def _day_button(day: date, today: date, start: date | None) -> InlineKeyboardButton:
     first, last = calendar_bounds(today)
-    if not first <= day <= last or (start is not None and day < start):
+    if start is not None:
+        # The end must keep the window within what the service accepts.
+        first, last = start, min(last, start + timedelta(days=MAX_WINDOW_DAYS - 1))
+    if not first <= day <= last:
         return _button("·", CalendarCb(action="noop"))
     label = str(day.day)
     if day == start:
@@ -416,9 +420,11 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
     )
 
 
-def more_results_keyboard(next_page: int, count: int) -> InlineKeyboardMarkup:
-    """The ➡️ Yana N ta button under a result page."""
-    return _markup([[_button(texts.BTN_MORE.format(count=count), ResultsCb(page=next_page))]])
+def more_results_keyboard(next_page: int, count: int, token: int) -> InlineKeyboardMarkup:
+    """The ➡️ Yana N ta button under a result page (``token``: the result it belongs to)."""
+    return _markup(
+        [[_button(texts.BTN_MORE.format(count=count), ResultsCb(page=next_page, token=token))]]
+    )
 
 
 # --------------------------------------------------------------------------- settings
@@ -455,13 +461,30 @@ def settings_choice_keyboard(
     return _markup([*_chunks(buttons, 3), *_settings_footer(name)])
 
 
+def toggle_key(field: str, value: str) -> str:
+    """What a multi-select button carries to name its item (see :class:`SettingsCb`).
+
+    Sports and markets are identified by their enum value; league ids can be up to 40
+    bytes, so a leagues button carries ``crc32(id)`` (plus its index) instead.
+    """
+    if field == "leagues":
+        return f"{zlib.crc32(value.encode()):08x}"
+    return value
+
+
 def settings_toggle_keyboard(
-    name: str, labels: Sequence[str], selected: Sequence[bool]
+    name: str, labels: Sequence[str], selected: Sequence[bool], values: Sequence[str]
 ) -> InlineKeyboardMarkup:
-    """Multi-select field (sports, markets, leagues), saved on every toggle."""
+    """Multi-select field (sports, markets, leagues), saved on every toggle.
+
+    ``values`` are the item ids (enum values or league ids) in the order of ``labels``.
+    """
     buttons = [
-        _button(_checked(label, on=on), SettingsCb(field=name, action="toggle", index=index))
-        for index, (label, on) in enumerate(zip(labels, selected, strict=True))
+        _button(
+            _checked(label, on=on),
+            SettingsCb(field=name, action="toggle", index=index, key=toggle_key(name, value)),
+        )
+        for index, (label, on, value) in enumerate(zip(labels, selected, values, strict=True))
     ]
     return _markup([*_chunks(buttons, 2), *_settings_footer(name)])
 

@@ -7,6 +7,8 @@ Handlers use these instead of raw ``message.answer`` so every message gets
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Final
 
 from aiogram import Bot
@@ -114,10 +116,34 @@ async def drop_keyboard(bot: Bot, chat_id: int, message_id: int | None) -> None:
         logger.debug("drop_keyboard_failed", error=error.message)
 
 
+@dataclass(slots=True)
+class AnswerTracker:
+    """Whether the callback of the current update was already answered.
+
+    Telegram accepts one answer per callback; once it is spent, a failure later in the
+    handler has to reach the user as a message instead (see ``ErrorMiddleware``).
+    """
+
+    answered: bool = False
+
+
+_tracker: ContextVar[AnswerTracker | None] = ContextVar("answer_tracker", default=None)
+
+
+def track_answers() -> AnswerTracker:
+    """Start tracking for the update handled in the current context."""
+    tracker = AnswerTracker()
+    _tracker.set(tracker)
+    return tracker
+
+
 async def answer_callback(
     callback: CallbackQuery, text: str | None = None, *, alert: bool = False
 ) -> None:
     """Answer a callback query, ignoring "query is too old"/"already answered" errors."""
+    tracker = _tracker.get()
+    if tracker is not None:
+        tracker.answered = True
     if text is not None and len(text) > CALLBACK_ALERT_LIMIT:
         text = text[: CALLBACK_ALERT_LIMIT - 1] + "…"
     try:

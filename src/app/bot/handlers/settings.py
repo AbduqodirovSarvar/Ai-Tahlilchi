@@ -6,7 +6,7 @@ fields (sports, markets, leagues) are toggled in place; single-value fields retu
 overview after saving. Only typed values need FSM state (``SettingsFlow.value_input``).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
@@ -219,7 +219,7 @@ async def render_editor(
     if field in keyboards.MULTI_SELECT_FIELDS:
         values, labels, selected = await _toggle_options(field, settings, services)
         flags = [value in selected for value in values]
-        return prompt, keyboards.settings_toggle_keyboard(field, labels, flags)
+        return prompt, keyboards.settings_toggle_keyboard(field, labels, flags, values)
     if field == "risk":
         return prompt, keyboards.risk_keyboard(settings.risk_profile)
     shown = settings_values(settings, await league_names(settings, services))[field]
@@ -268,7 +268,7 @@ async def _apply_callback(
         return await services.settings.apply_risk_profile(user_id, profile)
     if callback_data.action == "toggle":
         values, _, selected = await _toggle_options(field, settings, services)
-        toggled_value = _pick(tuple(values), callback_data.index)
+        toggled_value = _toggled_item(field, values, callback_data)
         toggled = frozenset(selected ^ {toggled_value})
         typed = _typed_selection(field, toggled)
         return await _save(services, user_id, with_value(settings, field, typed))
@@ -277,6 +277,25 @@ async def _apply_callback(
         raise StaleDraftError
     value = _pick(choices.values, callback_data.index)
     return await _save(services, user_id, with_value(settings, field, value))
+
+
+def _toggled_item(field: str, values: Sequence[str], callback_data: SettingsCb) -> str:
+    """The item a toggle press names, checked against the list as it is *now*.
+
+    Options are recomputed on every press (catalog or settings may have changed since the
+    keyboard was drawn), so a position alone could hit another item.
+
+    Raises:
+        StaleDraftError: the named item is no longer offered (at that position).
+    """
+    if field == "leagues":
+        value = _pick(tuple(values), callback_data.index)
+        if keyboards.toggle_key(field, value) != callback_data.key:
+            raise StaleDraftError
+        return value
+    if callback_data.key not in values:
+        raise StaleDraftError
+    return callback_data.key
 
 
 def _typed_selection(field: str, values: frozenset[str]) -> object:
@@ -320,16 +339,24 @@ async def on_settings(
         prompt = texts.SETTINGS_INPUT_PROMPTS[field].format(**_bounds(field))
         await edit_html(message, prompt, keyboards.settings_input_keyboard(field))
         return
-    if action != "open":
-        settings = await _apply_callback(callback_data, settings, services, user_id)
-        await answer_callback(callback, texts.SETTINGS_SAVED)
-        if field not in keyboards.MULTI_SELECT_FIELDS:
-            text = await _overview(settings, services)
-            if field == "min_probability":
-                text = _with_warning(text, settings, notices, user_id)
-            await edit_html(message, text, keyboards.settings_keyboard())
-            return
-    await answer_callback(callback)
+    if action == "open":
+        await answer_callback(callback)
+        await _show_editor(message, field, settings, services)
+        return
+    settings = await _apply_callback(callback_data, settings, services, user_id)
+    await answer_callback(callback, texts.SETTINGS_SAVED)
+    if field in keyboards.MULTI_SELECT_FIELDS:
+        await _show_editor(message, field, settings, services)
+        return
+    text = await _overview(settings, services)
+    if field == "min_probability":
+        text = _with_warning(text, settings, notices, user_id)
+    await edit_html(message, text, keyboards.settings_keyboard())
+
+
+async def _show_editor(
+    message: Message, field: str, settings: UserSettingsView, services: Services
+) -> None:
     text, markup = await render_editor(field, settings, services)
     await edit_html(message, text, markup)
 

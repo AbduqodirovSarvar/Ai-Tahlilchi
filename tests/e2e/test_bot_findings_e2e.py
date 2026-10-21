@@ -1,10 +1,9 @@
-"""QA findings pinned as strict xfails (see docs/qa/T3-bot.md); fixing one turns it XPASS."""
+"""QA findings F-5, F-7 and F-8 (see docs/qa/T3-bot.md), pinned as regression tests."""
 
 from typing import Any
 
-import pytest
-
 from app.bot import texts
+from app.bot.wizard import MAX_TEAM_NAMES_PER_MESSAGE
 from app.domain import Sport
 from app.services.interfaces import MAX_SCOPE_IDS, AnalysisQuery, AnalysisResult, Services
 from tests.e2e.bot_client import Client, answers, shown
@@ -23,11 +22,6 @@ class ResultSpy:
         return result
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-5: ➡️ Yana carries only the page number; after a newer analysis an old "
-    "button pages through the *newer* result set",
-)
 async def test_old_more_button_does_not_page_through_a_newer_result(
     admin: Client, services: Services
 ) -> None:
@@ -48,11 +42,6 @@ async def test_old_more_button_does_not_page_through_a_newer_result(
     assert stale or (cards and all(card.startswith("⚽") for card in cards))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-6: a typo'd reversed range without year (25.10-24.10) rolls into next year "
-    "and is reported as 'too long' instead of 'end before start'",
-)
 async def test_reversed_typed_range_says_end_before_start(admin: Client) -> None:
     await admin.send(texts.MENU_ANALYSIS)
 
@@ -61,11 +50,6 @@ async def test_reversed_typed_range_says_end_before_start(admin: Client) -> None
     assert shown(methods) == [texts.PARSE_REVERSED_RANGE]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-7: percents are displayed with 0 decimals: a typed EV 4.5% is shown as "
-    "'EV ≥ 4%' (and 62.5% as '62%') on the confirmation and in settings",
-)
 async def test_typed_fractional_percent_is_shown_as_typed(admin: Client) -> None:
     await admin.send(texts.MENU_ANALYSIS)
     await admin.press(texts.BTN_TODAY)
@@ -80,11 +64,6 @@ async def test_typed_fractional_percent_is_shown_as_typed(admin: Client) -> None
     assert "≥ 62.5% · EV ≥ 4.5%" in admin.last_text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F-8: the wizard team step searches every typed name (no MAX_SCOPE_IDS cap, "
-    "unlike /tahlil): one message can trigger hundreds of catalog searches",
-)
 async def test_team_step_bounds_catalog_searches(admin: Client, services: Services) -> None:
     calls = 0
     real = services.catalog.search_teams
@@ -103,3 +82,38 @@ async def test_team_step_bounds_catalog_searches(admin: Client, services: Servic
     await admin.send(", ".join(f"Team{index:03d}" for index in range(300)))
 
     assert calls <= MAX_SCOPE_IDS
+
+
+async def test_team_step_rejects_a_message_with_too_many_names(admin: Client) -> None:
+    await admin.send(texts.MENU_ANALYSIS)
+    for label in (texts.BTN_TODAY, texts.SPORT_LABELS[Sport.FOOTBALL], "50%", "5%"):
+        await admin.press(label)
+    await admin.press(texts.BTN_SCOPE_TEAMS)
+
+    methods = await admin.send(", ".join(f"Team{index:03d}" for index in range(300)))
+
+    assert shown(methods) == [
+        texts.WIZARD_TEAMS_TOO_MANY_NAMES.format(max_names=MAX_TEAM_NAMES_PER_MESSAGE)
+    ]
+    assert await admin.state() == "AnalysisFlow:teams"
+
+
+async def test_team_step_searches_each_distinct_name_once(
+    admin: Client, services: Services
+) -> None:
+    searched: list[str] = []
+    real = services.catalog.search_teams
+
+    async def recording(text: str, **kwargs: Any) -> Any:
+        searched.append(text)
+        return await real(text, **kwargs)
+
+    services.catalog.search_teams = recording  # type: ignore[method-assign]
+    await admin.send(texts.MENU_ANALYSIS)
+    for label in (texts.BTN_TODAY, texts.SPORT_LABELS[Sport.FOOTBALL], "50%", "5%"):
+        await admin.press(label)
+    await admin.press(texts.BTN_SCOPE_TEAMS)
+
+    await admin.send("Arsenal, arsenal ,  ARSENAL, Inter,, Inter")
+
+    assert searched == ["Arsenal", "Inter"]

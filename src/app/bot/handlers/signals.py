@@ -13,7 +13,7 @@ from app.bot.callbacks import CardCb, ResultsCb
 from app.bot.formatters import format_hidden_card
 from app.bot.handlers.analysis_run import send_result_page
 from app.bot.messaging import answer_callback, callback_message, edit_html
-from app.bot.states import load_results
+from app.bot.states import load_results, save_results
 from app.logging import get_logger
 from app.services.errors import NotFoundError
 from app.services.interfaces import Services, SignalView
@@ -53,17 +53,27 @@ async def on_results_page(
     services: Services,
     user_id: int,
 ) -> None:
-    """Send the next page of the last analysis result."""
+    """Send the next page of the last analysis result.
+
+    The button names its result (``token``) and the page it continues. A button of an
+    older result is refused; a repeated tap (the page was already served) is ignored.
+    """
     stored = await load_results(state)
+    if callback_data.token != stored.token:
+        await answer_callback(callback, texts.STALE_BUTTON, alert=True)
+        return
     message = callback_message(callback)
     await answer_callback(callback)
     if message is None:  # pragma: no cover - Telegram hides only very old messages
         return
-    # The button is used once: remove it so a double tap cannot send the page twice.
+    if callback_data.page != stored.next_page:
+        return
+    # The button is used once: remove it so a repeated tap cannot ask for the page again.
     await edit_html(message, message.html_text)
     settings = await services.settings.get_settings(user_id)
     signals = await _fetch(services, user_id, stored.signal_ids)
-    await send_result_page(message, signals, settings.zone, callback_data.page)
+    await send_result_page(message, signals, settings.zone, callback_data.page, stored.token)
+    await save_results(state, stored.advanced())
 
 
 def create_router() -> Router:

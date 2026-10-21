@@ -2,11 +2,12 @@
 update builders and a harness that drives the real dispatcher like a user would.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any, override
 
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
@@ -18,6 +19,7 @@ from aiogram.methods import (
 from aiogram.types import CallbackQuery, Chat, InlineKeyboardMarkup, Message, Update, User
 
 from app.bot.dispatcher import build_dispatcher
+from app.bot.jobs import BackgroundJobs
 from app.bot.middleware import RateLimitMiddleware
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
@@ -67,6 +69,18 @@ class RecordingSession(BaseSession):
     @override
     async def close(self) -> None:
         return None
+
+
+async def feed(dispatcher: Dispatcher, bot: Bot, update: Update) -> None:
+    """Deliver ``update`` and wait for the background jobs it started (an analysis run).
+
+    Jobs that were already running before (a blocked analysis in a concurrency test) are
+    not waited for, so a later tap is still delivered while they run.
+    """
+    jobs: BackgroundJobs = dispatcher["jobs"]
+    before = jobs.tasks
+    await dispatcher.feed_update(bot, update)
+    await asyncio.gather(*(jobs.tasks - before))
 
 
 def _user(user_id: int) -> User:
@@ -162,7 +176,7 @@ class BotHarness:
     async def send(self, text: str) -> list[TelegramMethod[Any]]:
         """The user types ``text``; returns the API calls the bot made."""
         self.update_id += 1
-        await self.dispatcher.feed_update(self.bot, text_update(ADMIN_ID, text, self.update_id))
+        await feed(self.dispatcher, self.bot, text_update(ADMIN_ID, text, self.update_id))
         return self._track()
 
     def find_button(self, label: str) -> tuple[int, str]:
@@ -187,7 +201,7 @@ class BotHarness:
         update = callback_update(
             ADMIN_ID, data, message_id, self.texts.get(message_id, ""), self.update_id
         )
-        await self.dispatcher.feed_update(self.bot, update)
+        await feed(self.dispatcher, self.bot, update)
         return self._track()
 
     @property

@@ -9,8 +9,16 @@ from hypothesis import strategies as st
 from app.bot import keyboards, texts
 from app.bot.callbacks import CalendarCb
 from app.bot.keyboards import PickerRow
+from app.bot.states import RESULTS_TOKEN_MODULUS
 from app.domain import MarketType, Sport
-from app.services.interfaces import RiskProfile, ScopeKind, SortKey, SportOption
+from app.services.interfaces import (
+    MAX_RETRO_LOOKBACK_DAYS,
+    MAX_WINDOW_DAYS,
+    RiskProfile,
+    ScopeKind,
+    SortKey,
+    SportOption,
+)
 
 TELEGRAM_CALLBACK_LIMIT = 64
 TODAY = date(2026, 10, 21)
@@ -65,10 +73,13 @@ def test_static_keyboards_fit_callback_limit() -> None:
     page=st.integers(min_value=0, max_value=10**6),
     count=st.integers(min_value=1, max_value=100),
     retro=st.booleans(),
+    token=st.integers(min_value=0, max_value=RESULTS_TOKEN_MODULUS - 1),
 )
-def test_result_keyboards_fit(signal_id: int, page: int, count: int, retro: bool) -> None:
+def test_result_keyboards_fit(
+    signal_id: int, page: int, count: int, retro: bool, token: int
+) -> None:
     assert_fits(keyboards.card_keyboard(signal_id, retro=retro))
-    assert_fits(keyboards.more_results_keyboard(page, count))
+    assert_fits(keyboards.more_results_keyboard(page, count, token))
 
 
 @given(
@@ -100,7 +111,11 @@ def test_calendar_keyboards_fit(offset: int, start_offset: int | None) -> None:
 )
 def test_settings_editors_fit(field: str, labels: list[str]) -> None:
     assert_fits(keyboards.settings_choice_keyboard(field, labels, current=0))
-    assert_fits(keyboards.settings_toggle_keyboard(field, labels, [True] * len(labels)))
+    assert_fits(
+        keyboards.settings_toggle_keyboard(
+            field, labels, [True] * len(labels), [f"v{i}" for i in range(len(labels))]
+        )
+    )
 
 
 def test_calendar_only_allows_days_within_horizon() -> None:
@@ -171,3 +186,19 @@ def test_retro_card_has_no_bet_or_recalc() -> None:
 def test_main_menu_texts_are_known() -> None:
     assert texts.MENU_ANALYSIS in keyboards.MENU_TEXTS
     assert len(keyboards.MENU_TEXTS) == 9
+
+
+def test_calendar_end_is_limited_to_the_longest_window_after_the_start() -> None:
+    start = TODAY - timedelta(days=40)  # 11.09
+    markup = keyboards.calendar_keyboard(keyboards.month_key(TODAY), TODAY, start)
+    selectable = [
+        date.fromordinal(CalendarCb.unpack(d).value)
+        for d in callbacks(markup)
+        if d.startswith("wc:day")
+    ]
+    assert max(selectable) == start + timedelta(days=MAX_WINDOW_DAYS - 1)  # 11.10
+
+
+def test_calendar_start_reaches_back_exactly_the_retro_lookback() -> None:
+    first, _ = keyboards.calendar_bounds(TODAY)
+    assert first == TODAY - timedelta(days=MAX_RETRO_LOOKBACK_DAYS)

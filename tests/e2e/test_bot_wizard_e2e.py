@@ -13,6 +13,7 @@ from app.bot.callbacks import CalendarCb, PickCb
 from app.domain import Sport
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
+    MAX_RETRO_LOOKBACK_DAYS,
     MAX_SCOPE_IDS,
     MAX_WINDOW_DAYS,
     AnalysisQuery,
@@ -275,6 +276,10 @@ async def test_fixtures_scope_selection_survives_paging(admin: Client, services:
         ("21.10 - 04.11", texts.PARSE_TOO_FAR.format(max_future=MAX_FUTURE_DAYS)),
         ("01.08 - 15.09", texts.PARSE_WINDOW_TOO_LONG.format(max_window=MAX_WINDOW_DAYS)),
         ("01.12.2026", texts.PARSE_TOO_FAR.format(max_future=MAX_FUTURE_DAYS)),
+        (
+            "01.01.2026 - 05.01.2026",
+            texts.PARSE_TOO_OLD.format(max_lookback=MAX_RETRO_LOOKBACK_DAYS),
+        ),
     ],
 )
 async def test_invalid_typed_dates_keep_the_step(admin: Client, typed: str, expected: str) -> None:

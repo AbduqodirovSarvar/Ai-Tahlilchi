@@ -1,5 +1,6 @@
 """End-to-end (offline) tests of ⚙️ Sozlamalar."""
 
+from dataclasses import replace
 from datetime import time
 from decimal import Decimal
 
@@ -8,7 +9,7 @@ import pytest
 from app.bot import texts
 from app.bot.callbacks import SettingsCb
 from app.domain import MarketType, Sport
-from app.services.interfaces import QuietHours, RiskProfile, UserSettingsView
+from app.services.interfaces import LeagueOption, QuietHours, RiskProfile, UserSettingsView
 from tests.bot.fakes import ADMIN_ID, BotHarness, answers, sent_texts
 
 
@@ -97,6 +98,50 @@ async def test_leagues_toggle(harness: BotHarness) -> None:
     assert (await current(harness)).league_ids == {"af:l39"}
     overview = await harness.press(texts.BTN_SETTINGS_BACK)
     assert "Premier League" in sent_texts(overview)[-1]
+
+
+async def test_markets_toggle_names_its_item_not_a_position(harness: BotHarness) -> None:
+    """The keyboard was drawn for football; the sport changed before the press."""
+    await open_field(harness, "markets")
+    message_id, old_btts = harness.find_button("Ikkala jamoa")
+    assert SettingsCb.unpack(old_btts).key == MarketType.BTTS.value
+    settings = await current(harness)
+    await harness.services.settings.update_settings(
+        ADMIN_ID,
+        replace(settings, sports=frozenset({Sport.HOCKEY}), markets=frozenset({MarketType.TOTALS})),
+    )
+
+    methods = await harness.press_data(old_btts, message_id)
+
+    assert "eskirgan" in (answers(methods)[0].text or "")
+    assert (await current(harness)).markets == {MarketType.TOTALS}
+
+
+async def test_leagues_toggle_rejects_a_shifted_list(
+    harness: BotHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await open_field(harness, "leagues")
+    message_id, premier = harness.find_button("Premier League")
+    real = harness.services.catalog.list_leagues
+
+    async def with_new_league_first(sport: Sport) -> tuple[LeagueOption, ...]:
+        extra = LeagueOption(league_id="af:l1", sport=sport, name="Aaa Liga")
+        return (extra, *await real(sport))
+
+    monkeypatch.setattr(harness.services.catalog, "list_leagues", with_new_league_first)
+
+    methods = await harness.press_data(premier, message_id)
+
+    assert "eskirgan" in (answers(methods)[0].text or "")
+    assert (await current(harness)).league_ids == frozenset()
+
+
+async def test_toggle_buttons_answer_exactly_once(harness: BotHarness) -> None:
+    await open_field(harness, "sports")
+
+    methods = await harness.press("Xokkey")
+
+    assert [a.text for a in answers(methods)] == [texts.SETTINGS_SAVED]
 
 
 async def test_typed_value_invalid_then_valid(harness: BotHarness) -> None:

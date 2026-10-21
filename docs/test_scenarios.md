@@ -68,6 +68,9 @@
 | 3.21 | Ikkinchi 📊 Tahlil ochib, birinchi xabardagi tugmani bosish | "eskirgan" alerti |
 | 3.22 | Tugmali qadamda matn yozish | "👆 Iltimos, tugmalardan birini tanlang" |
 | 3.23 | Byudjetdan oshadigan so'rov (real servisda) | Tasdiqlashda "⚠️ API limitidan oshadi", ▶️ Boshlash yo'q |
+| 3.24 | Tahlil davomida (progress "⏳ …") boshqa tugmalar: ⚙️ Sozlamalar, eski natijadagi 🙈, "➡️ Yana" | Hammasi javob beradi (tahlil fon vazifasi); wizard tugmalari "⏳ allaqachon bajarilmoqda" oladi |
+| 3.25 | Tahlil davomida 📊 Tahlil bilan yangi wizard boshlash, so'ng eski tahlil tugashi (yoki xato berishi) | Yangi wizard o'z holatida qoladi; eski natija/xato xabari alohida yuboriladi |
+| 3.26 | Tahlil kutilmagan xato bilan tugasa (servis ishlamayapti) | Progress xabari yopiladi, "⚠️ Kutilmagan xatolik", tasdiqlash ekrani qaytadi, eski kartalardagi tugmalar ishlayveradi |
 
 ## 4. `/tahlil` tezkor buyrug'i (F6.5)
 | # | Qadam | Kutilgan natija |
@@ -94,6 +97,7 @@
 | 5.7 | ⭐ sevimli jamoa o'yini (F7 dan keyin) | Alohida "⭐ Sevimlilar" bloki, son hisobiga kirmaydi |
 | 5.8 | 🙈 Yashirish | Alert "🙈 Signal yashirildi", karta "🙈 Yashirildi: …" ga aylanadi |
 | 5.9 | 🔄 Qayta hisoblash / 📋 Batafsil / ✅ Stavka qildim | Alert "🔜 Bu imkoniyat tez orada qo'shiladi" |
+| 5.10 | Eski natijadagi [➡️ Yana] ni yangi tahlildan keyin bosish; [➡️ Yana] ni tez ikki marta bosish | Birinchisi "⌛ eskirgan" alerti; ikkinchisida sahifa bir marta yuboriladi |
 
 ## 6. Telegram cheklovlari (F6.10)
 | # | Qadam | Kutilgan natija |
