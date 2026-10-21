@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.errors import ConfigurationError
@@ -46,9 +46,17 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     gemini_model: str = Field(default="gemini-flash-latest", min_length=1)
 
-    tz: str = "Asia/Tashkent"
+    # Not `TZ`: the POSIX variable is often set by the OS (e.g. ":/etc/localtime") and also
+    # changes the process clock; this one only affects how times are shown to users.
+    display_tz: str = "Asia/Tashkent"
     db_path: Path = Path("data/app.db")
     healthchecks_url: HttpUrl | None = None
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalise_log_level(cls, value: object) -> object:
+        """Accept ``info`` as well as ``INFO``."""
+        return value.strip().upper() if isinstance(value, str) else value
 
     @field_validator("admin_ids", mode="before")
     @classmethod
@@ -70,21 +78,30 @@ class Settings(BaseSettings):
             raise ValueError(msg)
         return value
 
-    @field_validator("tz")
+    @field_validator("display_tz")
     @classmethod
     def _check_timezone(cls, value: str) -> str:
         """Fail at startup rather than at the first time conversion."""
         try:
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
-            msg = f"TZ={value!r} is not a known IANA time zone"
+            msg = "must be an IANA time zone name such as Asia/Tashkent"
             raise ValueError(msg) from exc
         return value
 
     @property
     def display_timezone(self) -> ZoneInfo:
         """Time zone used only when presenting times to users (storage is always UTC)."""
-        return ZoneInfo(self.tz)
+        return ZoneInfo(self.display_tz)
+
+    def secret_values(self) -> frozenset[str]:
+        """All configured secret values, so logging can scrub them from any output."""
+        values = (getattr(self, name) for name in type(self).model_fields)
+        return frozenset(
+            value.get_secret_value()
+            for value in values
+            if isinstance(value, SecretStr) and value.get_secret_value().strip()
+        )
 
     def require_secret(self, name: SecretName) -> str:
         """Return the plain value of a secret, or explain how to configure it.
@@ -110,7 +127,28 @@ class Settings(BaseSettings):
         return self.admin_ids
 
 
+def describe_validation_error(error: ValidationError) -> str:
+    """Summarise invalid settings by variable name and reason, never by value.
+
+    Pydantic's own message echoes the input, which may be a secret or a URL with a key.
+    """
+    problems = sorted(
+        {
+            f"{'.'.join(str(part) for part in issue['loc']).upper()}: {issue['msg']}"
+            for issue in error.errors(include_url=False, include_input=False)
+        }
+    )
+    return "Invalid settings in environment/.env: " + "; ".join(problems)
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Load settings once per process."""
-    return Settings()
+    """Load settings once per process.
+
+    Raises:
+        ConfigurationError: a variable is set to an invalid value.
+    """
+    try:
+        return Settings()
+    except ValidationError as exc:
+        raise ConfigurationError(describe_validation_error(exc)) from None

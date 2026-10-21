@@ -92,8 +92,8 @@ def test_admin_ids_rejects_invalid_values(raw: str) -> None:
 
 
 def test_invalid_timezone_is_rejected() -> None:
-    with pytest.raises(ValidationError, match="IANA"):
-        make_settings(tz="Mars/Olympus")
+    with pytest.raises(ValidationError, match="IANA time zone"):
+        make_settings(display_tz="Mars/Olympus")
 
 
 @pytest.mark.parametrize(("field", "value"), [("app_env", "staging"), ("log_level", "LOUD")])
@@ -247,3 +247,46 @@ def test_secret_values_never_appear_in_validation_errors(monkeypatch: pytest.Mon
         make_settings()
 
     assert "SUPERSECRET-123" not in str(excinfo.value)
+
+
+# --- T1 fix round ---------------------------------------------------------------------------
+
+
+def test_display_timezone_is_read_from_display_tz(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISPLAY_TZ", "Europe/London")
+    monkeypatch.setenv("TZ", ":/etc/localtime")  # the POSIX variable must not interfere
+
+    assert make_settings().display_timezone == ZoneInfo("Europe/London")
+
+
+@pytest.mark.parametrize("raw", ["debug", " Warning ", "INFO"])
+def test_log_level_is_case_insensitive(raw: str) -> None:
+    assert make_settings(log_level=raw).log_level == raw.strip().upper()
+
+
+def test_secret_values_lists_only_configured_secrets() -> None:
+    settings = make_settings(telegram_bot_token="42:TOKEN-VALUE", gemini_api_key="  ")
+
+    assert settings.secret_values() == frozenset({"42:TOKEN-VALUE"})
+
+
+def test_get_settings_reports_invalid_values_without_echoing_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HEALTHCHECKS_URL", "not-a-url-with-key-SECRET123")
+    monkeypatch.setenv("DISPLAY_TZ", "Mars/SECRET456")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ConfigurationError) as caught:
+            get_settings()
+    finally:
+        get_settings.cache_clear()
+
+    message = str(caught.value)
+    assert "HEALTHCHECKS_URL" in message
+    assert "DISPLAY_TZ" in message
+    assert "SECRET123" not in message
+    assert "SECRET456" not in message
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__

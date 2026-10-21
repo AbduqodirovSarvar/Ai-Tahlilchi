@@ -19,8 +19,8 @@ SETTINGS_ENV_VARS = tuple(name.upper() for name in Settings.model_fields)
 def clean_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate every test from the developer's or CI runner's shell environment.
 
-    ``TZ`` in particular is commonly set by operating systems (e.g. ``:/etc/localtime``) and
-    would otherwise make any ``Settings()`` built in a test fail or differ between machines.
+    Any setting exported by the shell (e.g. ``LOG_LEVEL`` or ``DISPLAY_TZ``) would otherwise
+    make ``Settings()`` built in a test differ between machines.
     """
     for name in SETTINGS_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
