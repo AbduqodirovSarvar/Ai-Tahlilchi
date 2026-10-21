@@ -44,7 +44,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.27"]
+# Exact pin: the build backend is not covered by uv.lock.
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 # src layout: the importable package is `app`, located in src/app (see docs/adr/0001-tooling.md).
