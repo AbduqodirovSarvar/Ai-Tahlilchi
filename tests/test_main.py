@@ -1,26 +1,13 @@
 """Tests for app.main (no network: polling is replaced by a mock)."""
 
-import logging
-from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import pytest
-import structlog
 from aiogram import Bot, Dispatcher
 
 from app import main as main_module
 from app.config import Settings
 from app.errors import ConfigurationError
-
-
-@pytest.fixture(autouse=True)
-def restore_logging() -> Iterator[None]:
-    """main() configures logging globally; undo it after each test."""
-    root = logging.getLogger()
-    handlers, level = root.handlers[:], root.level
-    yield
-    root.handlers, root.level = handlers, level
-    structlog.reset_defaults()
 
 
 @pytest.fixture

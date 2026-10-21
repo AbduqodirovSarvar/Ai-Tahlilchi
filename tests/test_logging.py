@@ -2,22 +2,12 @@
 
 import json
 import logging
-from collections.abc import Iterator
+from typing import Literal
 
 import pytest
 import structlog
 
 from app.logging import REDACTED, configure_logging, get_logger, redact_secrets
-
-
-@pytest.fixture(autouse=True)
-def restore_logging() -> Iterator[None]:
-    """configure_logging mutates process-global state; put it back after each test."""
-    root = logging.getLogger()
-    handlers, level = root.handlers[:], root.level
-    yield
-    root.handlers, root.level = handlers, level
-    structlog.reset_defaults()
 
 
 def last_json_line(output: str) -> dict[str, object]:
@@ -112,3 +102,78 @@ def test_dev_renders_plain_ascii_tracebacks(capsys: pytest.CaptureFixture[str]) 
     output = capsys.readouterr().out
     assert "Traceback (most recent call last)" in output
     assert "ValueError: bad data" in output
+
+
+# --- Secret redaction edge cases (QA, T1) -------------------------------------------------
+
+SECRET = "42:SUPERSECRET"
+
+
+@pytest.mark.parametrize("app_env", ["dev", "prod"])
+def test_secrets_are_redacted_in_every_renderer(
+    capsys: pytest.CaptureFixture[str], app_env: Literal["dev", "prod"]
+) -> None:
+    configure_logging(level="INFO", app_env=app_env)
+
+    get_logger("tests.redact").info("calling_api", telegram_bot_token=SECRET)
+
+    output = capsys.readouterr().out
+    assert SECRET not in output
+    assert REDACTED in output
+
+
+def test_secrets_bound_as_context_are_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(level="INFO", app_env="prod")
+    structlog.contextvars.bind_contextvars(api_key=SECRET)
+    try:
+        get_logger("tests.ctx").info("with_context")
+        get_logger("tests.ctx").bind(client_secret=SECRET).info("with_bound_logger")
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert SECRET not in json.dumps(lines)
+    assert [line["api_key"] for line in lines] == [REDACTED, REDACTED]
+    assert lines[1]["client_secret"] == REDACTED
+
+
+def test_redaction_never_masks_the_event_name() -> None:
+    # Only keys are inspected: an event *named* after a token stays readable.
+    event = {"event": "token_refreshed", "user_id": 7}
+
+    assert redact_secrets(None, "info", dict(event)) == event
+
+
+@pytest.mark.xfail(
+    reason="QA-T1 F-2: redact_secrets only inspects top-level keys; nested mappings leak",
+    strict=True,
+)
+def test_secrets_nested_in_mappings_are_redacted(capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging(level="INFO", app_env="prod")
+
+    get_logger("tests.nested").info("http_call", headers={"Authorization": f"Bearer {SECRET}"})
+
+    assert SECRET not in capsys.readouterr().out
+
+
+@pytest.mark.xfail(
+    reason="QA-T1 F-1: prod dict_tracebacks renders frame locals (show_locals=True)",
+    strict=True,
+)
+def test_prod_exception_logs_do_not_render_frame_locals(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging(level="INFO", app_env="prod")
+
+    def connect() -> None:
+        url = f"https://api.telegram.org/bot{SECRET}/getMe"
+        raise ConnectionError(len(url))
+
+    try:
+        connect()
+    except ConnectionError:
+        get_logger("tests.locals").exception("request_failed")
+
+    output = capsys.readouterr().out
+    assert "request_failed" in output
+    assert SECRET not in output

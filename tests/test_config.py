@@ -11,27 +11,6 @@ from pydantic import ValidationError
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 
-SETTINGS_ENV_VARS = (
-    "APP_ENV",
-    "LOG_LEVEL",
-    "TELEGRAM_BOT_TOKEN",
-    "ADMIN_IDS",
-    "API_FOOTBALL_KEY",
-    "ODDS_API_KEY",
-    "GEMINI_API_KEY",
-    "GEMINI_MODEL",
-    "TZ",
-    "DB_PATH",
-    "HEALTHCHECKS_URL",
-)
-
-
-@pytest.fixture(autouse=True)
-def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Isolate every test from the developer's shell environment."""
-    for name in SETTINGS_ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
-
 
 def make_settings(**overrides: object) -> Settings:
     """Build settings that never read a real `.env` file."""
@@ -166,3 +145,105 @@ def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         assert get_settings() is get_settings()
     finally:
         get_settings.cache_clear()
+
+
+# --- ADMIN_IDS edge cases through the real source (environment / .env), not init kwargs ----
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1,", frozenset({1})),  # trailing comma
+        (",1", frozenset({1})),  # leading comma
+        (" 1 ", frozenset({1})),
+        ("\t1\t,\n2", frozenset({1, 2})),  # tabs / newline from a pasted list
+        ("1 , 2", frozenset({1, 2})),
+        ("00012", frozenset({12})),
+        ("123456789012", frozenset({123456789012})),  # ids beyond 32 bits are real
+    ],
+)
+def test_admin_ids_from_environment_tolerates_separators_and_spaces(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: frozenset[int]
+) -> None:
+    monkeypatch.setenv("ADMIN_IDS", raw)
+
+    assert make_settings().admin_ids == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "-0",
+        "-1",
+        "0,1",
+        "1;2",  # wrong separator must not silently become one id or be dropped
+        "1 2",
+        "[1,2]",  # JSON form is not supported (NoDecode)
+        "1e3",
+        "0x10",
+        "١٢",  # non-ASCII digits
+        "@admin",
+    ],
+)
+def test_admin_ids_from_environment_rejects_invalid_values(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("ADMIN_IDS", raw)
+
+    with pytest.raises(ValidationError, match="admin_ids"):
+        make_settings()
+
+
+@pytest.mark.parametrize("raw", [",", " , ", ",,,"])
+def test_admin_ids_of_only_separators_is_an_empty_whitelist(
+    monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    monkeypatch.setenv("ADMIN_IDS", raw)
+    settings = make_settings()
+
+    assert settings.admin_ids == frozenset()
+    with pytest.raises(ConfigurationError, match="ADMIN_IDS"):
+        settings.require_admin_ids()
+
+
+def test_whitespace_only_token_in_env_file_is_treated_as_missing(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("TELEGRAM_BOT_TOKEN=   \nADMIN_IDS=1\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    with pytest.raises(ConfigurationError, match="TELEGRAM_BOT_TOKEN is not set"):
+        settings.require_secret("telegram_bot_token")
+
+
+def test_environment_overrides_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("ADMIN_IDS=1\nLOG_LEVEL=DEBUG\n", encoding="utf-8")
+    monkeypatch.setenv("ADMIN_IDS", "2")
+
+    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+
+    assert settings.admin_ids == frozenset({2})
+    assert settings.log_level == "DEBUG"
+
+
+def test_empty_environment_variable_falls_back_to_env_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # docker compose passes `KEY=` through as an empty variable; it must not mask .env.
+    env_file = tmp_path / ".env"
+    env_file.write_text("ADMIN_IDS=7\n", encoding="utf-8")
+    monkeypatch.setenv("ADMIN_IDS", "")
+
+    assert Settings(_env_file=env_file).admin_ids == frozenset({7})  # type: ignore[call-arg]
+
+
+def test_secret_values_never_appear_in_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A failing setting next to a secret must not echo the secret in the startup error.
+    monkeypatch.setenv("GEMINI_API_KEY", "SUPERSECRET-123")
+    monkeypatch.setenv("ADMIN_IDS", "abc")
+
+    with pytest.raises(ValidationError) as excinfo:
+        make_settings()
+
+    assert "SUPERSECRET-123" not in str(excinfo.value)
