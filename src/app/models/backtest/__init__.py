@@ -45,7 +45,14 @@ from app.models.backtest.metrics import (
     score_table,
     summarize_bets,
 )
-from app.models.backtest.report import GateCheck, RunMetadata, gate_checks, render_report
+from app.models.backtest.report import (
+    GateCheck,
+    GateStatus,
+    RunMetadata,
+    gate_checks,
+    gate_passed,
+    render_report,
+)
 from app.models.backtest.synthetic import SyntheticConfig, generate_history
 from app.models.backtest.walk_forward import (
     FixturePrediction,
@@ -67,6 +74,7 @@ __all__ = [
     "ExperimentResult",
     "FixturePrediction",
     "GateCheck",
+    "GateStatus",
     "GridRow",
     "GridSpec",
     "Interval",
@@ -88,6 +96,7 @@ __all__ = [
     "dataset_fingerprint",
     "evaluate",
     "gate_checks",
+    "gate_passed",
     "generate_history",
     "max_drawdown",
     "probability_samples",

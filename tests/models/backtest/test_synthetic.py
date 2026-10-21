@@ -11,13 +11,19 @@ from app.domain import HistoryBatch, Market, OddsKind, Selection
 from app.models import ModelInputError, devig_shin
 from app.models.backtest import (
     BetFilter,
+    ExperimentConfig,
+    GateStatus,
+    GridSpec,
     PricingConfig,
     StakingConfig,
     SyntheticConfig,
     WalkForwardConfig,
     build_dataset,
     candidate_bets,
+    gate_checks,
+    gate_passed,
     generate_history,
+    run_experiment,
     select_bets,
     summarize_bets,
     walk_forward,
@@ -157,3 +163,32 @@ def test_backtest_finds_no_edge_on_an_efficient_market() -> None:
     # Nobody beats an efficient close: CLV is negative, positive only through odds rounding.
     assert summary.mean_clv < 0.0
     assert summary.beat_close_rate < 0.05
+
+
+# Forced pure-model betting on everything with value: as many bets as possible, so the gate
+# is not failed merely for lack of signals (the old point-estimate gate passed falsely here).
+FORCED_MODEL = ExperimentConfig(
+    grid=GridSpec(xis=(0.0065,), weights=(1.0,), min_evs=(0.0,), min_probabilities=(0.0,)),
+    refit_days=28,
+    odds_min=1.01,
+    odds_max=100.0,
+    n_resamples=300,
+    min_validation_bets=1,
+)
+
+
+@pytest.mark.parametrize("seed", [21, 22])
+def test_gate_never_passes_on_an_efficient_market(seed: int) -> None:
+    config = SyntheticConfig(
+        leagues=4, teams_per_league=12, seasons=3, first_season=2020, seed=seed
+    )
+    result = run_experiment(build_dataset(generate_history(config)), FORCED_MODEL)
+    checks = gate_checks(result.holdout, result.chosen)
+    assert result.holdout.summary.n_clv >= 500  # enough signals: the failure is statistical
+    assert not gate_passed(checks)
+    _, clv, _, leagues, baseline = checks
+    assert clv.status is GateStatus.FAILED  # mean CLV is negative: nobody beats the close
+    assert result.holdout.summary.mean_clv is not None
+    assert result.holdout.summary.mean_clv < 0.0
+    assert leagues.status is GateStatus.FAILED
+    assert baseline.status is GateStatus.FAILED  # the pure market has the better log-loss

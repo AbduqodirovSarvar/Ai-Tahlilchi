@@ -8,16 +8,21 @@ from app.models import ModelInputError
 from app.models.backtest import (
     BacktestFixture,
     BettingSummary,
+    CalibrationBucket,
     ChosenParameters,
+    Evaluation,
     ExperimentConfig,
     ExperimentResult,
+    GateStatus,
     GridSpec,
+    Interval,
     RunMetadata,
     SeasonSplit,
     build_dataset,
     complete_seasons,
     dataset_fingerprint,
     gate_checks,
+    gate_passed,
     render_report,
     run_experiment,
     season_end,
@@ -52,7 +57,8 @@ def test_split_seasons() -> None:
 def test_grid_validation() -> None:
     with pytest.raises(ModelInputError, match="at least one"):
         GridSpec(xis=())
-    assert GridSpec().size == 3 * 4 * 4 * 3
+    assert GridSpec().size == 3 * 5 * 4 * 3
+    assert 0.0 in GridSpec().weights  # pure-market baseline
 
 
 def test_experiment_evaluates_every_configuration_and_holdout_once(
@@ -122,6 +128,8 @@ def test_report_contains_every_section(result: ExperimentResult) -> None:
     for fragment in (
         "# Backtest hisoboti: test",
         "> eslatma",
+        "Chegaraviy w",  # a two-value weight grid: either choice is on its edge
+        "Yopilish narxi bor stavkalar (CLV qamrovi)",
         "`deadbeef`",
         "synthetic.seed",
         f"**{SMALL_GRID.size}**",
@@ -129,7 +137,7 @@ def test_report_contains_every_section(result: ExperimentResult) -> None:
         "## Validatsiya",
         "log-loss bozor (yopilish)",
         "![Kalibratsiya](x-calibration.png)",
-        "## F3 darvozasi (hold-out)",
+        "## F3 darvozasi (hold-out, qaror #11)",
     ):
         assert fragment in text
     no_figures = render_report(result, replace(metadata(), figures={}, notes=()))
@@ -140,24 +148,92 @@ def summary_like(base: BettingSummary, **change: object) -> BettingSummary:
     return replace(base, **change)  # type: ignore[arg-type]
 
 
-def test_gate_checks_pass_and_fail(result: ExperimentResult) -> None:
-    holdout = result.holdout
-    base = holdout.summary
-    good = summary_like(base, n_bets=600, roi=0.03, n_closing=600, roi_at_closing=0.01)
-    leagues = dict.fromkeys(("A", "B", "C"), good)
-    chosen = ChosenParameters(
-        xi=0.0, weight=0.5, min_ev=0.05, min_probability=0.3, underpowered=False
-    )
-    passing = replace(holdout, summary=good, by_league=leagues)
-    checks = gate_checks(passing, chosen)
-    assert [c.passed for c in checks[1:]] == [True, True, True]
+CHOSEN = ChosenParameters(xi=0.0, weight=0.5, min_ev=0.05, min_probability=0.3, underpowered=False)
 
-    bad = summary_like(base, n_bets=10, roi=-0.1, n_closing=10, roi_at_closing=-0.1)
-    failing = replace(holdout, summary=bad, by_league={"A": bad}, calibration=())
-    checks = gate_checks(failing, replace(chosen, min_ev=0.0))
-    assert [c.passed for c in checks] == [False, False, False, False]
-    assert "tekshirilmagan" in checks[2].detail
-    assert "baholanadigan oraliq yo'q" in checks[0].detail
+
+def good_summary(base: BettingSummary) -> BettingSummary:
+    return summary_like(
+        base,
+        n_bets=600,
+        n_clv=600,
+        mean_clv=0.02,
+        clv_ci=Interval(0.01, 0.03),
+        roi=0.03,
+        roi_ci=Interval(-0.01, 0.07),
+    )
+
+
+def passing_evaluation(result: ExperimentResult) -> Evaluation:
+    good = good_summary(result.holdout.summary)
+    calibration = (
+        CalibrationBucket(lower=0.4, upper=0.5, n=40, mean_predicted=0.45, observed_rate=0.47),
+    )
+    return replace(
+        result.holdout,
+        summary=good,
+        by_league=dict.fromkeys(("A", "B", "C"), replace(good, n_bets=150)),
+        calibration=calibration,
+        log_loss=0.70,
+        baseline_log_loss=0.71,
+    )
+
+
+def statuses(evaluation: Evaluation, chosen: ChosenParameters = CHOSEN) -> list[GateStatus]:
+    return [check.status for check in gate_checks(evaluation, chosen)]
+
+
+def test_gate_passes_only_when_every_criterion_is_met(result: ExperimentResult) -> None:
+    passing = passing_evaluation(result)
+    checks = gate_checks(passing, CHOSEN)
+    assert [c.status for c in checks] == [GateStatus.PASSED] * 5
+    assert gate_passed(checks)
+    assert checks[1].n == "600 / 600"
+    assert checks[1].interval == "[+1.00%; +3.00%]"
+
+
+def test_point_estimate_without_ci_is_not_significant(result: ExperimentResult) -> None:
+    passing = passing_evaluation(result)
+    weak = replace(passing.summary, clv_ci=Interval(-0.001, 0.04), roi_ci=Interval(-0.05, 0.11))
+    checks = gate_checks(replace(passing, summary=weak), CHOSEN)
+    assert checks[1].status is GateStatus.NOT_SIGNIFICANT
+    assert checks[2].status is GateStatus.NOT_SIGNIFICANT
+    assert not gate_passed(checks)  # "ahamiyatsiz" never counts as passed
+    assert "ahamiyatsiz" in render_report(
+        replace(result, holdout=replace(passing, summary=weak)), metadata()
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "index"),
+    [
+        ({"n_clv": 499}, 1),  # too few signals with a closing price
+        ({"mean_clv": -0.01}, 1),
+        ({"mean_clv": None, "clv_ci": None}, 1),
+        ({"roi": -0.001}, 2),
+        ({"n_bets": 0}, 2),
+    ],
+)
+def test_summary_criteria_fail(
+    result: ExperimentResult, change: dict[str, object], index: int
+) -> None:
+    passing = passing_evaluation(result)
+    summary = summary_like(passing.summary, **change)
+    assert statuses(replace(passing, summary=summary))[index] is GateStatus.FAILED
+
+
+def test_calibration_league_and_baseline_criteria_fail(result: ExperimentResult) -> None:
+    passing = passing_evaluation(result)
+    off = (CalibrationBucket(lower=0.4, upper=0.5, n=40, mean_predicted=0.45, observed_rate=0.52),)
+    assert statuses(replace(passing, calibration=off))[0] is GateStatus.FAILED
+    small = (CalibrationBucket(lower=0.4, upper=0.5, n=29, mean_predicted=0.45, observed_rate=0.9),)
+    assert statuses(replace(passing, calibration=small))[0] is GateStatus.FAILED  # none judged
+    league = passing.by_league["A"]
+    thin = {**passing.by_league, "C": replace(league, n_bets=99)}
+    assert statuses(replace(passing, by_league=thin))[3] is GateStatus.FAILED
+    losing = {**passing.by_league, "C": replace(league, mean_clv=-0.01)}
+    assert statuses(replace(passing, by_league=losing))[3] is GateStatus.FAILED
+    assert statuses(replace(passing, log_loss=0.72))[4] is GateStatus.FAILED
+    assert statuses(passing, replace(CHOSEN, weight=0.0))[4] is GateStatus.FAILED
 
 
 def test_dataset_is_finished_fixtures_in_kickoff_order(small_batch: HistoryBatch) -> None:
