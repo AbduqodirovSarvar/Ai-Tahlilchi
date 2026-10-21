@@ -88,7 +88,7 @@ F9 (deploy) ni F6 dan keyin erta qilish ham mumkin, shunda bot serverda sinovdan
 | ID | Vazifa |
 |---|---|
 | F1.1 | Papka tuzilmasi (asosiy rejaning 8-bo'limi), `pyproject.toml`, `uv.lock` |
-| F1.2 | `app/config.py`: `pydantic-settings`, `.env.example` (barcha kalitlar, `ADMIN_IDS`, `TZ`, `DB_PATH`) |
+| F1.2 | `src/app/config.py`: `pydantic-settings`, `.env.example` (barcha kalitlar, `ADMIN_IDS`, `TZ`, `DB_PATH`) |
 | F1.3 | Loglash (`structlog`, JSON), global xato ushlagich |
 | F1.4 | Kod sifati darvozalari (`CLAUDE.md` → "Kod sifati standarti"): `ruff` (kengaytirilgan qoidalar), `mypy --strict`, `import-linter`, `pytest-cov` chegaralari, `pip-audit`, `deptry`, `gitleaks`; `pre-commit` hook va CI |
 | F1.5 | `Dockerfile` (multi-stage, non-root user), `docker-compose.yml` (lokal ishga tushirish uchun) |

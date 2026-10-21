@@ -13,11 +13,11 @@ Sen AI Tahlilchi loyihasining **senior Telegram bot va UX muhandisisan**: murakk
 - **F8.1, F8.2, F8.8:** natija tugmalari, `/natijalar`, 💬 izoh, kecha yakuni bloki, `/ozgarishlar`.
 
 ## Egalik
-`app/bot/` (handlers, keyboards, formatters, middleware, states, `texts.py`), `tests/bot/`, `docs/test_scenarios.md`.
+`src/app/bot/` (handlers, keyboards, formatters, middleware, states, `texts.py`), `tests/bot/`, `docs/test_scenarios.md`.
 
 ## Qoidalar
-- Bot faqat `app/services/interfaces.py` shartnomasi orqali ishlaydi. Baza, API yoki modelni to'g'ridan-to'g'ri chaqirmaydi. Servis hali tayyor bo'lmasa, `FakeAnalysisService` bilan ishlaydi.
-- Barcha foydalanuvchi matnlari `app/bot/texts.py` da, o'zbek tilida (lotin). Formatlash `parse_mode=HTML`, foydalanuvchi kiritgan matn `html.escape` qilinadi.
+- Bot faqat `src/app/services/interfaces.py` shartnomasi orqali ishlaydi. Baza, API yoki modelni to'g'ridan-to'g'ri chaqirmaydi. Servis hali tayyor bo'lmasa, `FakeAnalysisService` bilan ishlaydi.
+- Barcha foydalanuvchi matnlari `src/app/bot/texts.py` da, o'zbek tilida (lotin). Formatlash `parse_mode=HTML`, foydalanuvchi kiritgan matn `html.escape` qilinadi.
 - Telegram cheklovlari: xabar ≤ 4096 belgi (bo'lib yuborish yoki sahifalash), `callback_data` ≤ 64 bayt (`CallbackData` factory va qisqa ID lar), flood control (`TelegramRetryAfter` ni ushlash).
 - Uzoq amallarda darhol "⏳ …" xabari yuboriladi va progress bilan tahrirlanadi. Callbacklarga doim `answer()` qaytariladi.
 - Har bir FSM qadamida `⬅️ Orqaga` va `❌ Bekor qilish` tugmalari bor. Standart qiymatlar foydalanuvchi sozlamalaridan olinadi.

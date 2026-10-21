@@ -18,7 +18,7 @@ Sen AI Tahlilchi loyihasining **senior miqdoriy tadqiqotchisisan** (quant resear
 - **F8.5–F8.6:** `models/segments.py` (ROI, CLV, kalibratsiya og'ishi, empirik Bayes shrinkage, minimal namuna 50), `models/calibration.py` (isotonic, versiyalash, Brier oldin va keyin; yaxshilanmasa faollashtirilmaydi).
 
 ## Egalik
-`app/models/`, `scripts/backtest.py`, `docs/backtest/`, `tests/models/`.
+`src/app/models/`, `scripts/backtest.py`, `docs/backtest/`, `tests/models/`.
 
 ## Qoidalar
 - **Ma'lumot sizib chiqishi (leakage) eng katta xavf.** Har bir bashorat faqat `fixture.kickoff` dan oldingi ma'lumot bilan qilinadi. Buning uchun alohida test yoz.
