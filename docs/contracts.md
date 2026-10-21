@@ -3,15 +3,15 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)** (T2, orkestr ko'rib chiqadi). 6–7 keyingi to'lqinlarda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 6–7 keyingi to'lqinlarda.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
 | 1 | Domen modellari | `src/app/domain/*.py` | data-engineer | hamma | qotirilgan (v1) |
 | 2 | Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant | qotirilgan (v1) |
 | 3 | Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) | qotirilgan (v1) |
-| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
-| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) |
+| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
+| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | hali qotirilmagan |
 | 7 | LLM API si | `src/app/llm/service.py` | llm-engineer | pipeline | hali qotirilmagan |
 
@@ -111,14 +111,14 @@ Foydalanish: faqat `pipeline` (va `db` ning o'zi). `bot`/`services` bazani bevos
 - Migratsiya: `uv run alembic upgrade head` (yo'l: `DB_PATH` yoki `-x db_path=...`).
 
 ## 4. Servis shartnomasi — `src/app/services/interfaces.py`
-**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
 
 Bot tizim bilan **faqat** shu modul orqali gaplashadi (domen qiymat turlari `Sport`, `Market`, `MarketType`, `Selection` ham ishlatiladi). Barcha DTO lar `@dataclass(frozen=True, slots=True)`; noto'g'ri kiritma konstruktorda `ValidationFailedError` beradi (noto'g'ri so'rov obyekti umuman yaratilmaydi). Barcha metodlar `async`.
 
 **Konvensiyalar**
 - Lahzalar (`kickoff`, `recalculated_at`, `data_as_of`) — tz-aware **UTC** `datetime`. Foydalanuvchi tanlaydigan **sanalar** (`DateSpec`, `DateWindow`, `ReportRequest`, `day_summary(day)`) — foydalanuvchi vaqt mintaqasidagi (`UserSettingsView.timezone`, standart `Asia/Tashkent`) kalendar sanalari; UTC ga servis o'tkazadi.
 - Ehtimollik, koeffitsient, EV — `float` (`ev=0.05` = +5%); pul va unit — `Decimal`.
-- ID lar shaffof emas: `SignalId`, `BetId`, `TemplateId` — `int`; liga/jamoa/o'yin/so'rov — `EntityId = str` (≤ 64 bayt, `callback_data` ga sig'adi).
+- ID lar shaffof emas: `SignalId`, `BetId`, `TemplateId` — `int`; liga/jamoa/o'yin/so'rov — `EntityId = str` (≤ 40 UTF-8 bayt — `MAX_ENTITY_ID_BYTES`, `is_valid_entity_id`; 64 baytlik `callback_data` da amal prefiksi uchun joy qoladi; DTO lar tekshiradi).
 - Takroriy tahlil bir xil signal ID larini qaytaradi (kalit: foydalanuvchi + o'yin + bozor + tanlov).
 
 **Nomlangan chegaralar (bot shulardan foydalanadi, raqamni takrorlamaydi)**
@@ -233,23 +233,54 @@ class SystemStatusService(Protocol):
 
 **Semantika (real servis ham shunga amal qiladi; `tests/services/contract_suite.py` tekshiradi)**
 - Oddiy tahlil: tanlov `probability ≥ min_probability`, `ev ≥ min_ev` va sozlamadagi `odds_min..odds_max` ga mos bo'lsa o'tadi; har bir o'yindan **eng yaxshi bitta** tanlov (saralash kaliti bo'yicha); saralanadi, keyin `max_signals` (jami yoki `per_day`) bilan kesiladi. Shartga mos kelmagan o'yin ro'yxatni to'ldirish uchun qo'shilmaydi (`matched`, `shortfall`).
+- **Qamrov `scope=all`** = `settings.league_ids` dagi ligalar (bo'sh bo'lsa — barcha kuzatiladigan ligalar) **+ sevimli jamoa/ligalar** (sozlama ligalaridan tashqarida bo'lsa ham). `list_fixtures` filtrsiz chaqirilsa ham `settings.league_ids` qo'llanadi.
 - `include_no_value=True` (maxsus tahlil, §6.3): filtrlar o'chadi, tanlangan bozorlarning barcha tanlovlari qaytadi, chegaradan pastdagilari `no_value=True`, `stake_units=0`.
-- Sevimli jamoa/liga o'yini (`scope=all`) shartga mos kelmasa ham eng yuqori EV li tanlovi bilan qo'shiladi (`watchlist=True`, `no_value=True`).
-- `kickoff` dan 3 kundan uzoq — `preliminary=True`, ishonch bir pog'ona past. O'tgan oyna — `retro=True`, `result` to'ldirilgan, API sarfi yo'q. O'yin davom etayotgan (in-play) o'yinlar tahlil va ro'yxatdan chiqariladi.
+- **Sevimlilar (§6.7, "har doim kiritiladi"):** `scope=all` da sevimli o'yinning signali (o'tgan bo'lsa — eng yaxshisi, o'tmagan bo'lsa — eng yuqori EV li tanlov, `no_value=True`) `watchlist=True` bilan **har doim** qo'shiladi: `max_signals` kesimidan tashqarida va `matched`/`shortfall` ga kirmaydi. Natija ro'yxati baribir saralash kaliti bo'yicha tartiblangan.
+- **Boshlangan o'yinlar:** faqat hali boshlanmagan o'yinlar haqiqiy signal beradi. Oynadagi tugagan o'yinlar `source=retro` signal beradi (`result` bilan, `recommended_at=None`, hech qachon tavsiya emas); in-play o'yinlar tashlab ketiladi. Retro signallar `list_signals`, `pending_results`, hisobot, kalibratsiya, `day_summary` va eksportga **kirmaydi**; ularga `place_bet`/`mark_result` — `ValidationFailedError`, `recalc_*` — boshlangan o'yin qoidasi. Butunlay o'tgan oyna — `AnalysisResult.retro=True`, API sarfi yo'q.
+- **Tavsiya identifikatsiyasi (`recommended_at`):** signal kaliti — foydalanuvchi + o'yin + bozor + tanlov (retro alohida). Tanlov birinchi marta biror so'rov chegaralaridan o'tganda `recommended_at` shu vaqtga qo'yiladi va **o'zgarmaydi**: keyingi qattiqroq so'rov uni `no_value` ga qaytarmaydi va hisobotdan chiqarmaydi. `no_value` signal keyinroq yumshoqroq so'rovda o'tsa, o'sha **keyingi** vaqt bilan tavsiya bo'ladi (orqaga sanab emas). Signal shu paytdagi chegaralarni (so'rovning `min_probability`/`min_ev` va sozlamadagi koeff. oralig'i) eslab qoladi.
+- **Hisobotga nima kiradi:** faqat tavsiya qilingan (`recommended_at` bor), retro bo'lmagan signallar — **yashirilganlari ham** (yashirish faqat ko'rinish uchun; tanlov xatosi bo'lmasligi uchun). Shu to'plam `report`, kalibratsiya, `day_summary`, `export` va `pending_results` uchun bir xil. ROI — foydalanuvchining shu davrdagi signallarga qilgan **barcha** stavkalari bo'yicha. Yield va segment yield'ida void stavkalar "tikilgan" summaga kirmaydi.
+- `kickoff` dan 3 kundan uzoq — `preliminary=True`, ishonch bir pog'ona past.
+- **Horizon:** oyna bugundan boshlab ko'pi bilan 14 kalendar kunini qamraydi (bugun ham sanaladi): `date_to ≤ horizon_end(today) = today + 13`. `DateSpec.next_days(14)` aynan shu chegaraga yetadi; `between(...)` ham xuddi shu qoida bilan tekshiriladi (`resolve` paytida, servis "bugun"i bilan).
+- **Vaqt o'tkazish:** mahalliy sanalar UTC ga faqat `DateWindow.utc_bounds(zone)` (yarim ochiq `[start, end)`, DST ga chidamli) / `DateWindow.contains(instant, zone)` orqali o'tkaziladi.
 - Byudjet: `estimate_cost` hech narsa sarflamaydi; `analyze` qo'lda so'rovlar zaxirasidan oshsa `BudgetExceededError(needed, available)`. 10 daqiqa ichida olingan ma'lumot qayta so'ralmaydi.
-- Qayta hisob: bitta o'yin uchun `RECALC_COOLDOWN` da bir marta (`CooldownActiveError(retry_after)`), boshlangan o'yin — `ValidationFailedError`. Zaxira tugagan bo'lsa raqamlar o'zgarmaydi va `data_as_of` ("09:00 holatiga") qo'yiladi. `recalc_query` cooldown dagi va boshlangan signallarni o'tkazib yuboradi (`skipped_*`), bitta o'yindagi bir nechta signalni bitta hisob bilan yangilaydi; bitta xato butun to'plamni yiqitmaydi (`failed`).
+- **Progress callback:** servis callback xatosini (har qanday `Exception`) ushlaydi, logga yozadi va ishni davom ettiradi; `asyncio.CancelledError` uzatiladi (bekor qilish ishlaydi). Callback har o'yinda chaqirilishi mumkin — bot xabar tahririni o'zi siyraklashtiradi (throttle, Telegram flood limiti).
+- Qayta hisob: bitta o'yin uchun `RECALC_COOLDOWN` da bir marta (`CooldownActiveError(retry_after)`), boshlangan o'yin — `ValidationFailedError`. Zaxira tugagan bo'lsa raqamlar o'zgarmaydi va `data_as_of` ("09:00 holatiga") qo'yiladi. **Verdikt signal yaratilgan/tavsiya qilingan paytdagi chegaralar bilan** hisoblanadi (joriy sozlamalar bilan emas). `recalc_query` cooldown dagi va boshlangan signallarni o'tkazib yuboradi (`skipped_*`), bitta o'yindagi bir nechta signalni bitta hisob bilan yangilaydi; bitta xato butun to'plamni yiqitmaydi (`failed`).
 - Egalik: boshqa foydalanuvchining signali, so'rovi yoki shabloni `NotFoundError` (mavjud emasdek). Noma'lum foydalanuvchi standart sozlamalarni oladi.
 - `update_settings` to'liq almashtiradi va `risk_profile` ni chegaralardan qayta chiqaradi (preset bilan aynan mos → shu profil, aks holda `custom`).
 
 **Xatolar — `app.services.errors`:** `ServiceError(AppError)` → `ValidationFailedError(field, message)` (+ `ValueError`), `NotFoundError(entity, entity_id)` (+ `LookupError`), `CooldownActiveError(retry_after: timedelta)`, `BudgetExceededError(needed, available)`.
 
+**v1.1 qo'shimchalari (T3, faqat qo'shish; mavjud nomlar o'zgarmagan)**
+
+| Nom | Turi | Ma'nosi |
+|---|---|---|
+| `SignalSource` | `StrEnum`: `analysis`, `daily`, `custom`, `watchlist`, `retro` | signal qaysi oqimdan |
+| `SignalView.source: SignalSource = ANALYSIS`, `SignalView.recommended_at: datetime \| None = None`; xossalar `retro`, `recommended` | maydon (standart qiymat bilan) | invariant: `recommended_at` bor → `no_value=False`; retro → `recommended_at=None`; `recommended_at` UTC |
+| `SportOption(sport, available, experimental, supported_markets)` + `CatalogService.list_sports() -> tuple[SportOption, ...]` | DTO + metod | bot sport va bozorlarni hardcode qilmaydi; barcha `Sport` lar enum tartibida |
+| `DateWindow.utc_bounds(zone) -> tuple[datetime, datetime]`, `DateWindow.contains(instant, zone) -> bool` | metodlar | mahalliy sana → UTC yagona joyda |
+| `horizon_end(today) -> date` | funksiya | oynaning oxirgi ruxsat etilgan kuni (`today + 13`); kalendar tugmalari uchun |
+| `ReportRequest.recent_days: int \| None = None`, `ReportRequest.recent(days, group_by=None)`, `ReportRequest.all_time(group_by=None)`, `ReportRequest.resolve(today)`; `date_to` endi ixtiyoriy (`None` = servisdagi bugun) | maydon + konstruktorlar | bot "bugun"ni bilishi shart emas; eski `last_days(days, today)` ishlaydi |
+| `MAX_ENTITY_ID_BYTES = 40`, `is_valid_entity_id(value) -> bool` | konstanta + funksiya | `scope_ids`, `league_ids`, `team_ids`, `WatchTarget.entity_id`, `SignalView.fixture_id`, `LeagueOption`/`TeamOption`/`FixtureOption` id lari tekshiriladi |
+
+**Xatti-harakat o'zgarishlari (nomlar o'zgarmagan, semantika aniqlashtirildi):** horizon `today+14` dan `today+13` ga (14 kun, bugun bilan); `scope=all` endi `settings.league_ids` ga amal qiladi; hisobotlar yashirilgan signallarni ham sanaydi, retro va no-value signallarni sanamaydi; sevimlilar `max_signals`/`matched` dan tashqarida; `list_fixtures` filtrsiz bo'lsa `settings.league_ids`; recalc verdikti yaratilish chegaralari bo'yicha; progress callback xatosi ishni to'xtatmaydi.
+
+**Rejalashtirilgan qo'shimchalar (T4, hali amalga oshirilmagan)**
+- `Notifier` porti (pipeline → bot: kunlik xabar, pre-match, sevimlilar bildirishnomalari, kecha yakuni).
+- So'rovsiz `/qayta` (bugungi / oxirgi signallar bo'yicha qayta hisob, `query_id` siz).
+- `ServiceUnavailableError` (tashqi API/baza ishlamay qolganda) va bitta foydalanuvchi uchun bir vaqtda bitta `analyze` qoidasi.
+- `place_bet` idempotentligi (takroriy bosish dublikat yaratmaydi) va bank semantikasi (balans qachon o'zgaradi, bank o'zgartirilganda tarix).
+- Cashout'ni `BetService` da (stavka bo'yicha haqiqiy summa).
+- Ekspress baholash (§6.11), stavkalar CSV eksporti, `/ozgarishlar` jurnali (§6.13 C), shablonlarni jadval bo'yicha avtomatik ishga tushirish.
+
 ## 5. Soxta servis — `src/app/services/fake.py`
-**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** pipeline-engineer
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.1 · **Egasi:** pipeline-engineer
 
 - `create_fake_services(*, clock: Clock = system_clock) -> Services` — barcha protokollarning bitta umumiy xotira holati ustidagi soxta amalga oshirilishi (`FakeAnalysisService`, `FakeSignalService`, `FakeCatalogService`, `FakeSettingsService`, `FakeTemplateService`, `FakeWatchlistService`, `FakeBetService`, `FakeResultService`, `FakeReportService`, `FakeSystemStatusService`). `Clock = Callable[[], datetime]` (UTC).
 - Ma'lumot: hash asosida **deterministik** (tasodif yo'q): APL, La Liga, Seriya A, Bundesliga (futbol) va KHL (xokkey, `experimental=True`), soat bo'yicha "bugun" dan 7 kun oldin — 14 kun keyin, har kuni har ligada bitta o'yin; bozorlar 1X2, ikki natija, Total 2.5, BTTS, Fora −0.5 (xokkey: 1X2, Total 5.5). Tugagan o'yinlarning ~15% ida natija "API dan kelmagan" (`/natijalar` uchun).
 - Byudjet: kunlik limit 100, avtomatik sarf 40, qo'lda zaxira 30 so'rov; 10 daqiqalik kesh. Cooldown, progress, idempotentlik va xatolar shartnomadagidek.
+- Dunyo injeksiya qilingan soatga ergashadi: mahalliy kun o'zgarsa qayta yaratiladi (bugundan −7..+14 kun), avval ko'rilgan o'yinlar esa saqlanib qoladi (eski signallar va batafsil karta ishlayveradi). Xokkey `list_sports` da `experimental=True`, qolgan (futbol/xokkeydan boshqa) sportlar `available=False`.
 - I/O, tarmoq, `sleep` yo'q. `RecalcVerdict.CANCELLED` va `failed_fixtures > 0` holatlarini soxta servis hosil qilmaydi (real servisda: o'yin qoldirilgan / tarkib, qisman nosozlik).
+- Qatlam himoyasi: `import-linter` qoidasi "production code never depends on the fake services" — `app.pipeline`, `app.services.interfaces`, `app.services.errors` fake modullarni import qila olmaydi (yangi real servis modullari shu ro'yxatga qo'shiladi).
 
 ## 6. Model API si — `src/app/models/__init__.py`
 **Holat:** hali qotirilmagan · **Versiya:** —
@@ -267,3 +298,4 @@ class SystemStatusService(Protocol):
 | 2026-10-21 | 1. Domen, 2. `SportAdapter` | v1 yozildi (T2, F2.4) | data-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 3. Baza sxemasi | v1 yozildi, Alembic `0001` (T2, F2.1) | data-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1 taklif yozildi (T2): DTO lar, 10 ta protokol, `Services` to'plami, xatolar ierarxiyasi, deterministik fake, qayta ishlatiladigan shartnoma testlari ([ADR 0004](adr/0004-service-contract.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
+| 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1.1 (T3, faqat qo'shish): `SignalSource`, `SignalView.source`/`recommended_at`, `SportOption` + `CatalogService.list_sports`, `DateWindow.utc_bounds`/`contains`, `horizon_end`, `ReportRequest.recent`/`all_time`/`resolve`/`recent_days`, `MAX_ENTITY_ID_BYTES`/`is_valid_entity_id`; tavsiya, retro, yashirish, sevimlilar, `scope=all` va horizon semantikasi aniqlashtirildi | pipeline-engineer | orkestr (sharh tuzatishlari) |
