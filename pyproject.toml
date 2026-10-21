@@ -124,6 +124,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 xfail_strict = true
+markers = [
+    "slow: long-running test (seconds to minutes); deselect with -m 'not slow'",
+]
 filterwarnings = ["error"]
 addopts = [
     "-ra",
