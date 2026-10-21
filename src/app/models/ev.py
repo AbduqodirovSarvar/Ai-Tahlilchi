@@ -2,7 +2,7 @@
 
 EV is the expected profit per unit stake. For a plain win/lose bet ``EV = p * odds - 1``;
 for Asian lines the half-win / push / half-loss outcomes contribute their partial profits.
-This is the only place the EV formula is written.
+This is the only place the EV and fair-odds formulas are written.
 """
 
 import math
@@ -32,3 +32,17 @@ def fair_odds(probability: float) -> float:
         msg = "fair odds are undefined for probability 0"
         raise ModelInputError(msg)
     return 1.0 / probability
+
+
+def asian_fair_odds(outcomes: AsianOutcomeProbabilities) -> float:
+    """Decimal odds at which an Asian bet has zero EV.
+
+    Solving ``(o - 1)(win + half_win/2) = loss + half_loss/2`` gives
+    ``o = 1 + (loss + half_loss/2) / (win + half_win/2)``; pushes do not matter. Equals
+    :func:`fair_odds` for a binary bet. Undefined when the bet cannot win anything.
+    """
+    gain = outcomes.win + outcomes.half_win / 2.0
+    if gain <= 0.0:
+        msg = f"fair odds are undefined for a bet that cannot win: {outcomes}"
+        raise ModelInputError(msg)
+    return 1.0 + (outcomes.loss + outcomes.half_loss / 2.0) / gain

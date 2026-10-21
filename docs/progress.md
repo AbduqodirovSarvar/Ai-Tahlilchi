@@ -44,22 +44,22 @@
 - [ ] F2.6 Jamoa nomlarini normallashtirish va qidiruv
 - [ ] F2.8 Ma'lumotlar qatlami testlari
 - [x] F3.1 De-vig (proporsional, Shin, power): `models/devig.py` (T2, quant-modeler; [ADR 0003](adr/0003-dixon-coles-and-devig.md))
-- [x] F3.2 Dixon-Coles modeli va bozorlar: `models/poisson.py`, `models/score_markets.py`, `models/asian.py` (T2: primitivlar bilan sof yadro; domen turlariga adapterlar T3 da)
-- [ ] F3.3 Bozor modeli
-- [ ] F3.4 Ansambl
-- [x] F3.5 EV va staking: `models/ev.py`, `models/staking.py` (Kelly 1/4, maksimal 2%, flat; Osiyo chiziqlari uchun ham)
-- [ ] F3.6 Ishonch darajasi
-- [ ] F3.7 Walk-forward backtest
-- [ ] F3.8 Backtest hisoboti
-- [~] F3.9 Model unit testlari: F3.1, F3.2, F3.5 uchun tayyor (orakullar, hypothesis, sintetik tiklash, sonli barqarorlik; `src/app/models` qamrovi 99.8%). F3.3, F3.4, F3.6 va backtest leakage testi T3 da
-- [ ] 🚦 F3 darvozasi
-- [ ] F6.1 Bot karkasi: routerlar, middleware
-- [ ] F6.2 Asosiy menyu, `/start`, `/yordam`
-- [ ] F6.3 Sozlamalar
-- [ ] F6.4 Tahlil oqimi (FSM)
-- [ ] F6.5 `/tahlil` tezkor buyrug'i parseri
-- [ ] F6.6 Signal kartasi formatteri
-- [ ] F6.10 Telegram cheklovlari
+- [x] F3.2 Dixon-Coles modeli va bozorlar: `models/poisson.py`, `models/score_markets.py`, `models/asian.py` (T2); domen adapterlari `models/adapters.py`, `models/outcomes.py` (T3)
+- [x] F3.3 Bozor modeli: `models/market.py` (Pinnacle de-vig, `market_avg` zaxira + noaniqlik bayrog'i, Osiyo butun/chorak chiziqlari, DC 1X2 dan) (T3; [ADR 0005](adr/0005-backtest-methodology.md))
+- [x] F3.4 Ansambl: `models/ensemble.py` (to'liq natija taqsimotlari bo'yicha, `w` backtestda tanlanadi) (T3)
+- [x] F3.5 EV va staking: `models/ev.py`, `models/staking.py` (Kelly 1/4, maksimal 2%, flat; Osiyo chiziqlari uchun ham); `asian_fair_odds` (T3)
+- [x] F3.6 Ishonch darajasi: `models/confidence.py` (Yuqori/O'rta/Past, sabab kodlari, > 15 p.p. sanity bayrog'i) (T3)
+- [x] F3.7 Walk-forward backtest: `app.models.backtest` (sof) + `scripts/backtest.py` (DB yoki `--synthetic`) (T3)
+- [~] F3.8 Backtest hisoboti: sintetik samarali bozorda [docs/backtest/2026-10-21-synthetic.md](backtest/2026-10-21-synthetic.md) (vosita tekshirildi: ustunlik yo'q, CLV ≈ −3%). **Haqiqiy ma'lumotdagi hisobot serverda** (qarorlar jurnali #7)
+- [x] F3.9 Model unit testlari: adapterlar, bozor modeli, ansambl, ishonch, backtest (instrumentlangan leakage testlari, samarali bozor sanity testi, hypothesis); `src/app/models` qamrovi 99.7% (T3)
+- [ ] 🚦 F3 darvozasi: **kutilmoqda** — haqiqiy football-data tarixi bilan serverda `scripts/import_history.py` + `scripts/backtest.py` (#7)
+- [x] F6.1 Bot karkasi: routerlar (factory), middleware (whitelist, user konteksti, token-bucket rate limit, servis xatolari → o'zbekcha xabar), `Services` DI, `APP_SERVICES=fake` ([ADR 0006](adr/0006-bot-architecture.md)) (bot-engineer)
+- [x] F6.2 Asosiy menyu (§6.1), `/start`, `/yordam`, `/bekor`; keyingi to'lqin bandlari "tez orada" bilan ulangan
+- [x] F6.3 Sozlamalar: §6.5 dagi barcha maydonlar, risk profillari, 80%+ ogohlantirishi (jarayon xotirasida "bir marta")
+- [x] F6.4 Tahlil oqimi (FSM): sana tugmalari + inline kalendar + matn, sport (`list_sports`), ehtimollik/EV, qamrov (ligalar/jamoalar/sahifalangan o'yinlar), son, bozorlar, saralash, tasdiqlash + `estimate_cost`, progress, shablon saqlash. FSM: MemoryStorage (persistent storage seam tayyor, eskirgan tugmalar ishlangan)
+- [x] F6.5 `/tahlil` parseri (sof funksiya, unit + hypothesis testlar) → tasdiqlash ekrani
+- [x] F6.6 Signal kartasi (§6.2, HTML escape, ⏳/❗/🧪/🕰 retro), kunlar bo'yicha guruhlash, ⭐ Sevimlilar bloki, sahifalash, shortfall va "Value topilmadi"; 🙈 Yashirish ishlaydi, 🔄/📋/✅ F6.7/F7 da
+- [x] F6.10 Telegram cheklovlari: 4096 bo'lish, `callback_data` ≤ 64 (indekslar, property test), flood control (bir marta qayta urinish), har callbackga `answer()`. Qo'lda sinov: [test_scenarios.md](test_scenarios.md) (jonli sinov token qo'shilgandan keyin)
 
 ## T4 — Tizimni birlashtirish
 - [ ] F4.1 `pipeline/refresh.py`

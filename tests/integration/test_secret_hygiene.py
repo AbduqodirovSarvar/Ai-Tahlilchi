@@ -15,6 +15,7 @@ from aiogram import Bot
 
 from app.bot.dispatcher import build_dispatcher
 from app.logging import configure_logging
+from app.services.fake import create_fake_services
 from tests.bot.fakes import ADMIN_ID, text_update
 
 TOKEN = "42:SUPERSECRET-TOKEN"
@@ -36,7 +37,7 @@ async def offline_bot(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Bot]:
 
 async def fail_to_reply(bot: Bot, app_env: Literal["dev", "prod"]) -> None:
     configure_logging(level="INFO", app_env=app_env)
-    dispatcher = build_dispatcher(frozenset({ADMIN_ID}))
+    dispatcher = build_dispatcher(frozenset({ADMIN_ID}), create_fake_services())
 
     await dispatcher.feed_update(bot, text_update(ADMIN_ID, "/start", update_id=99))
 
@@ -47,7 +48,8 @@ async def test_failed_reply_is_logged_without_the_token_in_dev(
     await fail_to_reply(offline_bot, "dev")
 
     output = capsys.readouterr().out
-    assert "unhandled_update_error" in output
+    # The error middleware logs the failed reply (with traceback) and tries to apologise.
+    assert "handler_failed" in output
     assert TOKEN not in output
 
 
@@ -57,5 +59,6 @@ async def test_failed_reply_is_logged_without_the_token_in_prod(
     await fail_to_reply(offline_bot, "prod")
 
     output = capsys.readouterr().out
-    assert "unhandled_update_error" in output
+    # The error middleware logs the failed reply (with traceback) and tries to apologise.
+    assert "handler_failed" in output
     assert TOKEN not in output

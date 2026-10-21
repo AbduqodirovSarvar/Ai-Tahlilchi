@@ -2,14 +2,32 @@
 
 This module is the public model API used by the pipeline (contract 6 in docs/contracts.md).
 Functions are synchronous and CPU-bound; async callers run them via ``asyncio.to_thread``.
+The walk-forward backtest library lives in :mod:`app.models.backtest`.
 """
 
+from app.models.adapters import (
+    MarketQuote,
+    complete_quotes,
+    match_date,
+    match_record,
+    match_records,
+    quotes_by_fixture,
+    team_key,
+)
 from app.models.asian import (
     AsianOutcomeProbabilities,
     Settlement,
     is_quarter_line,
     settle,
     split_line,
+)
+from app.models.confidence import (
+    ConfidenceAssessment,
+    ConfidenceInputs,
+    ConfidenceLevel,
+    ConfidenceReason,
+    assess_confidence,
+    lower_level,
 )
 from app.models.devig import (
     DevigMethod,
@@ -21,8 +39,25 @@ from app.models.devig import (
     overround,
     shin_insider_share,
 )
-from app.models.ev import asian_expected_value, expected_value, fair_odds
+from app.models.ensemble import DEFAULT_MODEL_WEIGHT, ensemble, ensemble_markets, mix_outcomes
+from app.models.ev import asian_expected_value, asian_fair_odds, expected_value, fair_odds
 from app.models.exceptions import ModelFitError, ModelInputError, UnknownTeamError
+from app.models.market import (
+    DEFAULT_MARKET_MODEL,
+    FairMarket,
+    MarketModelConfig,
+    asian_from_two_way,
+    devig_quote,
+    double_chance_from_match_result,
+    fair_markets,
+)
+from app.models.outcomes import (
+    MarketProbabilities,
+    is_partition_market,
+    market_from_matrix,
+    predict_markets,
+    settle_selection,
+)
 from app.models.poisson import (
     DEFAULT_XI_PER_DAY,
     DixonColesModel,
@@ -57,14 +92,24 @@ from app.models.staking import (
 
 __all__ = [
     "DEFAULT_KELLY_MULTIPLIER",
+    "DEFAULT_MARKET_MODEL",
     "DEFAULT_MAX_STAKE_FRACTION",
+    "DEFAULT_MODEL_WEIGHT",
     "DEFAULT_XI_PER_DAY",
     "AsianOutcomeProbabilities",
     "BothTeamsToScoreProbabilities",
+    "ConfidenceAssessment",
+    "ConfidenceInputs",
+    "ConfidenceLevel",
+    "ConfidenceReason",
     "DevigMethod",
     "DixonColesModel",
     "DoubleChanceProbabilities",
     "ExpectedGoals",
+    "FairMarket",
+    "MarketModelConfig",
+    "MarketProbabilities",
+    "MarketQuote",
     "MatchRecord",
     "MatchResultProbabilities",
     "ModelFitError",
@@ -74,30 +119,50 @@ __all__ = [
     "TwoSidedAsianProbabilities",
     "UnknownTeamError",
     "asian_expected_value",
+    "asian_fair_odds",
+    "asian_from_two_way",
     "asian_handicap",
     "asian_kelly_fraction",
+    "assess_confidence",
     "both_teams_to_score",
     "capped_fraction",
+    "complete_quotes",
     "devig",
     "devig_power",
     "devig_proportional",
+    "devig_quote",
     "devig_shin",
     "double_chance",
+    "double_chance_from_match_result",
+    "ensemble",
+    "ensemble_markets",
     "expected_value",
+    "fair_markets",
     "fair_odds",
     "feasible_rho",
     "fit_dixon_coles",
     "flat_stake",
     "implied_probabilities",
+    "is_partition_market",
     "is_quarter_line",
     "kelly_fraction",
+    "lower_level",
+    "market_from_matrix",
+    "match_date",
+    "match_record",
+    "match_records",
     "match_result",
+    "mix_outcomes",
     "overround",
+    "predict_markets",
+    "quotes_by_fixture",
     "score_matrix",
     "settle",
+    "settle_selection",
     "shin_insider_share",
     "split_line",
     "stake_amount",
+    "team_key",
     "top_scores",
     "total_goals",
 ]

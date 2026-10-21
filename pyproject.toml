@@ -82,6 +82,9 @@ explicit-preview-rules = true
 "src/app/logging.py" = ["A005"]
 # CLI quality-gate tool: writing its report to stdout is its purpose.
 "scripts/ops/**" = ["T201"]
+# User-facing Uzbek texts use typographic dashes (25.10–31.10) on purpose.
+"src/app/bot/texts.py" = ["RUF001"]
+"tests/bot/**" = ["RUF001"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -168,7 +171,6 @@ DEP002 = [
     "aiosqlite",
     "apscheduler",
     "google-genai",
-    "matplotlib",
     "pandas",
     "scikit-learn",
     "tzdata",

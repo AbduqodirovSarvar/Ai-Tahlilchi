@@ -1,0 +1,94 @@
+"""Walk-forward backtest library (F3.7): pure functions over in-memory data.
+
+Callers (``scripts/backtest.py``) load the data, build a :class:`~app.domain.HistoryBatch`
+and pass it in; this package never touches files, the database or the network.
+Methodology: docs/adr/0005-backtest-methodology.md.
+"""
+
+from app.models.backtest.betting import (
+    Bet,
+    BetFilter,
+    PricingConfig,
+    StakingConfig,
+    candidate_bets,
+    select_bets,
+)
+from app.models.backtest.dataset import BacktestFixture, build_dataset, dataset_fingerprint
+from app.models.backtest.experiment import (
+    ChosenParameters,
+    Evaluation,
+    ExperimentConfig,
+    ExperimentResult,
+    GridRow,
+    GridSpec,
+    SeasonSplit,
+    evaluate,
+    run_experiment,
+    split_seasons,
+)
+from app.models.backtest.metrics import (
+    BettingSummary,
+    CalibrationBucket,
+    Interval,
+    ProbabilitySample,
+    ScoreRow,
+    bootstrap_ratio_ci,
+    calibration_table,
+    max_drawdown,
+    probability_samples,
+    score_table,
+    summarize_bets,
+)
+from app.models.backtest.report import GateCheck, RunMetadata, gate_checks, render_report
+from app.models.backtest.synthetic import SyntheticConfig, generate_history
+from app.models.backtest.walk_forward import (
+    FixturePrediction,
+    SkipReason,
+    WalkForwardConfig,
+    WalkForwardResult,
+    walk_forward,
+)
+
+__all__ = [
+    "BacktestFixture",
+    "Bet",
+    "BetFilter",
+    "BettingSummary",
+    "CalibrationBucket",
+    "ChosenParameters",
+    "Evaluation",
+    "ExperimentConfig",
+    "ExperimentResult",
+    "FixturePrediction",
+    "GateCheck",
+    "GridRow",
+    "GridSpec",
+    "Interval",
+    "PricingConfig",
+    "ProbabilitySample",
+    "RunMetadata",
+    "ScoreRow",
+    "SeasonSplit",
+    "SkipReason",
+    "StakingConfig",
+    "SyntheticConfig",
+    "WalkForwardConfig",
+    "WalkForwardResult",
+    "bootstrap_ratio_ci",
+    "build_dataset",
+    "calibration_table",
+    "candidate_bets",
+    "dataset_fingerprint",
+    "evaluate",
+    "gate_checks",
+    "generate_history",
+    "max_drawdown",
+    "probability_samples",
+    "render_report",
+    "run_experiment",
+    "score_table",
+    "select_bets",
+    "split_seasons",
+    "summarize_bets",
+    "walk_forward",
+]

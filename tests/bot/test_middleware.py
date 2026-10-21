@@ -1,15 +1,41 @@
 """Tests for app.bot.middleware."""
 
+from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.methods import AnswerCallbackQuery, SendMessage
 from aiogram.types import Chat, Update, User
 from hypothesis import given
 from hypothesis import strategies as st
 
-from app.bot.middleware import WhitelistMiddleware
-from tests.bot.fakes import ADMIN_ID, STRANGER_ID
+from app.bot import texts
+from app.bot.draft import StaleDraftError
+from app.bot.middleware import (
+    ErrorMiddleware,
+    RateLimitMiddleware,
+    WhitelistMiddleware,
+    _plain,
+    user_message_for,
+)
+from app.bot.parsing import InputError
+from app.services.errors import (
+    BudgetExceededError,
+    CooldownActiveError,
+    NotFoundError,
+    ValidationFailedError,
+)
+from tests.bot.fakes import (
+    ADMIN_ID,
+    STRANGER_ID,
+    RecordingSession,
+    bind,
+    callback_update,
+    text_update,
+)
 
 WHITELIST = frozenset({ADMIN_ID})
 
@@ -74,3 +100,87 @@ async def test_admin_outside_a_private_chat_is_dropped(chat_type: str) -> None:
 async def test_admin_update_without_a_chat_is_dropped() -> None:
     handler = await call(WhitelistMiddleware(WHITELIST), {"event_from_user": user(ADMIN_ID)})
     handler.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------- rate limit
+class FakeMonotonic:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_rate_limit_allows_burst_then_warns_once(bot: Bot, session: RecordingSession) -> None:
+    clock = FakeMonotonic()
+    limiter = RateLimitMiddleware(capacity=2, refill_per_second=1.0, monotonic=clock)
+    handler = AsyncMock(return_value="ok")
+    update = bind(text_update(ADMIN_ID, "salom"), bot)
+    data = {"event_from_user": user(ADMIN_ID)}
+
+    results = [await limiter(handler, update, data) for _ in range(4)]
+
+    assert results == ["ok", "ok", None, None]
+    sent = [m for m in session.requests if isinstance(m, SendMessage)]
+    assert [m.text for m in sent] == [texts.RATE_LIMITED]
+    clock.now = 1.0
+    assert await limiter(handler, update, data) == "ok"
+
+
+async def test_rate_limit_answers_throttled_buttons(bot: Bot, session: RecordingSession) -> None:
+    limiter = RateLimitMiddleware(capacity=1, refill_per_second=0.0, monotonic=FakeMonotonic())
+    handler = AsyncMock()
+    update = bind(callback_update(ADMIN_ID, "x", 1), bot)
+    data = {"event_from_user": user(ADMIN_ID)}
+
+    await limiter(handler, update, data)
+    await limiter(handler, update, data)
+
+    assert handler.await_count == 1
+    assert isinstance(session.requests[-1], AnswerCallbackQuery)
+
+
+# --------------------------------------------------------------------------- errors
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (InputError("typed wrong"), "typed wrong"),
+        (StaleDraftError(), texts.STALE_BUTTON_HINT),
+        (CooldownActiveError(timedelta(minutes=3)), "⏳ 3 daqiqadan"),
+        (BudgetExceededError(10, 2), "10 ta so'rov kerak"),
+        (ValidationFailedError("markets", "x"), "bozorni"),
+        (NotFoundError("signal", 1), "Topilmadi"),
+        (RuntimeError("bug"), texts.UNEXPECTED_ERROR),
+    ],
+)
+def test_user_message_for_each_error(error: Exception, expected: str) -> None:
+    assert expected in user_message_for(error)
+
+
+async def test_error_middleware_reports_long_callback_errors_as_message(
+    bot: Bot, session: RecordingSession
+) -> None:
+    update = bind(callback_update(ADMIN_ID, "x", 1), bot)
+    assert update.callback_query is not None
+    handler = AsyncMock(side_effect=InputError("x" * 300))
+
+    assert await ErrorMiddleware()(handler, update.callback_query, {}) is None
+
+    kinds = [type(m).__name__ for m in session.requests]
+    assert kinds == ["AnswerCallbackQuery", "SendMessage"]
+
+
+async def test_error_middleware_survives_telegram_failure(
+    bot: Bot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    update = bind(text_update(ADMIN_ID, "x"), bot)
+    assert update.message is not None
+    bad = TelegramBadRequest(method=SendMessage(chat_id=1, text="x"), message="bad")
+    monkeypatch.setattr("app.bot.middleware.send_html", AsyncMock(side_effect=bad))
+    handler = AsyncMock(side_effect=NotFoundError("x", 1))
+
+    assert await ErrorMiddleware()(handler, update.message, {}) is None
+
+
+def test_alert_text_is_plain() -> None:
+    assert _plain("<b>a</b> &lt;b&gt; <code>c</code> &amp;") == "a <b> c &"

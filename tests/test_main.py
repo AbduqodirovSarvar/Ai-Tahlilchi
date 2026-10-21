@@ -11,8 +11,10 @@ from aiogram.methods import GetMe
 from aiogram.types import User
 
 from app import main as main_module
+from app.bot.messaging import FloodControlMiddleware
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
+from app.services.interfaces import Services
 
 TOKEN = "42:TEST-TOKEN-VALUE"
 
@@ -58,7 +60,18 @@ async def test_run_bot_verifies_token_then_polls(
     bot = start_polling.await_args.args[0]
     assert isinstance(bot, Bot)
     assert bot.token == TOKEN
-    assert start_polling.await_args.kwargs["allowed_updates"] == ["message"]
+    assert start_polling.await_args.kwargs["allowed_updates"] == ["callback_query", "message"]
+    # Flood control (retry after 429) is installed on the bot session.
+    assert any(
+        isinstance(middleware, FloodControlMiddleware) for middleware in bot.session.middleware
+    )
+
+
+def test_build_services_uses_the_fake_backend() -> None:
+    services = main_module.build_services(settings())
+
+    assert isinstance(services, Services)
+    assert settings().app_services == "fake"
 
 
 @pytest.mark.parametrize(

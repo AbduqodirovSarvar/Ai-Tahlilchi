@@ -3,7 +3,7 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 6–7 keyingi to'lqinlarda.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 + v1.1 qo'shimchalari (orkestr tasdiqlagan, 2026-10-21)**. 6 (model API) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 7 keyingi to'lqinlarda.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
@@ -12,7 +12,7 @@
 | 3 | Baza sxemasi | `src/app/db/schema.py` | data-engineer | pipeline, bot (DTO orqali) | qotirilgan (v1) |
 | 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
 | 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) |
-| 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | hali qotirilmagan |
+| 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | frozen v1 (orkestr tasdiqlagan, 2026-10-21) |
 | 7 | LLM API si | `src/app/llm/service.py` | llm-engineer | pipeline | hali qotirilmagan |
 
 ## Platforma (T1 da mavjud, infra-engineer)
@@ -284,8 +284,29 @@ class SystemStatusService(Protocol):
 - Qatlam himoyasi: `import-linter` qoidasi "production code never depends on the fake services" — `app.pipeline`, `app.services.interfaces`, `app.services.errors` fake modullarni import qila olmaydi (yangi real servis modullari shu ro'yxatga qo'shiladi).
 
 ## 6. Model API si — `src/app/models/__init__.py`
-**Holat:** hali qotirilmagan · **Versiya:** —
-- `predict_markets`, `compute_ev`, `stake`, `confidence`: (to'ldiriladi)
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21) (orkestr ko'rib chiqadi) · **Versiya:** 1 · **Egasi:** quant-modeler · Qarorlar: [ADR 0003](adr/0003-dixon-coles-and-devig.md), [ADR 0005](adr/0005-backtest-methodology.md) · **Import:** `from app.models import ...`
+
+Barcha funksiyalar **sinxron va sof** (I/O yo'q, faqat `app.domain`/`app.errors` import qilinadi); pipeline ularni `asyncio.to_thread` orqali chaqiradi. Xatolar: `ModelInputError` (`DataError`; kiritma yaroqsiz → o'yinni o'tkazib yubor, logla), `UnknownTeamError` (`ModelInputError`; jamoa modelda yo'q → o'tkazib yubor), `ModelFitError` (`AppError`; fit yaqinlashmadi). Ehtimollik/koeffitsient — `float`; pul — `Decimal`.
+
+**Konvensiyalar:** jamoa kaliti `team_key(team) = str(team.ref)`; o'yin sanasi `match_date(fixture)` = kickoff ning UTC sanasi; `fit_dixon_coles(..., as_of)` da `as_of` **eksklyuziv** (unda yoki undan keyin o'ynalgan o'yin → xato). Fit **har liga uchun alohida**.
+
+| Qadam | API | Izoh |
+|---|---|---|
+| Fit kiritmasi | `match_records(fixtures, results) -> list[MatchRecord]`, `match_record(fixture, result)` | faqat `finished` natijalar |
+| Fit | `fit_dixon_coles(matches, as_of, *, xi=DEFAULT_XI_PER_DAY) -> DixonColesModel` | `xi` backtestda tanlanadi |
+| Bashorat | `predict_markets(model, home_key, away_key, markets) -> dict[Market, MarketProbabilities]` | bitta hisob matritsasi; `UnknownTeamError` |
+| Narxlar | `complete_quotes(snapshots) -> list[MarketQuote]` | (o'yin, bukmeker, kind, bozor) bo'yicha to'liq to'plamlar, eng yangi narx |
+| Bozor modeli | `fair_markets(quotes_of_one_fixture, *, kind, config=DEFAULT_MARKET_MODEL, references=model_probs) -> dict[Market, FairMarket]` | Pinnacle → `market_avg` zaxira (`wide_uncertainty`); Osiyo butun/chorak chiziqlari uchun `references` (DC) kerak, bo'lmasa bozor tashlanadi; DC 1X2 dan hosil qilinadi (`derived`) |
+| Ansambl | `ensemble_markets(model_probs, fair, weight) -> dict[Market, MarketProbabilities]`, `ensemble(model, market, weight)` | `p = w·p_DC + (1−w)·p_bozor`; bozor bahosi yo'q bozor qaytmaydi |
+| Ehtimollik | `MarketProbabilities.outcomes[selection]` (`AsianOutcomeProbabilities`), `.win_probability(selection)` (`win + half_win`) | |
+| EV | `asian_expected_value(outcomes, odds)`, `asian_fair_odds(outcomes)`; ikkilik: `expected_value`, `fair_odds` | `0.05` = +5% |
+| Stavka | `capped_fraction(asian_kelly_fraction(outcomes, odds))` → `stake_amount(bank, fraction) -> Decimal`; `flat_stake(ev, unit)` | Kelly × 0.25, maks 2%, sentgacha pastga |
+| Ishonch | `assess_confidence(ConfidenceInputs(...)) -> ConfidenceAssessment(level, reasons, sanity_flag, disagreement)`; `lower_level(level, steps)` | `ConfidenceLevel` (HIGH/MEDIUM/LOW) servis enumiga **nom bo'yicha** o'tkaziladi; `sanity_flag` = farq > 15 p.p. → "value" emas, tekshiruv |
+| Natija | `settle_selection(market, selection, home_goals, away_goals) -> Settlement` | win/half_win/push/half_loss/loss; `Outcome` ga pipeline o'tkazadi |
+
+`ConfidenceInputs`: `min_team_matches` (fit oynasidagi ikki jamoadan kichigi), `xg_available`, `lineups_known`, `model_probability`, `market_probability | None`, `days_to_kickoff` (manfiy = retro), `market_wide_uncertainty`, `calibration_bias | None`. Chegaralar nomlangan konstantalar: `MIN_TEAM_MATCHES=6`, `GOOD_TEAM_MATCHES=15`, `MODERATE_DISAGREEMENT=0.08`, `SANITY_DISAGREEMENT=0.15`, `PRELIMINARY_DAYS=3`, `MAX_CALIBRATION_BIAS=0.05`.
+
+**Backtest kutubxonasi** `app.models.backtest` (skript va testlar uchun, pipeline emas): `build_dataset(HistoryBatch)`, `walk_forward(...)`, `run_experiment(dataset, ExperimentConfig) -> ExperimentResult`, `render_report(result, RunMetadata)`, `generate_history(SyntheticConfig)`. Skript: `scripts/backtest.py [--synthetic]`.
 
 ## 7. LLM API si — `src/app/llm/service.py`
 **Holat:** hali qotirilmagan · **Versiya:** —
@@ -301,3 +322,4 @@ class SystemStatusService(Protocol):
 | 2026-10-21 | 3. Baza sxemasi | v1.1 (qo'shimcha): Alembic `0002` — `user_settings.daily_loss_limit`/`weekly_loss_limit`, `ix_user_bets_signal_id`, opening/closing uchun qisman unique indeks; football-data o'yin `external_id` = `liga/mavsum/uy/mehmon` (sanasiz) | data-engineer | orkestr (T2 fix round) |
 | 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1 taklif yozildi (T2): DTO lar, 10 ta protokol, `Services` to'plami, xatolar ierarxiyasi, deterministik fake, qayta ishlatiladigan shartnoma testlari ([ADR 0004](adr/0004-service-contract.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
 | 2026-10-21 | 4. Servis shartnomasi, 5. Soxta servis | v1.1 (T3, faqat qo'shish): `SignalSource`, `SignalView.source`/`recommended_at`, `SportOption` + `CatalogService.list_sports`, `DateWindow.utc_bounds`/`contains`, `horizon_end`, `ReportRequest.recent`/`all_time`/`resolve`/`recent_days`, `MAX_ENTITY_ID_BYTES`/`is_valid_entity_id`; tavsiya, retro, yashirish, sevimlilar, `scope=all` va horizon semantikasi aniqlashtirildi | pipeline-engineer | orkestr (sharh tuzatishlari) |
+| 2026-10-21 | 6. Model API | v1 taklif yozildi (T3): domen adapterlari, `predict_markets`, bozor modeli (`fair_markets`), ansambl, `assess_confidence`, `asian_fair_odds`, `settle_selection`; backtest kutubxonasi ([ADR 0005](adr/0005-backtest-methodology.md)) | quant-modeler | orkestr (tasdiqlangan) |
