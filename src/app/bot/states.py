@@ -74,6 +74,12 @@ class TemplateFlow(StatesGroup):
     time_input = State()
 
 
+class ReportFlow(StatesGroup):
+    """📈 Hisobot: waiting for a typed date range."""
+
+    range_input = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 

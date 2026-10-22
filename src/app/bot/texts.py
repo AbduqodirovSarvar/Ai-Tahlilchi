@@ -66,11 +66,6 @@ HELP: Final = (
     "• ❗ <b>Qiymatsiz</b> — EV manfiy: tavsiya etilmaydi."
 )
 
-PLACEHOLDER: Final = (
-    "🔜 <b>{feature}</b> bo'limi tez orada qo'shiladi.\n"
-    "Hozircha 📊 <b>Tahlil</b> va ⚙️ <b>Sozlamalar</b> dan foydalaning."
-)
-PLACEHOLDER_ALERT: Final = "🔜 Bu imkoniyat tez orada qo'shiladi."
 UNKNOWN_TEXT: Final = "🤔 Buni tushunmadim. Menyudan bo'lim tanlang yoki /yordam ni bosing."
 USE_BUTTONS: Final = (
     "👆 Iltimos, yuqoridagi tugmalardan birini tanlang (yoki /bekor — bekor qilish)."
@@ -975,3 +970,67 @@ CHART_CALIBRATION_TITLE: Final = "Kalibratsiya: model va'dasi va haqiqat"
 CHART_CALIBRATION_X: Final = "Model ehtimolligi, %"
 CHART_CALIBRATION_Y: Final = "Haqiqatda o'tgan, %"
 CHART_YIELD_X: Final = "Yield, %"
+CHART_SEGMENTS_TITLE: Final = "Yield: {group} bo'yicha"
+
+
+# --------------------------------------------------------------------------- report (F7.6)
+REPORT_TITLE: Final = "📈 <b>Hisobot</b> — {period}"
+REPORT_PERIOD_ALL: Final = "hammasi ({end} gacha)"
+REPORT_PERIOD_RANGE: Final = "{start}–{end}"
+REPORT_GROUP_LINE: Final = "🧩 Kesim: <b>{group}</b>"
+REPORT_COUNTS: Final = (
+    "📊 Signallar: <b>{signals}</b> · yopilgan {settled}: ✅ {won} · ❌ {lost} · ↩️ {void}"
+)
+REPORT_PROFIT: Final = "💰 Foyda: <b>{profit}</b> unit · Yield: {yield_rate}"
+REPORT_ROI: Final = "🎟 ROI (sizning stavkalaringiz): {roi}"
+REPORT_ROI_NONE: Final = "🎟 ROI: shu davrda stavkangiz yo'q"
+REPORT_CLV: Final = "📐 CLV: {clv} · koeffitsienti yopilishdan yaxshi: {beat} signalda"
+REPORT_WINRATE: Final = "🎯 Win rate: {rate} · eng uzun mag'lubiyat seriyasi: {streak}"
+REPORT_NONE: Final = "—"
+REPORT_EMPTY: Final = (
+    "🤷 Bu davrda tavsiya qilingan signal yo'q.\n"
+    "Davrni kengaytiring (30 kun, hammasi) yoki avval 📊 Tahlil / ⚡ Bugungi signallar "
+    "orqali signal oling."
+)
+REPORT_NO_SETTLED: Final = "⏳ Signallar bor, lekin hali birortasi yopilmagan: natijalarni kuting."
+REPORT_CALIBRATION_HEADER: Final = (
+    "📉 <b>Kalibratsiya</b> — bot bergan foizlarga qanchalik ishonish mumkin"
+)
+REPORT_CALIBRATION_COLUMNS: Final = "Model ehtimolligi   n   Va'da   Haqiqat"
+REPORT_CALIBRATION_SENTENCE: Final = (
+    "💡 {lower}–{upper}% deb berilgan signallar haqiqatda {actual} holatda o'tdi ({count} ta)."
+)
+REPORT_CALIBRATION_THIN: Final = (
+    "ℹ️ Ma'lumot kam: {count} ta yopilgan signal ishonchli xulosa uchun yetarli emas."
+)
+REPORT_SEGMENTS_HEADER: Final = "🧩 <b>Kesim bo'yicha</b> ({group})"
+REPORT_SEGMENTS_COLUMNS: Final = "Kesim                     n   Foyda  Yield    CLV   Win"
+REPORT_MORE: Final = "…va yana {count} ta"
+REPORT_GROUP_LABELS: Final[dict[str, str]] = {
+    "": "kesimsiz",
+    "sport": "sport",
+    "league": "liga",
+    "market": "bozor",
+    "risk_profile": "risk profili",
+    "confidence": "ishonch",
+}
+BTN_REPORT_PERIODS: Final[dict[str, str]] = {
+    "7": "7 kun",
+    "30": "30 kun",
+    "all": "Hammasi",
+    "c": "📅 O'zim",
+}
+BTN_REPORT_CHART: Final = "📊 Grafik"
+BTN_REPORT_EXPORT: Final = "📤 CSV"
+REPORT_RANGE_PROMPT: Final = (
+    "📅 Davrni yozing: <code>01.10 - 21.10</code> (o'tgan sanalar, bugungacha)."
+)
+REPORT_RANGE_FUTURE: Final = (
+    "Hisobot faqat bugungacha bo'lgan sanalar uchun: tugash sanasi bugundan keyin bo'lmasin."
+)
+REPORT_NO_CHART: Final = "📊 Grafik uchun kamida bitta yopilgan signal (yoki kesim) kerak."
+REPORT_CHART_CALIBRATION: Final = "📉 Kalibratsiya: model va'dasi va haqiqat"
+REPORT_CHART_SEGMENTS: Final = "🧩 Yield: {group} bo'yicha"
+EXPORT_CAPTION_SIGNALS: Final = "📤 Signallar (CSV)"
+EXPORT_CAPTION_BETS: Final = "📤 Stavkalar (CSV)"
+EXPORT_INTRO: Final = "📤 Eksport tayyorlanmoqda…"

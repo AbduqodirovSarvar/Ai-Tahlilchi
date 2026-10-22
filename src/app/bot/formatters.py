@@ -78,6 +78,12 @@ def units(value: Decimal) -> str:
     return f"{value.normalize():f}"
 
 
+def signed_units(value: Decimal) -> str:
+    """``+2.3`` / ``-1`` / ``0``: a profit in units with an explicit sign."""
+    text = units(value)
+    return f"+{text}" if value > 0 else text
+
+
 def money(value: Decimal | None) -> str:
     """Amount with thousands separated by spaces, or "kiritilmagan"."""
     if value is None:

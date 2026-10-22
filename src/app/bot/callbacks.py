@@ -205,6 +205,19 @@ class BankCb(CallbackData, prefix="bk"):
     value: str = ""
 
 
+class ReportCb(CallbackData, prefix="hr"):
+    """📈 Hisobot buttons.
+
+    ``show`` renders the report for ``period`` (``7``/``30``/``all``/``c``) sliced by ``group``
+    (a ``ReportGroup`` value, empty = none); ``custom`` asks for a typed range; ``chart``
+    sends the PNGs of the same report; ``export`` sends the CSV files.
+    """
+
+    action: str
+    period: str = "7"
+    group: str = ""
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 
