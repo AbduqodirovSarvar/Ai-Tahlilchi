@@ -104,6 +104,11 @@ class LlmBudget:
         self._tokens = 0
         self._journal: deque[JournalEntry] = deque(maxlen=JOURNAL_CAPACITY)
 
+    @property
+    def limits(self) -> LlmLimits:
+        """The daily allowance this budget enforces."""
+        return self._limits
+
     def _roll_day(self) -> None:
         today = self._clock().date()
         if today != self._day:

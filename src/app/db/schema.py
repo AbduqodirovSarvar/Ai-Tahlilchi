@@ -362,6 +362,15 @@ class SignalRow(TimestampMixin, Base):
     min_ev: Mapped[float | None]
     odds_min: Mapped[float | None]
     odds_max: Mapped[float | None]
+    # The odds the user was first told (set with recommended_at, never changed): profit and
+    # CLV are judged on these while ``odds`` follows recalculations (decision #17, 0007).
+    recommended_odds: Mapped[float | None]
+    # Odds at which the selection has zero EV for the model (differs from 1/p_model on
+    # quarter-line Asian picks); NULL = unknown, readers fall back to 1/p_model (0007).
+    fair_odds: Mapped[float | None]
+    # When the bookmaker price behind ``odds`` was taken (the card's "data as of"); NULL for
+    # rows from before 0007.
+    quoted_at: Mapped[datetime | None]
 
     fixture: Mapped[FixtureRow] = relationship(lazy="raise")
 
@@ -478,6 +487,9 @@ class LedgerRow(Base):
     claimed_at: Mapped[datetime]
     done_at: Mapped[datetime | None]
     detail: Mapped[str | None] = mapped_column(Text)
+    # Failed attempts so far and when the next one may start (exponential backoff, 0007).
+    attempts: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    retry_after: Mapped[datetime | None]
 
 
 # --------------------------------------------------------------------------- feedback loop

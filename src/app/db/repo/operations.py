@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db._sql import table_of
 from app.db.enums import Outcome, RecalcKind
 from app.db.repo.records import RecalcTask, UserBetRecord
-from app.db.schema import ScheduledRecalcRow, UserBetRow
+from app.db.schema import ScheduledRecalcRow, SignalResultRow, UserBetRow
 
 DEFAULT_CLAIM_LEASE: Final = timedelta(minutes=15)
 DEFAULT_CLAIM_LIMIT: Final = 50
@@ -126,6 +126,25 @@ async def release_recalc(session: AsyncSession, task_id: int, *, claimed_at: dat
             ScheduledRecalcRow.done_at == claimed_at,
         )
         .values(done_at=None)
+    )
+    return bool(getattr(result, "rowcount", 0))
+
+
+async def reschedule_recalc(
+    session: AsyncSession, task_id: int, *, run_at: datetime, claimed_at: datetime
+) -> bool:
+    """Give a failed task back to run again at ``run_at`` (a backoff), not at once.
+
+    Only the current owner (matching ``claimed_at``) can move it; ``False`` otherwise.
+    """
+    result = await session.execute(
+        update(ScheduledRecalcRow)
+        .where(
+            ScheduledRecalcRow.id == task_id,
+            ScheduledRecalcRow.done == false(),
+            ScheduledRecalcRow.done_at == claimed_at,
+        )
+        .values(run_at=run_at, done_at=None)
     )
     return bool(getattr(result, "rowcount", 0))
 
@@ -251,6 +270,22 @@ async def bets_for_signal(session: AsyncSession, signal_id: int) -> list[UserBet
     """Every bet placed on a signal (settlement), oldest first."""
     rows = await session.scalars(
         select(UserBetRow).where(UserBetRow.signal_id == signal_id).order_by(UserBetRow.id)
+    )
+    return [_bet(row) for row in rows]
+
+
+async def open_bets_of_settled_signals(session: AsyncSession) -> list[UserBetRecord]:
+    """Unsettled bets whose signal already has a result (a bet placed after settlement).
+
+    Settlement closes them with the stored result; normally there are none.
+    """
+    rows = await session.scalars(
+        select(UserBetRow)
+        .where(
+            UserBetRow.outcome.is_(None),
+            UserBetRow.signal_id.in_(select(SignalResultRow.signal_id)),
+        )
+        .order_by(UserBetRow.id)
     )
     return [_bet(row) for row in rows]
 
