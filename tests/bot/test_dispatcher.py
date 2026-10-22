@@ -70,7 +70,6 @@ async def test_help_lists_commands_and_glossary(harness: BotHarness, command: st
     "item",
     [
         texts.MENU_TEMPLATES,
-        texts.MENU_WATCHLIST,
         texts.MENU_REPORT,
     ],
 )

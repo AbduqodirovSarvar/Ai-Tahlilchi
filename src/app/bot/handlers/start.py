@@ -19,7 +19,6 @@ from app.bot.states import drop_draft, load_draft
 
 PLACEHOLDER_ITEMS: Final = (
     texts.MENU_TEMPLATES,
-    texts.MENU_WATCHLIST,
     texts.MENU_REPORT,
 )
 

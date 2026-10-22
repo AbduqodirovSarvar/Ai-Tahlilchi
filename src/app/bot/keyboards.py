@@ -425,7 +425,8 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
                 [
                     _button(texts.BTN_DETAIL, CardCb(action="detail", signal_id=signal_id)),
                     _button(texts.BTN_HIDE, CardCb(action="hide", signal_id=signal_id)),
-                ]
+                ],
+                [_button(texts.BTN_WATCH_CARD, CardCb(action="watch", signal_id=signal_id))],
             ]
         )
     return _markup(
@@ -438,6 +439,7 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
                 _button(texts.BTN_BET, CardCb(action="bet", signal_id=signal_id)),
                 _button(texts.BTN_HIDE, CardCb(action="hide", signal_id=signal_id)),
             ],
+            [_button(texts.BTN_WATCH_CARD, CardCb(action="watch", signal_id=signal_id))],
         ]
     )
 

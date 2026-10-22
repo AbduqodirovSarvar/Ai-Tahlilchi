@@ -168,6 +168,20 @@ class CustomCb(CallbackData, prefix="cu"):
     index: int = 0
 
 
+class WatchCb(CallbackData, prefix="wl"):
+    """⭐ Sevimlilar buttons.
+
+    ``kind`` is ``t`` (team) or ``l`` (league); ``key`` is ``crc32(entity_id)`` in hex for
+    entries, an option index for pick lists and the signal id on a card; ``flag`` names a
+    notification (``l``/``o``/``r``).
+    """
+
+    action: str
+    kind: str = ""
+    key: str = ""
+    flag: str = ""
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 

@@ -26,6 +26,7 @@ from app.bot.handlers import (
     start,
     status,
     today,
+    watch,
 )
 from app.bot.jobs import BackgroundJobs
 from app.bot.middleware import (
@@ -103,6 +104,7 @@ def build_dispatcher(
         bets,
         detail,
         custom,
+        watch,
         signals,
         fallback,
     ):

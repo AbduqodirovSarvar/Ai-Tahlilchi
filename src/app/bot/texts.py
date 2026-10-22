@@ -7,7 +7,15 @@ or ``&``; values substituted into ``{placeholders}`` are escaped by the formatte
 from typing import Final
 
 from app.domain import MarketType, Selection, Sport
-from app.services.interfaces import ConfidenceLevel, FormResult, ResultMark, RiskProfile, SortKey
+from app.services.interfaces import (
+    ConfidenceLevel,
+    FormResult,
+    ResultMark,
+    RiskProfile,
+    SortKey,
+    WatchKind,
+    WatchNotification,
+)
 
 # --------------------------------------------------------------------------- main menu
 MENU_ANALYSIS: Final = "📊 Tahlil"
@@ -805,3 +813,51 @@ CUSTOM_EMPTY_RESULT: Final = (
     "🤷 <b>Natija yo'q.</b> Tanlangan o'yinlar uchun bukmeker narxi topilmadi "
     "yoki o'yin boshlangan. Boshqa o'yinni tanlab ko'ring."
 )
+
+
+# --------------------------------------------------------------------------- watchlist (F7.3)
+WATCH_TITLE: Final = "⭐ <b>Sevimlilar</b> — {count} ta"
+WATCH_EMPTY: Final = (
+    "⭐ <b>Sevimlilar</b>\n"
+    "Hali hech narsa kuzatilmayapti.\n"
+    "👕 Jamoa yoki 🏆 ligani qo'shing, yoki <code>/kuzat Barcelona</code> deb yozing."
+)
+WATCH_FOOTER: Final = (
+    "Sevimli jamoa yoki liga o'yini kunlik xabarga <b>har doim</b> kiritiladi "
+    "(EV past bo'lsa ham, ⭐ belgisi bilan)."
+)
+WATCH_ITEM_LINE: Final = "{icon} <b>{name}</b> — {flags}"
+WATCH_FLAGS_NONE: Final = "bildirishnomasiz"
+WATCH_MORE: Final = "…va yana {count} ta"
+WATCH_KIND_ICONS: Final[dict[WatchKind, str]] = {WatchKind.TEAM: "👕", WatchKind.LEAGUE: "🏆"}
+WATCH_NOTIFY_LABELS: Final[dict[WatchNotification, str]] = {
+    WatchNotification.LINEUPS: "📋 Tarkib",
+    WatchNotification.ODDS_MOVE: "📉 Koeffitsient",
+    WatchNotification.RESULT: "🏁 Natija",
+}
+WATCH_ITEM_TITLE: Final = (
+    "{icon} <b>{name}</b> ({sport})\n"
+    "Qaysi bildirishnomalar kelsin? Tugmani bossangiz yoqiladi/o'chadi."
+)
+BTN_WATCH_ADD_TEAM: Final = "➕ Jamoa"
+BTN_WATCH_ADD_LEAGUE: Final = "➕ Liga"
+BTN_WATCH_REMOVE: Final = "🗑 Olib tashlash"
+BTN_WATCH_BACK: Final = "⬅️ Sevimlilarga"
+BTN_WATCH_CARD: Final = "⭐ Kuzatish"
+WATCH_ASK_TEAM: Final = (
+    "👕 Kuzatmoqchi bo'lgan jamoa nomini yozing, masalan <code>Barcelona</code>."
+)
+WATCH_PICK_TEAM: Final = "👕 «{query}» bo'yicha topildi. Jamoani tanlang:"
+WATCH_PICK_LEAGUE: Final = "🏆 Kuzatmoqchi bo'lgan ligani tanlang:"
+WATCH_NO_LEAGUES: Final = "🏆 Liga topilmadi. Sozlamalarda sport turini tekshiring."
+WATCH_NOT_FOUND: Final = "🔎 «{query}» jamoasi topilmadi. Boshqacha yozib ko'ring."
+WATCH_ADDED: Final = "⭐ <b>{name}</b> sevimlilarga qo'shildi."
+WATCH_REMOVED: Final = "🗑 <b>{name}</b> sevimlilardan olib tashlandi."
+WATCH_GONE: Final = "ℹ️ Bu element endi sevimlilarda yo'q."
+WATCH_CARD_ASK: Final = "⭐ <b>{fixture}</b> — nimani kuzatamiz?"
+WATCH_CARD_ON: Final = "✅ {name} (olib tashlash)"
+WATCH_CARD_OFF: Final = "⭐ {name}"
+WATCH_CARD_UNKNOWN: Final = "ℹ️ Katalogda topilmadi: {names}."
+WATCH_STORED: Final = "Saqlandi"
+WATCH_ADDED_ALERT: Final = "⭐ Sevimlilarga qo'shildi"
+WATCH_REMOVED_ALERT: Final = "🗑 Sevimlilardan olib tashlandi"

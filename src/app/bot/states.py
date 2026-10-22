@@ -61,6 +61,12 @@ class CustomFlow(StatesGroup):
     running = State()
 
 
+class WatchFlow(StatesGroup):
+    """⭐ Sevimlilar: waiting for a team name to add."""
+
+    team_query = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 
