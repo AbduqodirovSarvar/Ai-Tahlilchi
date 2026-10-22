@@ -1138,8 +1138,8 @@ class BankView:
     Bank semantics (v1.2): ``UserSettingsView.bank`` is the **starting bank**. ``balance`` =
     starting bank + the profit of every *settled* bet of the user (open stakes do not reduce
     it). Editing the bank therefore re-bases the whole history: ``history`` is recomputed
-    from the new starting bank, no balance snapshots are kept. Days are the local dates of
-    the bets' matches; ``loss_today``/``loss_this_week`` are net losses over those days.
+    from the new starting bank, no balance snapshots are kept. Days are the local dates on
+    which the bets were settled; ``loss_today``/``loss_this_week`` are net losses over those days.
     """
 
     balance: Decimal | None

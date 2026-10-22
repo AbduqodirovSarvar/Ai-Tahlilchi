@@ -3,7 +3,7 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 + v1.1 qo'shimchalari (orkestr tasdiqlagan, 2026-10-21)**. 6 (model API) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 7 (LLM API) — **frozen v1 taklif (T4, orkestr ko'rib chiqadi)**.
+**Umumiy holat:** 1–3 (domen, `SportAdapter`, baza sxemasi) — **frozen v1, orkestr tomonidan tasdiqlangan (2026-10-21)**. 4–5 (servis shartnomasi va soxta servis) — **frozen v1 + v1.1 qo'shimchalari (orkestr tasdiqlagan, 2026-10-21); v1.2 (T4: Notifier, BusyError, ...) orkestr tasdig'ini kutmoqda**. 6 (model API) — **frozen v1 (orkestr tasdiqlagan, 2026-10-21)**. 7 (LLM API) — **frozen v1 taklif (T4, orkestr ko'rib chiqadi)**.
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
@@ -141,7 +141,7 @@ Barcha funksiyalar `async`, birinchi argument `AsyncSession`, **chaqiruvchining 
 - `app.sports.football.FootballAdapter(client, *, catalog, identity, purpose, clock)` — `SportAdapter` + `with_expected_goals(results)`, `fetch_injuries(fixture)`, `fetch_lineups(fixture)`, `for_purpose(MANUAL)`, `with_identity(IdentityMap)`. Jamoa moslash: `app.sports.team_matching.match_teams(...) -> TeamMatchReport`, `IdentityMap.from_report(report, LeagueCatalog())`.
 
 ## 4. Servis shartnomasi — `src/app/services/interfaces.py`
-**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.1 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.2 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
 
 Bot tizim bilan **faqat** shu modul orqali gaplashadi (domen qiymat turlari `Sport`, `Market`, `MarketType`, `Selection` ham ishlatiladi). Barcha DTO lar `@dataclass(frozen=True, slots=True)`; noto'g'ri kiritma konstruktorda `ValidationFailedError` beradi (noto'g'ri so'rov obyekti umuman yaratilmaydi). Barcha metodlar `async`.
 
@@ -295,13 +295,27 @@ class SystemStatusService(Protocol):
 
 **Xatti-harakat o'zgarishlari (nomlar o'zgarmagan, semantika aniqlashtirildi):** horizon `today+14` dan `today+13` ga (14 kun, bugun bilan); `scope=all` endi `settings.league_ids` ga amal qiladi; hisobotlar yashirilgan signallarni ham sanaydi, retro va no-value signallarni sanamaydi; sevimlilar `max_signals`/`matched` dan tashqarida; `list_fixtures` filtrsiz bo'lsa `settings.league_ids`; recalc verdikti yaratilish chegaralari bo'yicha; progress callback xatosi ishni to'xtatmaydi.
 
-**Rejalashtirilgan qo'shimchalar (T4, hali amalga oshirilmagan)**
-- `Notifier` porti (pipeline → bot: kunlik xabar, pre-match, sevimlilar bildirishnomalari, kecha yakuni).
-- So'rovsiz `/qayta` (bugungi / oxirgi signallar bo'yicha qayta hisob, `query_id` siz).
-- `ServiceUnavailableError` (tashqi API/baza ishlamay qolganda) va bitta foydalanuvchi uchun bir vaqtda bitta `analyze` qoidasi.
-- `place_bet` idempotentligi (takroriy bosish dublikat yaratmaydi) va bank semantikasi (balans qachon o'zgaradi, bank o'zgartirilganda tarix).
-- Cashout'ni `BetService` da (stavka bo'yicha haqiqiy summa).
-- Ekspress baholash (§6.11), stavkalar CSV eksporti, `/ozgarishlar` jurnali (§6.13 C), shablonlarni jadval bo'yicha avtomatik ishga tushirish.
+**v1.2 qo'shimchalari (T4, faqat qo'shish; mavjud nomlar o'zgarmagan)** — qarorlar: [ADR 0004 §11](adr/0004-service-contract.md), [ADR 0008](adr/0008-pipeline-and-real-services.md)
+
+| Nom | Turi | Ma'nosi |
+|---|---|---|
+| `Notifier` (Protocol) | port, pipeline → bot | `send_daily_digest(user_id, DailyDigest, *, key)`, `send_signal_update(user_id, SignalUpdate, *, key, reply_to=None)`, `send_signal_cancelled(user_id, SignalCancelled, *, key, reply_to=None)`, `send_watchlist_event(user_id, WatchlistEvent, *, key)`, `send_result_settled(user_id, SettledNotice, *, key)`, `alert_admin(AdminAlert)`. Xabar yuborilgan bo'lsa `MessageRef(chat_id, message_id)` qaytaradi (keyingi yangilanish unga javob sifatida), yetkazib bo'lmasa (foydalanuvchi botni bloklagan) `None`; bu holatda istisno **tashlamaydi** |
+| `DailyDigest`, `SignalUpdate`, `SignalCancelled`, `WatchlistEvent`, `SettledNotice`, `AdminAlert`, `MessageRef`, `UpdateKind` (`before_24h`/`prematch`), `CancelReason` (`postponed`/`cancelled`/`abandoned`) | frozen DTO lar | xabar yuklari |
+| `DeliveryKey(job, day, user_id, subject)` | frozen DTO | idempotentlik kaliti `(job, kun, foydalanuvchi, signal)`. **Idempotentlikni chaqiruvchi (pipeline) ta'minlaydi**: kalit ledger'da avval egallanadi, yuborilgach yakunlanadi; notifier kalitni faqat loglash uchun oladi, lekin takroriy kalitga ham bardoshli bo'lishi kerak |
+| **Tinch soatlar** | qoida | **Notifier'ni chaqiruvchi (pipeline) qo'llaydi, notifier emas.** Kunlik xabar tinch soat tugaguncha ushlab turiladi (kechikish `daily_catch_up` = 12 soatgacha, undan keyin o'tkazib yuboriladi); 24 soat/pre-match/sevimlilar/natija xabarlari tinch soatda **tashlanadi** (qayta hisobning o'zi bajariladi, raqamlar yangilanadi); admin ogohlantirishlari hech qachon tinch emas |
+| `ServiceUnavailableError(component, detail="")` | xato | tashqi API yoki baza ishlamaydi; bot "keyinroq urinib ko'ring" deydi, holat saqlanadi |
+| `BusyError(user_id)` | xato | bir foydalanuvchi uchun bir vaqtda bitta `analyze`; ikkinchisi navbatga qo'yilmaydi, rad etiladi (ikki marta bosish API byudjetini ikki marta sarflamasligi uchun) |
+| `AnalysisService.recalc_window(user_id, DateSpec, *, progress=None) -> RecalcBatch` | metod | so'rovsiz `/qayta`: oynadagi tavsiya qilingan signallar (yashirilganlar ham, retro hech qachon). `RecalcBatch.query_id` — oynaning tavsifiy id si |
+| `AnalysisService.recalc_signals(user_id, signal_ids, *, progress=None) -> RecalcBatch` | metod | berilgan signallar; noma'lum yoki begona id lar o'tkazib yuboriladi. Cooldown va boshlangan o'yin qoidalari `recalc_query` bilan bir xil |
+| `SignalService.get_signals(user_id, ids) -> tuple[SignalView, ...]` | metod | ommaviy olish; `ids` tartibida; noma'lum/begona id lar tashlab ketiladi (eskirgan tugmalar ro'yxati baribir ko'rsatiladi) |
+| `BetDraft.client_token: str \| None` (≤ 64 belgi) | maydon | `place_bet` idempotentligi: bir foydalanuvchi bir xil token bilan qayta yuborsa, birinchi yozilgan stavka qaytadi, dublikat yaratilmaydi. Token bo'lmasa har chaqiruv yangi stavka. Tavsiya: callback query id |
+| Bank semantikasi (`BankView` docstring) | qoida | `UserSettingsView.bank` — **boshlang'ich bank**; `balance` = boshlang'ich bank + barcha *yopilgan* stavkalar foydasi (ochiq stavkalar balansni kamaytirmaydi). Bankni o'zgartirish butun tarixni qayta asoslaydi (`history` yangi boshlang'ich bankdan qayta hisoblanadi, balans snapshotlari saqlanmaydi). Kunlar — stavka **yopilgan** mahalliy sana; zarar limitlari shu kunlar bo'yicha sof zarar |
+| `DateWindow.ensure_within_lookback(today)`, `DateWindow.ensure_allowed(today)` | metodlar | `MAX_RETRO_LOOKBACK_DAYS` (90) va horizon qoidalari DTO'da; servis har so'rovda `ensure_allowed` ni chaqiradi (`estimate_cost`, `analyze`, `recalc_window`, `list_fixtures`). Oyna uzunligi (31) `DateWindow` konstruktorida allaqachon majburlanadi |
+| `MAX_BET_TOKEN_LENGTH = 64` | konstanta | |
+
+`app.services.report_math` (hisobot arifmetikasi: `build_report`, `day_summary`, `export_file`) fake va real servis uchun **umumiy** (avval `_fake_metrics`). Fake ga `FakeNotifier` (chaqiruvlarni yozib boradi) qo'shildi.
+
+Hali qilinmagan (keyingi to'lqinlar): cashout'ni `BetService` da (stavka bo'yicha haqiqiy summa), ekspress baholash (§6.11), stavkalar CSV eksporti, `/ozgarishlar` jurnali (§6.13 C), shablonlarni jadval bo'yicha avtomatik ishga tushirish (jadval saqlanadi, lekin ishga tushirilmaydi).
 
 ## 5. Soxta servis — `src/app/services/fake.py`
 **Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3) · **Versiya:** 1.1 · **Egasi:** pipeline-engineer
@@ -311,7 +325,8 @@ class SystemStatusService(Protocol):
 - Byudjet: kunlik limit 100, avtomatik sarf 40, qo'lda zaxira 30 so'rov; 10 daqiqalik kesh. Cooldown, progress, idempotentlik va xatolar shartnomadagidek.
 - Dunyo injeksiya qilingan soatga ergashadi: mahalliy kun o'zgarsa qayta yaratiladi (bugundan −7..+14 kun), avval ko'rilgan o'yinlar esa saqlanib qoladi (eski signallar va batafsil karta ishlayveradi). Xokkey `list_sports` da `experimental=True`, qolgan (futbol/xokkeydan boshqa) sportlar `available=False`.
 - I/O, tarmoq, `sleep` yo'q. `RecalcVerdict.CANCELLED` va `failed_fixtures > 0` holatlarini soxta servis hosil qilmaydi (real servisda: o'yin qoldirilgan / tarkib, qisman nosozlik).
-- Qatlam himoyasi: `import-linter` qoidasi "production code never depends on the fake services" — `app.pipeline`, `app.services.interfaces`, `app.services.errors` fake modullarni import qila olmaydi (yangi real servis modullari shu ro'yxatga qo'shiladi).
+- Qatlam himoyasi: `import-linter` qoidasi "production code never depends on the fake services" — `app.pipeline`, `app.scheduler`, `app.services.interfaces`, `app.services.errors`, `app.services.report_math`, `app.services.real` fake modullarni import qila olmaydi.
+- v1.2: `FakeNotifier`, `recalc_window`/`recalc_signals`, `get_signals`, `BusyError`, `client_token` va retro oynasi chegarasi fake da ham amalga oshirilgan; shartnoma testlari real servisda ham o'tadi (`tests/services/test_real_contract.py`).
 
 ## 6. Model API si — `src/app/models/__init__.py`
 **Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), v1.1 qo'shimchalari (T3 fix, orkestr ko'rib chiqadi) · **Versiya:** 1.1 · **Egasi:** quant-modeler · Qarorlar: [ADR 0003](adr/0003-dixon-coles-and-devig.md), [ADR 0005](adr/0005-backtest-methodology.md) · **Import:** `from app.models import ...`
@@ -378,3 +393,4 @@ LLM qadami **hech qachon istisno ko'tarmaydi** va pipeline'ni to'xtatmaydi: o'ch
 | 2026-10-21 | 6. Model API | v1.1 (T3 fix, faqat qo'shish/aniqlashtirish): `complete_quotes(..., kickoffs=None)` — kickoffdan keyingi qaror vaqti narxlari tashlanadi (QA F-3); ishonch farqi chegarasi qat'iy va 1e-9 gacha yaxlitlangan (QA F-2); backtest: `complete_seasons`, `season_end`, `GateStatus`, `gate_passed`, darvoza qaror #11 bo'yicha | quant-modeler | orkestr (tasdiqlangan) |
 | 2026-10-21 | 4. Servis shartnomasi | v1.1 (qo'shimcha, T3 fix round): `MAX_RETRO_LOOKBACK_DAYS = 90` — retro oynaning orqaga qarash chegarasi (qaror #12); retro oyna uzunligi uchun mavjud `MAX_WINDOW_DAYS` (31) qayta ishlatiladi. Bot kalendari va matnli oraliq shuni ishlatadi; servis tomonida majburlash pipeline-engineer ishi | bot-engineer | orkestr (T3 fix round topshirig'i) |
 | 2026-10-21 | 7. LLM API | v1 taklif yozildi (T4): `LlmService.review_candidates` / `postmortem`, kirish DTO lari, `LlmReview`, fallback sabablari, kunlik limit, golden baholash ([ADR 0009](adr/0009-llm-integration.md)) | llm-engineer | orkestr ko'rib chiqadi |
+| 2026-10-22 | 4. Servis shartnomasi, 5. Soxta servis | v1.2 (T4, faqat qo'shish): `Notifier` porti va DTO lari, `DeliveryKey`, `ServiceUnavailableError`, `BusyError`, `recalc_window`/`recalc_signals`, `get_signals`, `BetDraft.client_token`, bank semantikasi, `DateWindow.ensure_allowed`/`ensure_within_lookback`, `FakeNotifier`; `_fake_metrics` → `report_math` ([ADR 0008](adr/0008-pipeline-and-real-services.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
