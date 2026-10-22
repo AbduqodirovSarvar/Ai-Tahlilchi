@@ -182,6 +182,17 @@ class WatchCb(CallbackData, prefix="wl"):
     flag: str = ""
 
 
+class TplCb(CallbackData, prefix="tp"):
+    """💾 Shablonlarim buttons.
+
+    ``id`` is the template id; ``value`` is a weekday (``day``) or a time preset index (``time``).
+    """
+
+    action: str
+    id: int = 0
+    value: int = 0
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 

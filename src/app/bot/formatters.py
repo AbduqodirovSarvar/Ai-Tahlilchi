@@ -20,6 +20,7 @@ from app.services.errors import BudgetExceededError, CooldownActiveError, Valida
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
     MAX_ODDS_LIMIT,
+    MAX_RETRO_LOOKBACK_DAYS,
     MAX_SCOPE_IDS,
     MAX_TEMPLATE_NAME_LENGTH,
     MAX_WINDOW_DAYS,
@@ -442,6 +443,8 @@ def budget_message(error: BudgetExceededError) -> str:
 
 def validation_message(error: ValidationFailedError) -> str:
     """User message for the offending field (generic for fields the bot cannot fix)."""
+    if error.field == "date_from" and "in the past" in error.message:
+        return texts.PARSE_TOO_OLD.format(max_lookback=MAX_RETRO_LOOKBACK_DAYS)
     template = texts.VALIDATION_BY_FIELD.get(error.field)
     if template is None:
         return texts.VALIDATION_GENERIC

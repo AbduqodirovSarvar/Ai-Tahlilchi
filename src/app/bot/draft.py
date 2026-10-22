@@ -6,10 +6,12 @@ cannot be decoded (old format, storage wiped) is reported as :class:`StaleDraftE
 the user is asked to start again.
 """
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from typing import Any, Self
 
+from app.bot import texts
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
     AnalysisQuery,
@@ -51,6 +53,7 @@ class WizardDraft:
     per_day: bool = False
     markets: tuple[str, ...] = (MarketType.MATCH_RESULT.value,)
     sort: str = SortKey.EV.value
+    include_no_value: bool = False
     message_id: int | None = None
     editing: bool = False
     defaults: dict[str, Any] = field(default_factory=dict)
@@ -188,4 +191,31 @@ class WizardDraft:
             max_signals=self.max_signals,
             per_day=self.per_day and self.max_signals is not None,
             sort=self.sort_key,
+            include_no_value=self.include_no_value,
         )
+
+    def with_query(self, query: AnalysisQuery, labels: Mapping[str, str]) -> Self:
+        """Copy holding everything ``query`` asks for (a saved template run in the wizard).
+
+        ``labels`` names the scope ids for display; unnamed ids get a neutral label so ids
+        and labels always stay aligned.
+        """
+        ids = tuple(sorted(query.scope_ids))
+        draft = replace(
+            self,
+            sports=tuple(sorted(sport.value for sport in query.sports)),
+            min_probability=query.min_probability,
+            min_ev=query.min_ev,
+            scope=query.scope.value,
+            scope_ids=ids,
+            scope_labels=tuple(labels.get(item, texts.TPL_UNKNOWN_ITEM) for item in ids),
+            options=(),
+            page=0,
+            max_signals=query.max_signals,
+            per_day=query.per_day,
+            markets=tuple(sorted(market.value for market in query.markets)),
+            sort=query.sort.value,
+            include_no_value=query.include_no_value,
+            editing=False,
+        )
+        return draft.with_dates(query.dates)

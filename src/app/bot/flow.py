@@ -16,6 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import TelegramObject
 
 from app.bot.jobs import BackgroundJobs
+from app.bot.notices import OnceNotices
 from app.services.interfaces import Services, UserSettingsView
 
 type Clock = Callable[[], datetime]
@@ -33,6 +34,7 @@ class FlowContext:
     state: FSMContext
     jobs: BackgroundJobs
     clock: Clock
+    notices: OnceNotices
 
     async def settings(self) -> UserSettingsView:
         """The user's current settings."""
@@ -58,5 +60,6 @@ class FlowContextMiddleware(BaseMiddleware):
             state=data["state"],
             jobs=data["jobs"],
             clock=data["clock"],
+            notices=data["notices"],
         )
         return await handler(event, data)

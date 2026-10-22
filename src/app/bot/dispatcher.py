@@ -25,6 +25,7 @@ from app.bot.handlers import (
     signals,
     start,
     status,
+    templates,
     today,
     watch,
 )
@@ -105,6 +106,7 @@ def build_dispatcher(
         detail,
         custom,
         watch,
+        templates,
         signals,
         fallback,
     ):

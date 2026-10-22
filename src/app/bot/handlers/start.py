@@ -17,10 +17,7 @@ from app.bot.formatters import escape
 from app.bot.messaging import drop_keyboard, send_html
 from app.bot.states import drop_draft, load_draft
 
-PLACEHOLDER_ITEMS: Final = (
-    texts.MENU_TEMPLATES,
-    texts.MENU_REPORT,
-)
+PLACEHOLDER_ITEMS: Final = (texts.MENU_REPORT,)
 
 
 async def _leave_flows(message: Message, state: FSMContext) -> bool:

@@ -861,3 +861,61 @@ WATCH_CARD_UNKNOWN: Final = "ℹ️ Katalogda topilmadi: {names}."
 WATCH_STORED: Final = "Saqlandi"
 WATCH_ADDED_ALERT: Final = "⭐ Sevimlilarga qo'shildi"
 WATCH_REMOVED_ALERT: Final = "🗑 Sevimlilardan olib tashlandi"
+
+
+# --------------------------------------------------------------------------- templates (F7.4)
+TPL_TITLE: Final = "💾 <b>Shablonlarim</b> — {count} ta"
+TPL_EMPTY: Final = (
+    "💾 <b>Shablonlarim</b>\n"
+    "Hali shablon yo'q.\n"
+    "📊 Tahlil → tasdiqlash ekranida «💾 Shablon sifatida saqlash» tugmasini bosing."
+)
+TPL_LINE: Final = "• <b>{name}</b> — {summary}{schedule}"
+TPL_SUMMARY: Final = "{dates} · {sports} · ≥ {probability} · EV ≥ {ev}"
+TPL_SCHEDULE_SHORT: Final = " · 🗓 {days} {time}"
+TPL_MORE: Final = "…va yana {count} ta"
+TPL_DATES: Final[dict[str, str]] = {
+    "today": "bugun",
+    "tomorrow": "ertaga",
+    "weekend": "dam olish kunlari",
+    "next_days": "{days} kun",
+    "range": "{start}–{end}",
+}
+TPL_DETAIL: Final = (
+    "💾 <b>{name}</b>\n"
+    "📅 {dates} · {sports}\n"
+    "🎯 ≥ {probability} · EV ≥ {ev}\n"
+    "🔎 {scope} · 📊 {markets}\n"
+    "🔢 {count} · ↕️ {sort}\n"
+    "🗓 Jadval: {schedule}"
+)
+TPL_NO_SCHEDULE: Final = "yo'q"
+TPL_SCHEDULE_TEXT: Final = "{days}, {time}"
+TPL_UNKNOWN_ITEM: Final = "tanlangan element"
+BTN_TPL_RUN: Final = "▶️ Ishga tushirish"
+BTN_TPL_SCHEDULE: Final = "🗓 Jadval"
+BTN_TPL_DELETE: Final = "🗑 O'chirish"
+BTN_TPL_BACK: Final = "⬅️ Shablonlarga"
+BTN_TPL_DELETE_YES: Final = "🗑 Ha, o'chirish"
+BTN_TPL_DELETE_NO: Final = "↩️ Yo'q"
+TPL_DELETE_ASK: Final = "🗑 <b>{name}</b> shabloni o'chirilsinmi? Qaytarib bo'lmaydi."
+TPL_DELETED: Final = "🗑 Shablon o'chirildi: <b>{name}</b>"
+TPL_SCHEDULE_TITLE: Final = (
+    "🗓 <b>{name}</b> — jadval\n"
+    "Kunlarni belgilang va vaqtni tanlang (mahalliy vaqt, {zone}).\n"
+    "Tanlangan: <b>{days}</b> · <b>{time}</b>"
+)
+TPL_SCHEDULE_NOTE: Final = (
+    "ℹ️ Jadval saqlanadi, lekin avtomatik ishga tushirish hozircha ulanmagan: "
+    "tahlilni shablondan qo'lda ishga tushiring."
+)
+TPL_NO_DAYS: Final = "kun tanlanmagan"
+BTN_TPL_SAVE_SCHEDULE: Final = "💾 Saqlash"
+BTN_TPL_CLEAR_SCHEDULE: Final = "🚫 Jadvalni o'chirish"
+BTN_TPL_TYPE_TIME: Final = "✏️ Vaqt kiritish"
+TPL_TIME_PROMPT: Final = "✏️ Jadval vaqtini yozing, masalan: <code>08:30</code>"
+TPL_SCHEDULE_SAVED: Final = "🗓 Jadval saqlandi: <b>{schedule}</b>."
+TPL_SCHEDULE_CLEARED: Final = "🗓 <b>{name}</b>: jadval o'chirildi."
+TPL_PICK_A_DAY: Final = "Kamida bitta kunni belgilang"
+TPL_GONE: Final = "ℹ️ Bu shablon endi yo'q."
+TPL_RUNNING: Final = "💾 Shablon: <b>{name}</b>"

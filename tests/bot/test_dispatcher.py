@@ -69,7 +69,6 @@ async def test_help_lists_commands_and_glossary(harness: BotHarness, command: st
 @pytest.mark.parametrize(
     "item",
     [
-        texts.MENU_TEMPLATES,
         texts.MENU_REPORT,
     ],
 )

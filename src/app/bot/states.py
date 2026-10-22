@@ -67,6 +67,12 @@ class WatchFlow(StatesGroup):
     team_query = State()
 
 
+class TemplateFlow(StatesGroup):
+    """💾 Shablonlar: waiting for a typed schedule time."""
+
+    time_input = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 
