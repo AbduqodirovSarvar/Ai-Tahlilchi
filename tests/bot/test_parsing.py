@@ -11,6 +11,7 @@ from app.bot.parsing import (
     MAX_QUICK_LENGTH,
     InputError,
     check_window,
+    parse_bet_input,
     parse_count,
     parse_date,
     parse_date_range,
@@ -319,3 +320,36 @@ def test_date_range_parser_never_crashes(text: str) -> None:
         return
     assert isinstance(start, date)
     assert isinstance(end, date)
+
+
+# --------------------------------------------------------------------------- bet input
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("1.90", (1.9, None)),
+        ("1,90", (1.9, None)),
+        ("  2.05   50000 ", (2.05, Decimal("50000"))),
+        ("1.90 50 000", (1.9, Decimal("50000"))),
+        ("1.01", (1.01, None)),
+    ],
+)
+def test_parse_bet_input(text: str, expected: tuple[float, Decimal | None]) -> None:
+    assert parse_bet_input(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["", "   ", "abc", "1.00", "0.5", "1000", "nan", "1.9 -5", "1.9 abc"]
+)
+def test_parse_bet_input_rejects_bad_values(text: str) -> None:
+    with pytest.raises(InputError):
+        parse_bet_input(text)
+
+
+@given(st.text(max_size=60))
+def test_parse_bet_input_never_crashes(text: str) -> None:
+    try:
+        odds, stake = parse_bet_input(text)
+    except InputError:
+        return
+    assert odds > 1.0
+    assert stake is None or stake > 0

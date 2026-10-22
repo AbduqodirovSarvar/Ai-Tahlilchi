@@ -5,7 +5,7 @@ stored result.
 """
 
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -53,16 +53,23 @@ class ProgressReporter:
     Edits are throttled and never raise: a failed edit must not abort the analysis.
     """
 
-    def __init__(self, message: Message, monotonic: Monotonic = time.monotonic) -> None:
-        """``message`` is the progress message to edit."""
+    def __init__(
+        self,
+        message: Message,
+        monotonic: Monotonic = time.monotonic,
+        *,
+        stages: Mapping[str, str] = texts.PROGRESS_STAGES,
+    ) -> None:
+        """``message`` is the progress message to edit; ``stages`` are its texts per stage."""
         self._message = message
+        self._stages = stages
         self._monotonic = monotonic
         self._last_text = message.text or ""
         self._last_edit = monotonic()
 
     async def __call__(self, progress: AnalysisProgress) -> None:
         """Show ``progress`` unless an edit happened very recently (final stage always)."""
-        template = texts.PROGRESS_STAGES[progress.stage.value]
+        template = self._stages[progress.stage.value]
         text = template.format(done=progress.done, total=progress.total)
         final = progress.stage is AnalysisStage.FINISHED
         now = self._monotonic()
@@ -145,7 +152,12 @@ async def _deliver(run: _Run, result: AnalysisResult, reporter: ProgressReporter
     done = result.fixtures_analyzed
     # No-op when the service already reported the final stage.
     await reporter(AnalysisProgress(stage=AnalysisStage.FINISHED, done=done, total=done))
-    await send_html(run.wizard_message, format_results_summary(result))
+    markup = (
+        keyboards.recalc_query_keyboard(result.query_id)
+        if result.signals and not result.retro
+        else None
+    )
+    await send_html(run.wizard_message, format_results_summary(result), markup)
     await send_result_page(run.wizard_message, ordered, session.ctx.zone, 0, stored.token)
 
 
@@ -201,11 +213,7 @@ async def send_result_page(
     ``token`` is put on the "➡️ Yana" button so it can only continue this very result.
     """
     for item in result_page(signals, zone, page, RESULTS_PAGE_SIZE):
-        markup = (
-            None
-            if item.signal is None
-            else keyboards.card_keyboard(item.signal.signal_id, retro=item.signal.retro)
-        )
+        markup = None if item.signal is None else keyboards.signal_keyboard(item.signal)
         await send_html(message, item.text, markup)
     shown = min((page + 1) * RESULTS_PAGE_SIZE, len(signals))
     remaining = len(signals) - shown

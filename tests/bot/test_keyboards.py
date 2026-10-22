@@ -2,12 +2,13 @@
 
 from datetime import date, timedelta
 
+import pytest
 from aiogram.types import InlineKeyboardMarkup
 from hypothesis import given
 from hypothesis import strategies as st
 
 from app.bot import keyboards, texts
-from app.bot.callbacks import CalendarCb
+from app.bot.callbacks import CalendarCb, RecalcAllCb, decode_ref
 from app.bot.keyboards import PickerRow
 from app.bot.states import RESULTS_TOKEN_MODULUS
 from app.domain import MarketType, Sport
@@ -16,9 +17,13 @@ from app.services.interfaces import (
     MAX_WINDOW_DAYS,
     RiskProfile,
     ScopeKind,
+    SignalSource,
+    SignalState,
     SortKey,
     SportOption,
+    is_valid_entity_id,
 )
+from tests.bot.samples import make_signal
 
 TELEGRAM_CALLBACK_LIMIT = 64
 TODAY = date(2026, 10, 21)
@@ -202,3 +207,54 @@ def test_calendar_end_is_limited_to_the_longest_window_after_the_start() -> None
 def test_calendar_start_reaches_back_exactly_the_retro_lookback() -> None:
     first, _ = keyboards.calendar_bounds(TODAY)
     assert first == TODAY - timedelta(days=MAX_RETRO_LOOKBACK_DAYS)
+
+
+# --------------------------------------------------------------------------- F6.7 / bets
+@given(query_id=st.text(min_size=1, max_size=40).filter(is_valid_entity_id))
+def test_recalc_query_keyboard_fits_and_round_trips_any_entity_id(query_id: str) -> None:
+    markup = keyboards.recalc_query_keyboard(query_id)
+
+    assert_fits(markup)
+    data = RecalcAllCb.unpack(markup.inline_keyboard[0][0].callback_data or "")
+    assert decode_ref(data.ref) == query_id
+
+
+def test_recalc_day_keyboard_fits() -> None:
+    assert_fits(keyboards.recalc_day_keyboard(date(2026, 10, 22)))
+
+
+@pytest.mark.parametrize("garbage", ["!!!", "%%%%", "ÿ", "", "/w=="])
+def test_decode_ref_rejects_garbage(garbage: str) -> None:
+    assert decode_ref(garbage) is None
+
+
+@given(
+    signal_id=st.integers(min_value=0, max_value=2**63 - 1),
+    can_use_defaults=st.booleans(),
+)
+def test_bet_keyboards_fit(signal_id: int, can_use_defaults: bool) -> None:
+    assert_fits(keyboards.bet_prompt_keyboard(signal_id, "1.85", can_use_defaults=can_use_defaults))
+    assert_fits(keyboards.bet_cancel_keyboard(signal_id))
+
+
+def test_bet_prompt_offers_the_default_only_when_a_stake_is_known() -> None:
+    with_default = keyboards.bet_prompt_keyboard(7, "1.85", can_use_defaults=True)
+    without = keyboards.bet_prompt_keyboard(7, "1.85", can_use_defaults=False)
+
+    assert with_default.inline_keyboard[0][0].text == "✅ Yozish: 1.85"
+    assert not any("Yozish" in b.text for row in without.inline_keyboard for b in row)
+
+
+def test_retro_and_cancelled_signals_cannot_be_recalculated_or_bet_on() -> None:
+    for signal in (
+        make_signal(source=SignalSource.RETRO, recommended_at=None),
+        make_signal(state=SignalState.CANCELLED),
+    ):
+        labels = [b.text for row in keyboards.signal_keyboard(signal).inline_keyboard for b in row]
+        assert texts.BTN_RECALC not in labels
+        assert texts.BTN_BET not in labels
+    active = [
+        b.text for row in keyboards.signal_keyboard(make_signal()).inline_keyboard for b in row
+    ]
+    assert texts.BTN_RECALC in active
+    assert texts.BTN_BET in active

@@ -37,6 +37,9 @@ HELP: Final = (
     "/start — bosh menyu\n"
     "/tahlil — tezkor tahlil, masalan:\n"
     "<code>/tahlil 25.10-31.10 futbol 60% Arsenal,Inter</code>\n"
+    "/qayta — bugungi signallarni qayta hisoblash (yoki <code>/qayta ertaga</code>, "
+    "<code>/qayta 3kun</code>)\n"
+    "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
     "/sozlamalar — sozlamalar\n"
     "/bekor — joriy amalni bekor qilish\n"
     "/yordam — shu yordam\n\n"
@@ -52,8 +55,7 @@ HELP: Final = (
     "Musbat CLV — to'g'ri yo'ldasiz degani.\n"
     "• ⏳ <b>Dastlabki tahlil</b> — o'yinga 3 kundan ko'p bor: tarkib va jarohatlar hali "
     "noma'lum, ishonch bir pog'ona past.\n"
-    "• ❗ <b>Qiymatsiz</b> — EV manfiy: tavsiya etilmaydi.\n\n"
-    "/holat (API limitlari, yangilanish vaqti) — tez orada."
+    "• ❗ <b>Qiymatsiz</b> — EV manfiy: tavsiya etilmaydi."
 )
 
 PLACEHOLDER: Final = (
@@ -109,6 +111,10 @@ VALIDATION_BY_FIELD: Final[dict[str, str]] = {
     "quiet_hours": "🌙 Tinch soatlarning boshlanishi va tugashi har xil bo'lishi kerak.",
     "prematch_minutes": "⏱ Pre-match yangilanish: o'chiq, 30, 60 yoki 90 daqiqa.",
     "signal_id": "⚽ Bu o'yin uchun amal hozir mumkin emas (o'yin boshlangan bo'lishi mumkin).",
+    "stake": (
+        "💵 Summani o'zingiz kiriting: unit sozlanmagan yoki bu signal uchun stavka tavsiya "
+        "etilmagan. ✅ Stavka qildim → ✏️ Boshqa koeff./summa."
+    ),
     "name": "💾 Shablon nomi 1–{max_name} belgidan iborat bo'lishi kerak.",
     "text": "🔤 Qidiruv uchun kamida {min_search} ta harf yozing.",
 }
@@ -509,3 +515,171 @@ SETTINGS_CURRENT: Final = "Joriy qiymat: <b>{value}</b>"
 PREMATCH_MINUTES: Final = "{minutes} daq."
 BTN_OFF: Final = "🚫 O'chirish"
 BTN_SETTINGS_BACK: Final = "⬅️ Sozlamalarga"
+
+# --------------------------------------------------------------------------- service errors (v1.2)
+BUSY: Final = (
+    "⏳ Tahlil allaqachon bajarilmoqda. Tugashini kuting, so'ng qayta urinib ko'ring "
+    "(ikki marta bosish API limitini ikki marta sarflamaydi)."
+)
+SERVICE_UNAVAILABLE: Final = (
+    "🔌 Ma'lumot manbai hozir javob bermayapti ({component}). Sozlamalaringiz saqlangan: "
+    "birozdan keyin qayta urinib ko'ring."
+)
+
+# --------------------------------------------------------------------------- recalculation (F6.7)
+RECALC_STARTED: Final = "⏳ Qayta hisoblanmoqda…"
+RECALC_DONE: Final = "✅ Tayyor."
+RECALC_STAGES: Final[dict[str, str]] = {
+    "collecting": "⏳ Yangi koeffitsientlar olinmoqda…",
+    "analysing": "⏳ Qayta hisoblanmoqda… {done}/{total}",
+    "reviewing": "⏳ AI tekshiruvi… {done}/{total}",
+    "finished": "✅ Qayta hisoblash tugadi: {total} ta o'yin.",
+}
+RECALC_TITLE: Final = "🔄 <b>{fixture}</b> yangilandi ({time})"
+UPDATE_TITLE_24H: Final = "⏰ <b>{fixture}</b> — o'yinga 24 soat qoldi, yangilandi ({time})"
+UPDATE_TITLE_PREMATCH: Final = "🔔 <b>{fixture}</b> — o'yin yaqin, yangilandi ({time})"
+DIFF_ODDS_EV: Final = "Koeff.: {odds_before} → {odds_after}   EV: {ev_before} → {ev_after}"
+DIFF_PROBABILITY: Final = "Ehtimollik: {before} → {after}"
+DIFF_STAKE: Final = "Tavsiya: {before} → {after} unit"
+DIFF_CONFIDENCE: Final = "Ishonch: {before} → {after}"
+DIFF_UNCHANGED: Final = "Raqamlar o'zgarmadi."
+DIFF_STATUS: Final = "Holat: {status}"
+DIFF_LINEUPS: Final = "📋 Tarkiblar e'lon qilingan."
+DIFF_DATA_AS_OF: Final = "📦 Yangi ma'lumot olinmadi: raqamlar {time} holatiga."
+VERDICT_LABELS: Final[dict[str, str]] = {
+    "still_valid": "✅ Kuchda",
+    "below_threshold": "⚠️ Chegaradan pastga tushdi, tavsiya etilmaydi",
+    "cancelled": "❌ Signal bekor qilindi",
+}
+RECALC_BATCH_HEADER: Final = (
+    "🔄 <b>Qayta hisoblash tugadi:</b> yangilandi {updated} ta, raqami o'zgargan {changed} ta."
+)
+RECALC_BATCH_EMPTY: Final = (
+    "ℹ️ Qayta hisoblanadigan signal topilmadi. Avval 📊 Tahlil yoki ⚡ Bugungi signallar ni oching."
+)
+RECALC_BATCH_UNCHANGED: Final = "Hech bir signalning raqami o'zgarmadi."
+RECALC_BATCH_COOLDOWN: Final = (
+    "⏳ {count} ta signal yaqinda yangilangan (bitta o'yin {minutes} daqiqada bir marta)."
+)
+RECALC_BATCH_STARTED: Final = "⚽ {count} ta o'yin boshlangan: qayta hisoblanmadi."
+RECALC_BATCH_FAILED: Final = (
+    "⚠️ {count} ta signalni yangilab bo'lmadi. Keyinroq qayta urinib ko'ring."
+)
+RECALC_BATCH_MORE: Final = "…va yana {count} ta o'zgarish."
+BTN_RECALC_ALL: Final = "🔄 Hammasini yangilash"
+QAYTA_NOT_A_WINDOW: Final = "«{value}» sana oralig'i emas."
+QAYTA_BAD_ARGUMENT: Final = (
+    "❗ {problem}\n\n"
+    "Namuna: <code>/qayta</code> (bugun), <code>/qayta ertaga</code>, <code>/qayta 3kun</code>, "
+    "<code>/qayta 25.10-27.10</code>."
+)
+
+# --------------------------------------------------------------------------- notifications
+DIGEST_TITLE: Final = "☀️ <b>Kunlik tahlil</b> — {weekday}, {day}"
+DIGEST_YESTERDAY: Final = (
+    "📆 <b>Kecha:</b> {signals} ta signal · {won} ✅ · {lost} ❌{extra} · {profit} unit{clv}"
+)
+DIGEST_YESTERDAY_VOID: Final = " · {count} ↩️"
+DIGEST_YESTERDAY_PENDING: Final = " · {count} ⏳"
+DIGEST_YESTERDAY_CLV: Final = " · CLV {clv}"
+CANCELLED_TITLE: Final = "❌ <b>Bekor: {fixture}</b>"
+CANCEL_REASONS: Final[dict[str, str]] = {
+    "postponed": "o'yin qoldirildi",
+    "cancelled": "o'yin bekor qilindi",
+    "abandoned": "o'yin to'xtatildi",
+}
+CANCELLED_BODY: Final = (
+    "Sabab: {reason}.\n"
+    "🎯 Tanlov: {selection}\n"
+    "Signal endi tavsiya etilmaydi. Stavka qilgan bo'lsangiz, bukmeker qoidalarini tekshiring "
+    "(odatda stavka qaytariladi)."
+)
+WATCH_TITLES: Final[dict[str, str]] = {
+    "lineups": "📋 Tarkiblar e'lon qilindi",
+    "odds_move": "📉 Koeffitsient sezilarli o'zgardi",
+    "result": "🏁 O'yin tugadi",
+}
+WATCH_HEADER: Final = "⭐ <b>Sevimli:</b> {title}\n{icon} <b>{fixture}</b>   🕒 {time}  🏆 {league}"
+SETTLED_HEADER: Final = "{result} — <b>{fixture}</b>"
+SETTLED_PICK: Final = "🎯 {selection}   @ {odds}"
+SETTLED_PROFIT: Final = "💰 Natija: {profit} unit"
+ADMIN_ALERT: Final = "🚨 <b>Tizim xatosi</b> · {component} · {time}\n{message}"
+
+# --------------------------------------------------------------------------- today's signals
+TODAY_HEADER: Final = "⚡ <b>Bugungi signallar</b> — {count} ta"
+TODAY_EMPTY: Final = (
+    "🤷 <b>Bugun faol signal yo'q.</b>\n"
+    "Kunlik xabar sozlangan vaqtda keladi. Hozir tekshirish uchun 📊 Tahlil → «Bugun» ni tanlang."
+)
+
+# --------------------------------------------------------------------------- /holat (F6.9)
+STATUS_TITLE: Final = "ℹ️ <b>Tizim holati</b>"
+STATUS_MODE: Final[dict[str, str]] = {
+    "fake": "🧪 Rejim: <b>namunaviy ma'lumot</b> (haqiqiy API ulanmagan)",
+    "real": "🟢 Rejim: <b>haqiqiy ma'lumot</b>",
+}
+STATUS_QUOTA_HEADER: Final = "📡 <b>API limitlari</b> (bugun):"
+STATUS_QUOTA_LINE: Final = (
+    "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining} · qo'lda: {manual}"
+)
+STATUS_QUOTA_NONE: Final = "📡 API limitlari: ma'lumot yo'q."
+STATUS_REFRESH: Final = "🔄 Ma'lumot oxirgi yangilangan: <b>{time}</b> ({age})"
+STATUS_REFRESH_NEVER: Final = "🔄 Ma'lumot hali yangilanmagan."
+STATUS_AGE_MINUTES: Final = "{minutes} daq. oldin"
+STATUS_AGE_HOURS: Final = "{hours} soat oldin"
+STATUS_AGE_DAYS: Final = "{days} kun oldin"
+STATUS_AGE_NOW: Final = "hozirgina"
+STATUS_JOBS_HEADER: Final = "🗓 <b>Oxirgi ishlar:</b>"
+STATUS_JOB_LINE: Final = "• {mark} {name} — {time}{detail}"
+STATUS_JOB_NEVER: Final = "hali ishlamagan"
+STATUS_JOBS_NONE: Final = "🗓 Rejalashtirilgan ishlar haqida ma'lumot yo'q."
+STATUS_ERRORS_HEADER: Final = "🧯 <b>Oxirgi xatolar:</b>"
+STATUS_ERROR_LINE: Final = "• {time} · {component}: {message}"
+STATUS_ERRORS_NONE: Final = "🧯 Oxirgi xatolar: yo'q ✅"
+STATUS_MORE: Final = "…va yana {count} ta"
+STATUS_FOOTER: Final = "Buyruqlar va atamalar: /yordam"
+
+# --------------------------------------------------------------------------- minimal bets
+BET_PROMPT: Final = (
+    "✅ <b>Stavka qildim</b>\n"
+    "{fixture}\n"
+    "🎯 {selection}\n"
+    "Signal koeffitsienti: <b>{odds}</b> · tavsiya: <b>{stake}</b>\n\n"
+    "Shu qiymatlar bilan yozaymi yoki o'zingiz kiritasizmi?"
+)
+BET_STAKE_UNITS: Final = "{units} unit"
+BET_STAKE_MONEY: Final = "{amount} ({units} unit)"
+BTN_BET_OK: Final = "✅ Yozish: {odds}"
+BTN_BET_CUSTOM: Final = "✏️ Boshqa koeff./summa"
+BET_INPUT_PROMPT: Final = (
+    "✏️ Haqiqatda olgan koeffitsientingizni (va ixtiyoriy summani) yozing:\n"
+    "<code>1.90</code> yoki <code>1.90 50000</code>\n"
+    "Summa yozilmasa, tavsiya etilgan summa olinadi."
+)
+BET_PLACED: Final = (
+    "🎟 <b>Stavka yozildi</b>\n{fixture}\n🎯 {selection} @ <b>{odds}</b>\n💵 Summa: <b>{stake}</b>"
+)
+BET_LOSS_LIMIT: Final = (
+    "🛑 Diqqat: zarar limitingizga yetdingiz. Qaror sizniki, lekin bugun to'xtab turish tavsiya "
+    "etiladi."
+)
+BET_CANCELLED: Final = "❌ Stavka yozilmadi."
+BET_FINISH_FLOW_FIRST: Final = "✏️ Avval joriy amalni tugating yoki /bekor ni bosing."
+BET_BAD_INPUT: Final = (
+    "«{value}» ni tushunmadim. Format: <code>1.90</code> yoki <code>1.90 50000</code>."
+)
+BET_BAD_ODDS: Final = "Koeffitsient {low}–{high} oralig'ida bo'lishi kerak."
+BTN_BET_CANCEL: Final = "❌ Bekor qilish"
+BETS_TITLE: Final = "🎟 <b>Mening stavkalarim</b>"
+BETS_BALANCE: Final = "💰 Balans: <b>{balance}</b> (boshlang'ich bank + yopilgan stavkalar foydasi)"
+BETS_BANK_UNSET: Final = "💰 Bank kiritilmagan: ⚙️ Sozlamalar → Bank."
+BETS_MONTH_PROFIT: Final = "📅 Oy foydasi: {profit}"
+BETS_OPEN_COUNT: Final = "🟡 Ochiq stavkalar: {count} (balansni kamaytirmaydi)"
+BETS_LOSS_LIMIT: Final = "🛑 Zarar limitiga yetildi (bugun {today}, hafta {week})."
+BETS_EMPTY: Final = (
+    "Ochiq stavkalar yo'q.\nSignal kartasidagi «✅ Stavka qildim» tugmasi bilan stavka yozing."
+)
+BETS_LINE: Final = "• {fixture} — {selection} @ {odds} · {stake} · {date}"
+BETS_MORE: Final = "…va yana {count} ta"
+BET_SIDE_HOME: Final = "uy jamoasi"
+BET_SIDE_AWAY: Final = "mehmon jamoasi"

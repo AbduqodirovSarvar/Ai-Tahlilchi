@@ -3,7 +3,8 @@ update builders and a harness that drives the real dispatcher like a user would.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections import deque
+from collections.abc import AsyncGenerator, Iterable
 from datetime import UTC, datetime
 from typing import Any, override
 
@@ -69,6 +70,24 @@ class RecordingSession(BaseSession):
     @override
     async def close(self) -> None:
         return None
+
+
+class ScriptedSession(RecordingSession):
+    """Fails the first requests as scripted (``None`` entries succeed), then behaves normally."""
+
+    def __init__(self, script: Iterable[Exception | None] = ()) -> None:
+        super().__init__()
+        self.script: deque[Exception | None] = deque(script)
+
+    @override
+    async def make_request(
+        self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None
+    ) -> Any:
+        failure = self.script.popleft() if self.script else None
+        if failure is not None:
+            self.requests.append(method)
+            raise failure
+        return await super().make_request(bot, method, timeout)
 
 
 async def feed(dispatcher: Dispatcher, bot: Bot, update: Update) -> None:

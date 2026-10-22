@@ -81,7 +81,7 @@ async def test_hide_button_hides_signal_and_edits_card(harness: BotHarness) -> N
     assert signal.state is SignalState.HIDDEN
 
 
-@pytest.mark.parametrize("action", ["recalc", "detail", "bet"])
+@pytest.mark.parametrize("action", ["detail"])
 async def test_later_wave_card_buttons_are_placeholders(harness: BotHarness, action: str) -> None:
     message_id, signal_id = await run_and_get_card(harness)
 

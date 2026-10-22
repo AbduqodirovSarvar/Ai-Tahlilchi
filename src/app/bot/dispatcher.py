@@ -13,7 +13,18 @@ from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 from aiogram.types import ErrorEvent
 
-from app.bot.handlers import analysis, fallback, quick, settings, signals, start
+from app.bot.handlers import (
+    analysis,
+    bets,
+    fallback,
+    quick,
+    recalc,
+    settings,
+    signals,
+    start,
+    status,
+    today,
+)
 from app.bot.jobs import BackgroundJobs
 from app.bot.middleware import (
     ErrorMiddleware,
@@ -79,6 +90,17 @@ def build_dispatcher(
     dispatcher.callback_query.middleware(ErrorMiddleware())
     dispatcher.errors.register(log_unhandled_error)
     # Order matters: menu and commands first, free-text flows after, catch-all last.
-    for module in (start, settings, quick, analysis, signals, fallback):
+    for module in (
+        start,
+        settings,
+        quick,
+        analysis,
+        recalc,
+        today,
+        status,
+        bets,
+        signals,
+        fallback,
+    ):
         dispatcher.include_router(module.create_router())
     return dispatcher

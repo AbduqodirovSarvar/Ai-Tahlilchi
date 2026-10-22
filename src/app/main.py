@@ -17,6 +17,7 @@ from aiogram.utils.token import TokenValidationError
 
 from app.bot.dispatcher import build_dispatcher
 from app.bot.messaging import install_flood_control
+from app.bot.notifier import TelegramNotifier
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 from app.logging import configure_logging, get_logger
@@ -95,11 +96,13 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
     """Bot over the pipeline-backed services, with the scheduler running beside it.
 
     The scheduler is stopped (running jobs finish) and the database closed on every exit.
-    Messages the pipeline sends on its own are only logged until the bot provides a
-    ``Notifier`` (ADR 0008).
+    Messages the pipeline sends on its own go through the :class:`TelegramNotifier`, which is
+    bound to the bot when the dispatcher starts (the services need it before the bot exists).
     """
     async with open_runtime(settings) as runtime:
-        system = create_real_services(runtime.ctx)
+        notifier = TelegramNotifier(admin_ids=admin_ids, default_zone=settings.display_timezone)
+        system = create_real_services(runtime.ctx, notifier=notifier)
+        notifier.attach_settings(system.services.settings)
         logger.info("services_backend", backend="real", sample_data=False)
         scheduler = PipelineScheduler(
             PipelineJobs(runtime.ctx, system.delivery),
@@ -108,7 +111,10 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
         )
         scheduler.start()
         try:
-            await poll(build_dispatcher(admin_ids, system.services), token, admin_ids, settings)
+            dispatcher = build_dispatcher(admin_ids, system.services)
+            dispatcher["backend"] = "real"
+            dispatcher.startup.register(notifier.on_startup)
+            await poll(dispatcher, token, admin_ids, settings)
         finally:
             await scheduler.stop()
 
