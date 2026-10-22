@@ -31,3 +31,15 @@ class ProviderUnavailableError(PipelineError):
         super().__init__(f"{provider} unavailable: {detail}")
         self.provider = provider
         self.detail = detail
+
+
+class DeliveryNotConfirmedError(PipelineError):
+    """A message was handed to the notifier but nobody confirmed its delivery.
+
+    The notifier answers ``None`` when the bot is not attached yet, the user blocked it or
+    sending failed softly; the idempotency key must then stay open so the message is retried.
+    """
+
+    def __init__(self, what: str) -> None:
+        """``what`` names the message, e.g. ``daily digest of user 7``."""
+        super().__init__(f"{what} was not delivered")

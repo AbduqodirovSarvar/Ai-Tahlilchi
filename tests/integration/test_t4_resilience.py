@@ -6,7 +6,7 @@ Everything runs on the real services over a temporary database; time is injected
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from app.pipeline.config import PipelineConfig
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import NullDelivery
 from app.pipeline.errors import ProviderUnavailableError
+from app.pipeline.ledger import backoff
 from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.provider import QuotaSnapshot
 from app.pipeline.review import LlmCandidateReviewer, Review, ReviewCandidate, ReviewKey
@@ -311,7 +312,7 @@ async def test_when_the_1xbet_price_vanishes_a_recalculation_keeps_the_old_price
 
     assert diff.signal.odds == signal.odds == WORLD_A.home  # never Pinnacle's 2.0
     assert diff.after.odds == diff.before.odds
-    assert diff.verdict.value == "below_threshold"  # it can no longer be priced at 1xBet
+    assert diff.verdict.value == "no_price"  # it can no longer be priced at 1xBet
 
 
 class DownProvider:
@@ -383,12 +384,15 @@ async def test_a_failed_digest_keeps_the_signals_and_a_rerun_delivers_it_once(
 
         first = await run_due_digests(bare.ctx, bare.system.delivery)
         after_failure = await stored_signals(bare)
+        too_soon = await run_due_digests(bare.ctx, bare.system.delivery)
+        bare.clock.advance(backoff(1))
         second = await run_due_digests(bare.ctx, bare.system.delivery)
         third = await run_due_digests(bare.ctx, bare.system.delivery)
         final = await stored_signals(bare)
 
     assert first.failed == (USER,)
     assert after_failure  # persisted although the message did not go out
+    assert too_soon.sent == too_soon.failed == ()  # the retry waits for its backoff
     assert second.sent == (USER,)
     assert third.sent == third.failed == ()
     assert notifier.count("daily_digest") == 1
@@ -447,6 +451,21 @@ async def schedule_tomorrow(bare: Bare, *, odds_move: bool) -> int:
     return result.signals[0].signal_id
 
 
+async def fresh_prices(bare: Bare, at: datetime) -> None:
+    """The morning prices taken again at ``at`` (a stale price is no decision basis)."""
+    rows = [
+        *snapshot(
+            FIXTURE, BOOKMAKER_PINNACLE, ONE_X_TWO, PINNACLE, kind=OddsKind.RECALC, taken_at=at
+        ),
+        *snapshot(
+            FIXTURE, BOOKMAKER_1XBET, ONE_X_TWO,
+            x12(WORLD_A.home, WORLD_A.draw, WORLD_A.away), kind=OddsKind.RECALC, taken_at=at,
+        ),
+    ]  # fmt: skip
+    async with bare.sessions.begin() as session:
+        await upsert_live(session, odds=rows)
+
+
 YESTERDAY_NOON = utc(2026, 10, 20, 6, 0)
 EARLIER = utc(2026, 10, 20, 5, 0)  # the morning prices of the day before
 
@@ -463,25 +482,21 @@ async def test_a_failed_prematch_message_is_retried_and_delivered_once(tmp_path:
     ) as bare:
         await schedule_tomorrow(bare, odds_move=False)
         bare.clock.now = KICKOFF - timedelta(minutes=55)
+        await fresh_prices(bare, bare.clock() - timedelta(minutes=5))
         first = await run_due_recalcs(bare.ctx, bare.system.delivery)
+        too_soon = await run_due_recalcs(bare.ctx, bare.system.delivery)
+        bare.clock.advance(backoff(1))
         second = await run_due_recalcs(bare.ctx, bare.system.delivery)
         third = await run_due_recalcs(bare.ctx, bare.system.delivery)
 
     prematch_updates = [n for n in notifier.sent if n.method == "signal_update"]
     assert first.failed >= 1
+    assert (too_soon.notified, too_soon.failed) == (0, 0)  # not re-claimed every minute
     assert len(prematch_updates) == 1
     assert (third.notified, third.failed) == (0, 0)
     assert second.notified == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F4b: the 24 h update is only sent when the odds moved >= 10% between the stored "
-        "'before' and the new 'after'; a failed send has already stored the new numbers, so the "
-        "retry sees no change and the user is never told"
-    ),
-)
 async def test_a_failed_24h_message_is_not_lost(tmp_path: Path) -> None:
     notifier = FlakyNotifier()
     notifier.fail["signal_update"] = 1
@@ -495,6 +510,7 @@ async def test_a_failed_24h_message_is_not_lost(tmp_path: Path) -> None:
         await schedule_tomorrow(bare, odds_move=True)
         bare.clock.now = utc(2026, 10, 20, 15, 5)
         first = await run_due_recalcs(bare.ctx, bare.system.delivery)
+        bare.clock.advance(backoff(1))
         await run_due_recalcs(bare.ctx, bare.system.delivery)
 
     assert first.failed == 1
@@ -540,14 +556,6 @@ async def two_finished_signals(bare: Bare) -> list[int]:
     return ids
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F4a: the result is stored before the message; if the send fails the exception "
-        "aborts the run and the next run skips signals that already have a result, so the user "
-        "is never told (and the signals after the failing one wait for the next run)"
-    ),
-)
 async def test_a_failed_result_message_is_not_lost(tmp_path: Path) -> None:
     notifier = FlakyNotifier()
     notifier.fail["result_settled"] = 1
@@ -556,10 +564,12 @@ async def test_a_failed_result_message_is_not_lost(tmp_path: Path) -> None:
     ) as bare:
         await permissive(bare.system.services, USER)
         await two_finished_signals(bare)
-        with pytest.raises(ConnectionError):
-            await run_settlement(bare.ctx, bare.system.delivery)
-        await run_settlement(bare.ctx, bare.system.delivery)
+        first = await run_settlement(bare.ctx, bare.system.delivery)
+        bare.clock.advance(backoff(1))
+        second = await run_settlement(bare.ctx, bare.system.delivery)
 
+    assert (first.settled, first.announce_failed) == (2, 1)  # the failure stops nothing else
+    assert second.notified == 1
     assert notifier.count("result_settled") == 2
 
 
@@ -573,8 +583,8 @@ async def test_a_failed_result_message_does_not_double_settle_or_lose_a_result(
     ) as bare:
         await permissive(bare.system.services, USER)
         ids = await two_finished_signals(bare)
-        with pytest.raises(ConnectionError):
-            await run_settlement(bare.ctx, bare.system.delivery)
+        await run_settlement(bare.ctx, bare.system.delivery)
+        bare.clock.advance(backoff(1))
         await run_settlement(bare.ctx, bare.system.delivery)
         views = await bare.system.services.signals.get_signals(USER, ids)
         third = await run_settlement(bare.ctx, NullDelivery())
@@ -669,6 +679,7 @@ async def test_two_scheduler_ticks_at_once_never_handle_a_task_twice(tmp_path: P
     ) as bare:
         await schedule_tomorrow(bare, odds_move=False)
         bare.clock.now = KICKOFF - timedelta(minutes=30)  # both tasks are due
+        await fresh_prices(bare, bare.clock() - timedelta(minutes=5))
         reports = await asyncio.gather(
             run_due_recalcs(bare.ctx, bare.system.delivery),
             run_due_recalcs(bare.ctx, bare.system.delivery),
@@ -690,6 +701,7 @@ async def test_a_dead_workers_claim_is_retaken_only_after_the_lease(tmp_path: Pa
     ) as bare:
         await schedule_tomorrow(bare, odds_move=False)
         bare.clock.now = KICKOFF - timedelta(minutes=30)
+        await fresh_prices(bare, bare.clock() - timedelta(minutes=5))
         async with bare.sessions.begin() as session:
             dead = await claim_due_recalcs(session, now=bare.clock())  # the worker dies here
         assert {t.kind for t in dead} == {RecalcKind.BEFORE_24H, RecalcKind.PREMATCH}

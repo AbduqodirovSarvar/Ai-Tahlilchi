@@ -4,14 +4,16 @@ The service-level :class:`~app.services.interfaces.Notifier` speaks in service D
 pipeline may not import (layering). The pipeline therefore talks to :class:`Delivery`, and
 the services layer adapts it to the notifier (mapping cards to ``SignalView`` and so on).
 Idempotency, quiet hours and bookkeeping live in the pipeline jobs; a ``Delivery`` just
-sends. A method returns an opaque message reference (or ``None`` when nothing was
-delivered), which the pipeline stores in the ledger so a later update can reply to it.
+sends. A method returns an opaque message reference, or ``None`` when nothing was delivered
+(bot not attached, user unreachable): the pipeline then keeps the idempotency key open and
+retries with a backoff. A confirmed reference is stored in the ledger so a later update can
+reply to it.
 """
 
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Final, Protocol
 
 from app.db.enums import RecalcKind
 from app.db.repo import FixtureRecord
@@ -95,12 +97,20 @@ class Delivery(Protocol):
         ...
 
 
+NULL_REFERENCE: Final = "null"
+"""What :class:`NullDelivery` answers: "handled" (a real ``None`` would mean "not delivered")."""
+
+
 class NullDelivery:
-    """Delivers nothing (jobs run for their stored side effects only)."""
+    """Delivers nothing (jobs run for their stored side effects only).
+
+    It confirms every message with :data:`NULL_REFERENCE`, so keys complete and nothing is
+    retried; the pipeline treats ``None`` as a delivery that did not happen.
+    """
 
     async def daily(self, user_id: int, message: DailyDelivery, key: LedgerKey) -> str | None:  # noqa: ARG002
         """Drop the message."""
-        return None
+        return NULL_REFERENCE
 
     async def update(
         self,
@@ -110,7 +120,7 @@ class NullDelivery:
         reply_to: str | None,  # noqa: ARG002
     ) -> str | None:
         """Drop the message."""
-        return None
+        return NULL_REFERENCE
 
     async def cancelled(
         self,
@@ -120,7 +130,7 @@ class NullDelivery:
         reply_to: str | None,  # noqa: ARG002
     ) -> str | None:
         """Drop the message."""
-        return None
+        return NULL_REFERENCE
 
     async def watch_event(
         self,
@@ -129,7 +139,7 @@ class NullDelivery:
         key: LedgerKey,  # noqa: ARG002
     ) -> str | None:
         """Drop the message."""
-        return None
+        return NULL_REFERENCE
 
     async def settled(
         self,
@@ -138,7 +148,7 @@ class NullDelivery:
         key: LedgerKey,  # noqa: ARG002
     ) -> str | None:
         """Drop the message."""
-        return None
+        return NULL_REFERENCE
 
     async def alert_admin(self, component: str, message: str, at: datetime) -> None:
         """Drop the alert."""

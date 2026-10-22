@@ -337,14 +337,6 @@ async def test_an_abandoned_match_without_a_score_is_void(tmp_path: Path) -> Non
     assert stored.result.outcome is Outcome.VOID
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F1: an abandoned match that carries the score at the time it was stopped is "
-        "settled on that partial score (settlement_of ignores the fixture status); "
-        "the module docstring and ADR 0008 §6 say it must void"
-    ),
-)
 async def test_an_abandoned_match_with_a_partial_score_is_void(tmp_path: Path) -> None:
     _, _, (_, stored) = await settle_one(
         tmp_path, Odd("abandoned-score", ResultStatus.ABANDONED, (2, 0))
@@ -443,14 +435,6 @@ async def test_without_a_sharp_closing_price_there_is_no_clv(tmp_path: Path) -> 
     assert clv is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F2: settle.clv_of calls complete_quotes(snapshots) without the kickoff map, so a "
-        "prematch/recalc price stored after kickoff (a late tick, a live price) becomes the "
-        "closing line; contract 6 says the pipeline always passes kickoffs"
-    ),
-)
 async def test_a_price_captured_after_kickoff_is_never_the_close(tmp_path: Path) -> None:
     """A late prematch capture (after the whistle) must not replace the pre-kickoff one."""
 
@@ -519,13 +503,5 @@ def test_stored_profit_is_the_exact_decimal_within_one_quantum(
     assert abs(stored - exact) <= MONEY_QUANTUM
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F9: profit_of builds money from Decimal(repr(odds - 1.0)), so float noise "
-        "(0.0100000000000000090 for odds 1.01) enters Decimal arithmetic; the 4-place column "
-        "hides it except on exact rounding ties"
-    ),
-)
 def test_profit_of_is_exact_for_two_decimal_odds() -> None:
     assert profit_of(Decimal("1.0"), 1.01, Settlement.WIN) == Decimal("0.01")

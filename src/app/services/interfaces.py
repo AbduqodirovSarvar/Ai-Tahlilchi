@@ -213,6 +213,8 @@ class RecalcVerdict(StrEnum):
     STILL_VALID = "still_valid"
     BELOW_THRESHOLD = "below_threshold"
     CANCELLED = "cancelled"
+    NO_PRICE = "no_price"
+    """v1.5: the user's bookmaker has no fresh price any more; the numbers are unconfirmed."""
 
 
 class AnalysisStage(StrEnum):
@@ -683,6 +685,13 @@ class SignalView:
     (``None`` = never recommended). Once set it never changes and ``no_value`` stays
     ``False``, whatever later queries say. Only recommended, non-retro signals count in
     reports, calibration, day summaries and exports; hiding a signal does not change that.
+
+    v1.5 (decision #17): ``odds`` are the *current* odds (recalculations move them);
+    ``recommended_odds`` are the odds first recommended, never changed, and the ones the
+    signal's profit and CLV are judged on (``None`` while never recommended; then ``odds``
+    stand in). ``zero_ev_odds`` is the price at which the pick has zero EV for the model
+    (``None`` = unknown); it differs from ``1 / probability`` on quarter-line Asian picks.
+    ``data_as_of`` is the time of the bookmaker price the numbers rest on.
     """
 
     signal_id: SignalId
@@ -713,6 +722,8 @@ class SignalView:
     data_as_of: datetime | None = None
     source: SignalSource = SignalSource.ANALYSIS
     recommended_at: datetime | None = None
+    recommended_odds: float | None = None
+    zero_ev_odds: float | None = None
 
     def __post_init__(self) -> None:
         """Guard the invariants the card formatter relies on."""
@@ -728,6 +739,16 @@ class SignalView:
         )
         self.market.require_selection(self.selection)
         _check(self.odds > 1.0, "odds", "decimal odds must be greater than 1")
+        _check(
+            self.recommended_odds is None or self.recommended_odds > 1.0,
+            "recommended_odds",
+            "decimal odds must be greater than 1",
+        )
+        _check(
+            self.zero_ev_odds is None or self.zero_ev_odds > 1.0,
+            "zero_ev_odds",
+            "decimal odds must be greater than 1",
+        )
         _check(0.0 < self.probability <= 1.0, "probability", "must be within (0, 1]")
         _check(self.stake_units >= 0, "stake_units", "must not be negative")
         _check(self.version >= 1, "version", "must be at least 1")
@@ -739,8 +760,17 @@ class SignalView:
 
     @property
     def fair_odds(self) -> float:
-        """Odds at which this selection would have zero EV for the model."""
-        return 1.0 / self.probability
+        """Odds at which this selection would have zero EV for the model.
+
+        The stored zero-EV price when known (quarter-line Asian picks count half wins and
+        half losses, so it is not ``1 / probability``), else ``1 / probability``.
+        """
+        return 1.0 / self.probability if self.zero_ev_odds is None else self.zero_ev_odds
+
+    @property
+    def profit_odds(self) -> float:
+        """The odds the signal's profit and CLV are judged on: first recommended, else current."""
+        return self.odds if self.recommended_odds is None else self.recommended_odds
 
     @property
     def negative_ev(self) -> bool:
@@ -778,6 +808,9 @@ class AnalysisResult:
     api_requests_used: int
     failed_fixtures: int = 0
     retro: bool = False
+    skipped_no_price: int = 0
+    skipped_stale_price: int = 0
+    data_stale: bool = False
 
     @property
     def shortfall(self) -> bool:
@@ -1301,11 +1334,41 @@ class ApiQuota:
     used: int
     limit: int
     reserved_manual: int
+    manual_reserve: int = 0
+    manual_used: int = 0
+    """v1.5: ``manual_reserve`` = requests kept back for the user's own actions today,
+    ``manual_used`` = how many of them are spent. (``reserved_manual`` is kept for old readers:
+    the real service filled it with ``manual_used``, the fake with the reserve.)"""
 
     @property
     def remaining(self) -> int:
         """Requests left today (never negative)."""
         return max(self.limit - self.used, 0)
+
+    @property
+    def manual_left(self) -> int:
+        """Requests of the manual reserve still available (never negative)."""
+        return max(self.manual_reserve - self.manual_used, 0)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LlmQuota:
+    """Today's usage of the language model (v1.5): requests and tokens against their caps."""
+
+    requests_used: int
+    requests_limit: int
+    tokens_used: int
+    tokens_limit: int
+
+    @property
+    def requests_remaining(self) -> int:
+        """Requests left today (never negative)."""
+        return max(self.requests_limit - self.requests_used, 0)
+
+    @property
+    def tokens_remaining(self) -> int:
+        """Tokens left today (never negative)."""
+        return max(self.tokens_limit - self.tokens_used, 0)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1335,6 +1398,7 @@ class SystemStatus:
     last_refresh_at: datetime | None
     jobs: tuple[JobStatus, ...]
     recent_errors: tuple[ErrorEntry, ...]
+    llm: LlmQuota | None = None
 
 
 # --------------------------------------------------------------------------- notifications

@@ -5,8 +5,13 @@ from typing import Final
 
 from app.domain import MarketType, Sport, normalize_name
 from app.pipeline import data, queries
-from app.pipeline.provider import DEFAULT_DAILY_LIMIT, SUPPORTED_SPORT_MARKETS
+from app.pipeline.provider import (
+    DEFAULT_DAILY_LIMIT,
+    DEFAULT_MANUAL_RESERVE,
+    SUPPORTED_SPORT_MARKETS,
+)
 from app.pipeline.queries import league_refs, team_refs
+from app.pipeline.review import CandidateReviewer, llm_usage
 from app.services.errors import NotFoundError, ValidationFailedError
 from app.services.interfaces import (
     MAX_SEARCH_RESULTS,
@@ -21,6 +26,7 @@ from app.services.interfaces import (
     FixturePage,
     JobStatus,
     LeagueOption,
+    LlmQuota,
     RiskProfile,
     ScopeKind,
     SortKey,
@@ -397,6 +403,18 @@ def _item(record: data.WatchRecord, name: str) -> WatchItem:
     )
 
 
+def _llm_quota(reviewer: CandidateReviewer) -> LlmQuota | None:
+    usage = llm_usage(reviewer)
+    if usage is None:
+        return None
+    return LlmQuota(
+        requests_used=usage.requests_used,
+        requests_limit=usage.requests_limit,
+        tokens_used=usage.tokens_used,
+        tokens_limit=usage.tokens_limit,
+    )
+
+
 class RealStatusService:
     """:class:`~app.services.interfaces.SystemStatusService` for ``/holat``."""
 
@@ -414,6 +432,8 @@ class RealStatusService:
                 used=snap.used,
                 limit=snap.limit,
                 reserved_manual=snap.manual_used,
+                manual_reserve=snap.manual_reserve,
+                manual_used=snap.manual_used,
             )
             for snap in [await provider.quota() for provider in ctx.providers.values()]
         ]
@@ -439,6 +459,7 @@ class RealStatusService:
             last_refresh_at=None if refresh is None else refresh.done_at,
             jobs=jobs,
             recent_errors=errors,
+            llm=_llm_quota(ctx.reviewer),
         )
 
     async def _stored_quotas(self) -> list[ApiQuota]:
@@ -453,6 +474,8 @@ class RealStatusService:
                 used=row.counts.requests_used,
                 limit=DEFAULT_DAILY_LIMIT,
                 reserved_manual=row.counts.manual_used,
+                manual_reserve=DEFAULT_MANUAL_RESERVE,
+                manual_used=row.counts.manual_used,
             )
             for row in rows
         ]
@@ -463,5 +486,7 @@ class RealStatusService:
                 used=0,
                 limit=DEFAULT_DAILY_LIMIT,
                 reserved_manual=0,
+                manual_reserve=DEFAULT_MANUAL_RESERVE,
+                manual_used=0,
             )
         ]

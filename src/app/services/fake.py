@@ -76,6 +76,7 @@ from app.services.interfaces import (
     FixturePage,
     JobStatus,
     LeagueOption,
+    LlmQuota,
     MessageRef,
     ProgressCallback,
     RecalcBatch,
@@ -126,6 +127,10 @@ type Clock = Callable[[], datetime]
 FAKE_DAILY_LIMIT: Final = 100
 FAKE_AUTOMATIC_USAGE: Final = 40
 FAKE_MANUAL_RESERVE: Final = round(FAKE_DAILY_LIMIT * MANUAL_RESERVE_SHARE)
+FAKE_LLM_REQUESTS: Final = 12
+FAKE_LLM_REQUEST_LIMIT: Final = 250
+FAKE_LLM_TOKENS: Final = 48_000
+FAKE_LLM_TOKEN_LIMIT: Final = 500_000
 CACHE_TTL: Final = timedelta(minutes=10)
 """The same provider data is not requested again within this period (plan §9)."""
 RECALC_REQUESTS: Final = 1
@@ -202,6 +207,7 @@ class _StoredSignal:
     no_value: bool
     watchlist: bool
     recommended_at: datetime | None = None
+    recommended_odds: float | None = None
     version: int = 1
     state: SignalState = SignalState.ACTIVE
     data_as_of: datetime | None = None
@@ -394,6 +400,7 @@ class FakeState:
             stored.watchlist = stored.watchlist or pick.watchlist
         if pick.passes and not retro and stored.recommended_at is None:
             stored.recommended_at = self.now()
+            stored.recommended_odds = stored.odds
             stored.no_value = False
             stored.thresholds = _Thresholds.of(query, settings)
         return stored
@@ -460,6 +467,7 @@ class FakeState:
             data_as_of=stored.data_as_of,
             source=stored.source,
             recommended_at=stored.recommended_at,
+            recommended_odds=stored.recommended_odds,
         )
 
     def outcomes(self, user_id: int) -> list[SignalOutcome]:
@@ -1303,13 +1311,23 @@ class FakeSystemStatusService:
             used=FAKE_AUTOMATIC_USAGE + manual_used,
             limit=FAKE_DAILY_LIMIT,
             reserved_manual=FAKE_MANUAL_RESERVE,
+            manual_reserve=FAKE_MANUAL_RESERVE,
+            manual_used=manual_used,
         )
         jobs = (
             JobStatus(name="refresh", last_run_at=refreshed, ok=True),
             JobStatus(name="daily", last_run_at=refreshed + timedelta(minutes=30), ok=True),
             JobStatus(name="settle", last_run_at=refreshed - timedelta(minutes=30), ok=True),
         )
-        return SystemStatus(quotas=(quota,), last_refresh_at=refreshed, jobs=jobs, recent_errors=())
+        llm = LlmQuota(
+            requests_used=FAKE_LLM_REQUESTS,
+            requests_limit=FAKE_LLM_REQUEST_LIMIT,
+            tokens_used=FAKE_LLM_TOKENS,
+            tokens_limit=FAKE_LLM_TOKEN_LIMIT,
+        )
+        return SystemStatus(
+            quotas=(quota,), last_refresh_at=refreshed, jobs=jobs, recent_errors=(), llm=llm
+        )
 
 
 @dataclass(frozen=True, slots=True)

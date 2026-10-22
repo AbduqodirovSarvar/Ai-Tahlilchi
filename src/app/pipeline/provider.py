@@ -11,7 +11,7 @@ from typing import Final, Protocol
 
 from app.clients.api_football import PROVIDER as API_FOOTBALL
 from app.clients.api_football import ApiFootballClient
-from app.clients.quota import QuotaExceededError, RequestPurpose
+from app.clients.quota import DEFAULT_MANUAL_RESERVE_SHARE, QuotaExceededError, RequestPurpose
 from app.domain import (
     ExternalRef,
     Fixture,
@@ -38,6 +38,8 @@ SUPPORTED_SPORT_MARKETS: Final[dict[Sport, frozenset[MarketType]]] = {
 """Markets each implemented sport can price, known without a configured provider."""
 DEFAULT_DAILY_LIMIT: Final = 100
 """The provider's free-plan daily request limit, shown when no provider is configured."""
+DEFAULT_MANUAL_RESERVE: Final = round(DEFAULT_DAILY_LIMIT * DEFAULT_MANUAL_RESERVE_SHARE)
+"""Requests of that limit kept back for the user's own actions."""
 AUTOMATIC: Final = RequestPurpose.AUTOMATIC
 MANUAL: Final = RequestPurpose.MANUAL
 
@@ -53,6 +55,7 @@ class QuotaSnapshot:
     manual_used: int
     remaining: int
     automatic_available: int
+    manual_reserve: int = 0
 
     def available(self, purpose: Purpose) -> int:
         """Requests ``purpose`` may still spend today."""
@@ -85,9 +88,9 @@ class SportProvider(Protocol):
         ...
 
     async def enrich_results(
-        self, results: Sequence[FixtureResult], *, purpose: Purpose
+        self, results: Sequence[FixtureResult], *, purpose: Purpose, max_requests: int
     ) -> list[FixtureResult]:
-        """``results`` with expected goals added where the provider has them."""
+        """``results`` with expected goals added where the provider has them (capped)."""
         ...
 
     async def lineups_confirmed(self, fixture: ExternalRef, *, purpose: Purpose) -> bool:
@@ -187,14 +190,17 @@ class FootballProvider:
             manual_used=status.counts.manual_used,
             remaining=status.remaining,
             automatic_available=status.automatic_available,
+            manual_reserve=status.policy.manual_reserve,
         )
 
     async def enrich_results(
-        self, results: Sequence[FixtureResult], *, purpose: Purpose
+        self, results: Sequence[FixtureResult], *, purpose: Purpose, max_requests: int
     ) -> list[FixtureResult]:
-        """Add expected goals to finished results (one request each)."""
+        """Add expected goals to at most ``max_requests`` finished results (one request each)."""
         adapter = self._base.for_purpose(purpose)
-        return await _guarded(adapter.with_expected_goals(results), API_FOOTBALL)
+        return await _guarded(
+            adapter.with_expected_goals(results, max_requests=max_requests), API_FOOTBALL
+        )
 
     async def lineups_confirmed(self, fixture: ExternalRef, *, purpose: Purpose) -> bool:
         """True when API-Football lists line-ups for ``fixture``."""

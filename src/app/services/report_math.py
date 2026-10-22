@@ -50,7 +50,7 @@ def profit_units(view: SignalView, cashout_units: Decimal | None) -> Decimal | N
     if view.result is ResultMark.CASHOUT:
         return cashout_units or Decimal(0)
     stake = view.stake_units
-    win = stake * (Decimal(str(view.odds)) - 1)
+    win = stake * (Decimal(str(view.profit_odds)) - 1)
     by_mark = {
         ResultMark.WON: win,
         ResultMark.HALF_WON: win * _HALF,

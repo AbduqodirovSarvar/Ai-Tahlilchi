@@ -25,6 +25,7 @@ from app.db.repo import (
     SignalRecord,
     enqueue_recalc,
     list_user_signals,
+    touch_signal_quote_time,
     upsert_signal,
 )
 from app.domain import Market, Selection
@@ -104,13 +105,31 @@ def _source(pick: Pick, request: AnalysisRequest) -> SignalSource:
     return request.source
 
 
-def _unchanged(prior: SignalRecord, draft: SignalDraft) -> bool:
+async def refresh_quote_time(
+    session: AsyncSession, prior: SignalRecord, draft: SignalDraft
+) -> SignalRecord:
+    """``prior`` with the price time of ``draft``; same numbers, so no new version is written."""
+    if draft.quoted_at is None or prior.quoted_at == draft.quoted_at:
+        return prior
+    await touch_signal_quote_time(session, prior.id, draft.quoted_at)
+    return replace(prior, quoted_at=draft.quoted_at)
+
+
+def _same_fair_odds(prior: float | None, new: float | None) -> bool:
+    if new is None:
+        return True
+    return prior is not None and abs(prior - new) < EPSILON
+
+
+def unchanged(prior: SignalRecord, draft: SignalDraft) -> bool:
+    """True when storing ``draft`` would change nothing the user could see."""
     return (
         abs(prior.odds - draft.odds) < EPSILON
         and abs(prior.p_model - draft.p_model) < EPSILON
         and abs(prior.ev - draft.ev) < EPSILON
         and prior.confidence is draft.confidence
         and prior.stake_units == draft.stake_units
+        and _same_fair_odds(prior.fair_odds, draft.fair_odds)
         and (draft.llm_verdict is None or prior.llm_verdict is draft.llm_verdict)
         and (draft.llm_note is None or prior.llm_note == draft.llm_note)
         and (prior.recommended_at is not None or draft.recommended_at is None)
@@ -126,8 +145,11 @@ def _draft(  # noqa: PLR0913, PLR0917 - everything one draft is made of
     now: datetime,
 ) -> SignalDraft:
     candidate = pick.candidate
-    keeps_stake = pick.passes or (prior is not None and prior.recommended_at is not None)
+    was_recommended = prior is not None and prior.recommended_at is not None
+    keeps_stake = pick.passes or was_recommended
     stake = stake_units(candidate, ctx.config, bank=request.bank, unit=request.unit)
+    if prior is not None and was_recommended and stake == 0:
+        stake = prior.stake_units  # a dip below zero EV must not erase the advised stake
     return SignalDraft(
         user_id=request.user_id,
         fixture_id=pick.fixture.id,
@@ -143,6 +165,8 @@ def _draft(  # noqa: PLR0913, PLR0917 - everything one draft is made of
         recommended_at=now if pick.passes and not pick.retro else None,
         llm_verdict=None if review is None else review.verdict,
         llm_note=None if review is None else review.note,
+        fair_odds=candidate.fair_odds,
+        quoted_at=candidate.quoted_at,
     )
 
 
@@ -188,8 +212,8 @@ async def store_picks(
             review = reviews.get(_key(pick))
             prior = existing.get((pick.fixture.id, pick.candidate.market, pick.candidate.selection))
             draft = _draft(ctx, request, pick, prior, review, now)
-            if prior is not None and _unchanged(prior, draft):
-                record = prior
+            if prior is not None and unchanged(prior, draft):
+                record = await refresh_quote_time(session, prior, draft)
             else:
                 record = await upsert_signal(session, draft, reason=SignalVersionReason.INITIAL)
             if record.recommended_at is not None and not record.retro:
@@ -202,6 +226,7 @@ async def store_picks(
                     no_value=record.recommended_at is None and not pick.passes,
                     watchlist=pick.watchlist,
                     risk_flags=tuple(dict.fromkeys(flags)),
+                    data_as_of=pick.candidate.quoted_at,
                 )
             )
     return Stored(cards=tuple(cards), matched=matched - rejected)

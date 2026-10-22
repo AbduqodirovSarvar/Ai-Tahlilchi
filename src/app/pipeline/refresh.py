@@ -6,6 +6,11 @@ Everything is automatic-purpose, so it can never eat the manual reserve; when th
 budget runs out a step is skipped and reported, never half-written. Rerunning the same day is
 a no-op (ledger key) unless ``force`` is set.
 
+A refresh that had to skip a step is *not* done for the day: its key is failed (attempt
+counted, exponential backoff, a few tries) so a later call - the scheduler's tick passes
+``retry_only`` - completes the missing part. An unexpected error does the same instead of
+leaving the key claimed until its lease runs out.
+
 Exit codes of the CLI: 0 done (also "nothing to do"), 1 unexpected error, 2 configuration
 error (for example no ``API_FOOTBALL_KEY``: nothing is fetched and the message says why).
 """
@@ -59,30 +64,54 @@ class RefreshSummary:
 
 
 async def refresh(
-    ctx: PipelineContext, *, sport: Sport = Sport.FOOTBALL, force: bool = False
+    ctx: PipelineContext,
+    *,
+    sport: Sport = Sport.FOOTBALL,
+    force: bool = False,
+    retry_only: bool = False,
 ) -> RefreshSummary:
     """Refresh fixtures, results and odds of ``sport`` (see the module docstring).
+
+    ``retry_only``: do nothing unless today's refresh already ran and failed (the scheduler's
+    tick uses it, so only the 08:30 job starts a day's refresh).
 
     Raises:
         ProviderUnavailableError: no provider is configured for ``sport``.
     """
+    summary = RefreshSummary()
+    if retry_only and sport not in ctx.providers:  # database-only mode: nothing to retry
+        summary.already_done = True
+        return summary
     provider_of(ctx, sport)
     now = ctx.clock()
     key = LedgerKey(JOB, now.date(), 0, sport.value)
-    summary = RefreshSummary()
+    if retry_only and not await _retryable(ctx, key):
+        summary.already_done = True
+        return summary
     if not await ctx.ledger.claim(key, now=now) and not force:
         summary.already_done = True
         return summary
-    await _step(summary, "fixtures", _fixtures(ctx, sport, summary))
-    await _step(summary, "results", _results(ctx, sport, summary))
-    await _step(summary, "odds", _odds(ctx, sport, summary))
+    try:
+        await _step(summary, "fixtures", _fixtures(ctx, sport, summary))
+        await _step(summary, "results", _results(ctx, sport, summary))
+        await _step(summary, "odds", _odds(ctx, sport, summary))
+    except Exception as error:  # the key must not stay claimed until its lease runs out
+        await ctx.ledger.fail(key, now=ctx.clock(), detail=f"{type(error).__name__}: {error}"[:200])
+        raise
     detail = f"fixtures={summary.fixtures} results={summary.results} odds={summary.odds}"
     if summary.skipped:
         detail += " skipped=" + ",".join(summary.skipped)
-    await ctx.ledger.complete(key, now=ctx.clock(), detail=detail)
+        await ctx.ledger.fail(key, now=ctx.clock(), detail=detail)
+    else:
+        await ctx.ledger.complete(key, now=ctx.clock(), detail=detail)
     await ctx.ledger.record_run(JOB, ok=summary.ok, detail=detail, now=ctx.clock())
     logger.info("refresh_done", detail=detail)
     return summary
+
+
+async def _retryable(ctx: PipelineContext, key: LedgerKey) -> bool:
+    """True when the key exists and may be attempted again now (failed, backoff over)."""
+    return key in await ctx.ledger.due_retries(JOB, now=ctx.clock())
 
 
 async def _step(summary: RefreshSummary, name: str, work: Awaitable[None]) -> None:

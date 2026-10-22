@@ -133,6 +133,9 @@ class NotifierDelivery:
             requested=outcome.requested,
             api_requests_used=outcome.api_requests_used,
             failed_fixtures=outcome.failed_fixtures,
+            skipped_no_price=outcome.skipped_no_price,
+            skipped_stale_price=outcome.skipped_stale_price,
+            data_stale=outcome.data_stale,
         )
         summary = await RealResultService(core).day_summary(user_id, _previous(message.day))
         digest = DailyDigest(

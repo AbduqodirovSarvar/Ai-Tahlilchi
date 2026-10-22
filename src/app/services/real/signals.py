@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Final
 
+from app.domain import FixtureStatus
 from app.pipeline import data
 from app.pipeline.profile import utc_bounds
 from app.pipeline.settle import settle_manually
@@ -133,7 +134,9 @@ class RealResultService:
         return tuple(
             to_view(self._core, r)
             for r in records
-            if r.result is None and r.fixture.fixture.kickoff <= over
+            if r.result is None
+            and r.fixture.fixture.kickoff <= over
+            and r.fixture.fixture.status is not FixtureStatus.POSTPONED
         )
 
     async def mark_result(self, user_id: int, request: ResultMarkRequest) -> SignalView:
@@ -190,8 +193,10 @@ class RealBetService:
         """See :meth:`BetService.place_bet`."""
         core = self._core
         record = await require_signal(core, user_id, draft.signal_id)
-        if record.retro:
-            raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
+        repeated = await self._repeated(user_id, draft)
+        if repeated is not None:  # the same tap again: answer with the bet stored first
+            return self._view(repeated, record)
+        self._ensure_open(record)
         await core.ensure_user(user_id)
         stake = draft.stake or await self._default_stake(user_id, record)
         async with core.ctx.sessions.begin() as session:
@@ -205,6 +210,23 @@ class RealBetService:
                 client_token=draft.client_token,
             )
         return self._view(bet, record)
+
+    async def _repeated(self, user_id: int, draft: BetDraft) -> data.UserBetRecord | None:
+        if draft.client_token is None:
+            return None
+        async with self._core.ctx.sessions() as session:
+            return await data.get_bet_by_token(session, user_id, draft.client_token)
+
+    def _ensure_open(self, record: data.SignalRecord) -> None:
+        """Only an open signal takes a bet: a settled one would leave the bet open for good."""
+        if record.retro:
+            raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
+        if record.result is not None:
+            raise ValidationFailedError("signal_id", "the signal is already settled")
+        if record.status is data.SignalStatus.CANCELLED:
+            raise ValidationFailedError("signal_id", "the signal was cancelled")
+        if record.fixture.fixture.kickoff <= self._core.now():
+            raise ValidationFailedError("signal_id", "the match has already started")
 
     async def _default_stake(self, user_id: int, record: data.SignalRecord) -> Decimal:
         unit = (await self._core.profile(user_id)).unit

@@ -72,7 +72,7 @@ async def test_lineups_and_expected_goals(
         [ExternalRef("api-football", "1208021")]
     )
     router.get("/fixtures/statistics").respond(json=load("statistics_fixture_1208021.json"))
-    enriched = await provider.enrich_results(results, purpose=AUTOMATIC)
+    enriched = await provider.enrich_results(results, purpose=AUTOMATIC, max_requests=8)
     assert len(enriched) == len(results)
 
 

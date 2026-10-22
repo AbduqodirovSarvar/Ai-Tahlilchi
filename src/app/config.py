@@ -19,6 +19,7 @@ from app.errors import ConfigurationError
 type AppEnv = Literal["dev", "prod"]
 type ServicesBackend = Literal["fake", "real"]
 type HandicapConventionName = Literal["home_line", "own_line"]
+type StakingModeName = Literal["flat", "kelly"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 type SecretName = Literal[
     "telegram_bot_token", "api_football_key", "odds_api_key", "gemini_api_key"
@@ -58,6 +59,9 @@ class Settings(BaseSettings):
     # Which implementation of the service contract the bot talks to: the in-memory sample
     # data ("fake", the default until API keys exist) or the pipeline-backed one ("real").
     app_services: ServicesBackend = "fake"
+    # How many units a recommendation stakes: one flat unit, or a capped quarter Kelly of the
+    # user's bank (falls back to flat for a user without a bank and unit).
+    staking_mode: StakingModeName = "flat"
     healthchecks_url: HttpUrl | None = None
 
     @field_validator("log_level", mode="before")

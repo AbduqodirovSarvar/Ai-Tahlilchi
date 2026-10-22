@@ -8,7 +8,11 @@ The rules of the service contract (``docs/contracts.md`` §4, "Semantika"):
   analysis (``include_no_value``) keeps every selection and flags the failing ones;
 - the result is sorted, then cut to ``max_signals`` in total or per local day;
 - watched fixtures (scope ``all``) are always included - a failing one with its highest-EV
-  selection - outside the cut and outside the ``matched`` count.
+  selection - outside the cut and outside the ``matched`` count;
+- retro picks (the match had already started: a look-back, never a recommendation) never
+  compete with real ones: they get their own ``max_signals`` budget after the real picks and
+  are not counted in ``matched``. Only when a run has no real pick at all (a look-back at
+  past days) do they count as the regular result.
 """
 
 from collections.abc import Callable, Sequence
@@ -101,13 +105,20 @@ def picks_for_fixture(
 def assemble(by_fixture: Sequence[Sequence[Pick]], request: AnalysisRequest) -> Assembly:
     """Sort, cut and merge the per-fixture picks (see the module docstring)."""
     regular: list[Pick] = []
+    retro: list[Pick] = []
     watched: list[Pick] = []
     for picks in by_fixture:
         is_watched = request.scope is QueryScope.ALL and any(pick.watchlist for pick in picks)
-        (watched if is_watched else regular).extend(picks)
+        if is_watched:
+            watched.extend(picks)
+        else:
+            (retro if any(pick.retro for pick in picks) else regular).extend(picks)
+    if not regular:  # a pure look-back: the retro picks are the result
+        regular, retro = retro, []
     order = sort_key(request.sort)
     regular.sort(key=order)
-    kept = _cut(regular, request)
+    retro.sort(key=order)
+    kept = [*_cut(regular, request), *_cut(retro, request)]
     return Assembly(picks=tuple(sorted([*kept, *watched], key=order)), matched=len(regular))
 
 
