@@ -16,6 +16,7 @@ from sklearn.isotonic import IsotonicRegression
 
 from app.models.asian import AsianOutcomeProbabilities
 from app.models.calibration import (
+    NEGLIGIBLE_MASS,
     CalibrationReason,
     CalibrationSample,
     apply_params,
@@ -150,12 +151,12 @@ def test_perturbing_anything_settled_at_or_after_the_cutoff_changes_nothing(seed
 
 def test_the_holdout_labels_decide_the_gate_not_the_fit() -> None:
     """Flipping only the newest 30% of labels must turn a passing fit into a failing one."""
-    samples = _samples(2000, shift=0.15, seed=3)
+    samples = _samples(6000, shift=0.15, seed=3)
     cutoff = samples[-1].settled_at + timedelta(hours=1)
     assert fit_calibration(samples, cutoff=cutoff, version=1).activate
 
     flipped = [
-        s if index < 1400 else CalibrationSample(s.probability, not s.hit, s.settled_at)
+        s if index < 4200 else CalibrationSample(s.probability, not s.hit, s.settled_at)
         for index, s in enumerate(samples)
     ]
     fit = fit_calibration(flipped, cutoff=cutoff, version=1)
@@ -177,7 +178,7 @@ def test_asian_rescale_hits_the_target_and_keeps_a_distribution(
     outcomes = AsianOutcomeProbabilities(
         win=a / total, half_win=b / total, push=0.0, half_loss=c / total, loss=1.0 / total
     )
-    if outcomes.win + outcomes.half_win <= 0.0:
+    if outcomes.win + outcomes.half_win <= NEGLIGIBLE_MASS:
         return
     scaled = rescale_outcomes(outcomes, target)
     parts = (scaled.win, scaled.half_win, scaled.push, scaled.half_loss, scaled.loss)
@@ -325,7 +326,7 @@ def test_a_clearly_overconfident_model_is_calibrated_within_a_year() -> None:
 
 
 def test_confirmation_needs_two_passes_in_a_row_without_a_gap() -> None:
-    samples = _samples(2000, shift=0.15, seed=3)
+    samples = _samples(6000, shift=0.15, seed=3)
     cutoff = samples[-1].settled_at + timedelta(hours=1)
     fit = fit_calibration(samples, cutoff=cutoff, version=1)
     assert fit.activate

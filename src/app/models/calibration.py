@@ -51,6 +51,7 @@ OUTPUT_FLOOR: Final = 0.01
 OUTPUT_CEILING: Final = 0.99
 """Calibrated probabilities stay inside this band: a fitted step of 0 or 1 is never certainty."""
 COMPLEMENT_SUM_TOLERANCE: Final = 1e-6
+NEGLIGIBLE_MASS: Final = 1e-12
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +219,7 @@ def rescale_outcomes(
     """
     current = outcomes.win + outcomes.half_win
     target = check_probability(win_probability)
-    if current <= 0.0:
+    if current <= NEGLIGIBLE_MASS:  # nothing to scale (and a denormal would overflow the ratio)
         return outcomes
     up = target / current
     rest = 1.0 - current
