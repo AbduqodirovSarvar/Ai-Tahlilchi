@@ -41,6 +41,7 @@ from app.pipeline.ingest import (
 )
 from app.pipeline.modeling import FittedLeague
 from app.pipeline.odds import current_quotes, load_decision_snapshots
+from app.pipeline.overlay import LearningOverlay
 from app.pipeline.persist import store_picks
 from app.pipeline.provider import MANUAL, QuotaSnapshot
 from app.pipeline.queries import league_refs, team_refs
@@ -234,9 +235,12 @@ class AnalysisEngine:
         fitted: dict[tuple[ExternalRef, date], FittedLeague] = {}
         by_fixture: list[list[Pick]] = []
         tally = Tally()
+        overlay = await ctx.learning.load()  # one read per run: calibration and segment rules
         for done, item in enumerate(items, start=1):
             try:
-                picks = await self._value_one(request, item, snapshots, fitted, (now, tally))
+                picks = await self._value_one(
+                    request, item, snapshots, fitted, (now, tally, overlay)
+                )
             except Exception as error:  # one bad fixture must not fail the other 29
                 tally.failed += 1
                 logger.warning(
@@ -253,10 +257,10 @@ class AnalysisEngine:
         item: WindowItem,
         snapshots: dict[ExternalRef, list[OddsSnapshot]],
         fitted: dict[tuple[ExternalRef, date], FittedLeague],
-        run: tuple[datetime, Tally],
+        run: tuple[datetime, Tally, LearningOverlay],
     ) -> list[Pick]:
         ctx = self._ctx
-        now, tally = run
+        now, tally, overlay = run
         record = item.record
         fixture = record.fixture
         kind = classify(record, now) or "upcoming"
@@ -276,6 +280,7 @@ class AnalysisEngine:
                 markets=request.markets,
                 allow_model_only=request.include_no_value,
                 require_fresh=kind == "upcoming",
+                calibration=overlay.calibration,
             ),
             ctx.config,
         )
@@ -283,12 +288,16 @@ class AnalysisEngine:
             logger.debug("fixture_skipped", fixture=str(fixture.ref), reason=valuation.skip)
             tally.no_price += valuation.skip == SKIP_NO_PRICE
             tally.stale_price += valuation.skip == SKIP_STALE_PRICE
+        watched = request.scope is QueryScope.ALL and item.watched
+        # Learning loop: disabled segments and raised EV bars apply to recommendations only;
+        # "show me everything" (custom) and followed fixtures keep every candidate.
+        candidates = (
+            valuation.candidates
+            if request.include_no_value or watched
+            else overlay.filter(valuation.candidates, fixture)
+        )
         return picks_for_fixture(
-            record,
-            valuation.candidates,
-            request,
-            watched=request.scope is QueryScope.ALL and item.watched,
-            retro=kind == "retro",
+            record, candidates, request, watched=watched, retro=kind == "retro"
         )
 
     # ------------------------------------------------------------------ scope

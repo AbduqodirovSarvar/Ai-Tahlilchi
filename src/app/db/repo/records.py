@@ -85,6 +85,8 @@ class SignalDraft:
     llm_note: str | None = None
     fair_odds: float | None = None
     quoted_at: datetime | None = None
+    p_raw: float | None = None
+    """The probability before calibration (``None`` = ``p_model`` is already raw)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -128,6 +130,7 @@ class SignalRecord:
     recommended_odds: float | None = None
     fair_odds: float | None = None
     quoted_at: datetime | None = None
+    p_raw: float | None = None
 
     @property
     def first_odds(self) -> float:

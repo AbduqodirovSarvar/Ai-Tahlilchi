@@ -15,6 +15,7 @@ from app.pipeline.config import PipelineConfig
 from app.pipeline.leagues import LeagueDirectory
 from app.pipeline.ledger import Ledger
 from app.pipeline.modeling import ModelCache
+from app.pipeline.overlay import LearningSource, NoLearning
 from app.pipeline.provider import SportProvider
 from app.pipeline.review import CandidateReviewer, NoReview
 
@@ -34,6 +35,7 @@ class PipelineContext:
     config: PipelineConfig = field(default_factory=PipelineConfig)
     leagues: LeagueDirectory = field(default_factory=LeagueDirectory)
     reviewer: CandidateReviewer = field(default_factory=NoReview)
+    learning: LearningSource = field(default_factory=NoLearning)
     models: ModelCache = field(init=False)
 
     def __post_init__(self) -> None:

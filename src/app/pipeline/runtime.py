@@ -22,6 +22,7 @@ from app.pipeline.clock import Clock, system_clock
 from app.pipeline.config import PipelineConfig, StakingMode
 from app.pipeline.context import PipelineContext
 from app.pipeline.ledger import Ledger
+from app.pipeline.overlay import DbLearningSource
 from app.pipeline.provider import FootballProvider
 from app.pipeline.review import LlmCandidateReviewer
 from app.sports.football_mapping import HandicapConvention
@@ -68,6 +69,7 @@ async def open_runtime(
         clock=clock,
         config=config or PipelineConfig(staking=StakingMode(settings.staking_mode)),
         reviewer=LlmCandidateReviewer(create_llm_service(settings)),
+        learning=DbLearningSource(sessions),
     )
     try:
         yield Runtime(ctx=ctx, http=http)

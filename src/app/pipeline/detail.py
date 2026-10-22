@@ -163,6 +163,7 @@ async def build_fixture_card(ctx: PipelineContext, fixture_id: int) -> FixtureCa
         moves = await _moves(session, ctx, record)
     fitted = await ctx.models.get(league, fixture.kickoff.date())
     quotes = current_quotes(snapshots, fixture.ref, fixture.kickoff)
+    overlay = await ctx.learning.load()
     valuation = value_fixture(
         ValuationInput(
             fixture=fixture,
@@ -171,6 +172,7 @@ async def build_fixture_card(ctx: PipelineContext, fixture_id: int) -> FixtureCa
             now=now,
             markets=frozenset(q.market.type for q in quotes),
             allow_model_only=True,
+            calibration=overlay.calibration,
         ),
         ctx.config,
     )

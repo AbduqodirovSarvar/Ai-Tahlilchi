@@ -371,6 +371,9 @@ class SignalRow(TimestampMixin, Base):
     # When the bookmaker price behind ``odds`` was taken (the card's "data as of"); NULL for
     # rows from before 0007.
     quoted_at: Mapped[datetime | None]
+    # The model's probability before the active calibration was applied (0008); NULL = ``p_model``
+    # is the raw number. The learning loop trains on this, never on an already-calibrated value.
+    p_raw: Mapped[float | None]
 
     fixture: Mapped[FixtureRow] = relationship(lazy="raise")
 
@@ -547,6 +550,10 @@ class SegmentStatRow(Base):
     ev_threshold: Mapped[float]
     enabled: Mapped[bool] = mapped_column(default=True)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+    # When the current restriction (raised bar / disabled) began, and until when automatic
+    # review must leave the segment alone after a manual rollback (0008).
+    state_since: Mapped[datetime | None]
+    hold_until: Mapped[datetime | None]
 
 
 class CalibrationVersionRow(CreatedAtMixin, Base):
@@ -567,6 +574,24 @@ class CalibrationVersionRow(CreatedAtMixin, Base):
     brier_before: Mapped[float]
     brier_after: Mapped[float]
     active: Mapped[bool] = mapped_column(default=False)
+    # Whether the fit beat the raw model on its hold-out (0008); only such a version may ever
+    # be active, and rollback walks back through these.
+    passed_gate: Mapped[bool] = mapped_column(default=False, server_default=false())
+
+
+class LearningChangeRow(CreatedAtMixin, Base):
+    """Journal of what the learning loop changed; ``before``/``after`` allow a rollback."""
+
+    __tablename__ = "learning_changes"
+    __table_args__ = (Index(None, "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH))
+    subject: Mapped[str] = mapped_column(String(NAME_LENGTH))
+    before: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    after: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    reason: Mapped[str] = mapped_column(Text)
+    rolled_back: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 # --------------------------------------------------------------------------- operations
