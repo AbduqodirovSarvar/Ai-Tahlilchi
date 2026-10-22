@@ -385,10 +385,5 @@ def test_probe_full_run_spends_at_most_twenty_five_requests_and_leaks_nothing(
         assert private not in status_text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-A1: F2 acceptance names `python -m app.pipeline.refresh`; the module does not "
-    "exist yet (pipeline wave); only the adapter-level refresh is verified here",
-)
 def test_the_refresh_entry_point_named_by_the_acceptance_criterion_exists() -> None:
     assert importlib.util.find_spec("app.pipeline.refresh") is not None
