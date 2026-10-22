@@ -7,6 +7,7 @@ where they exist; the records below add the database id and storage-only fields.
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Final
 
 from app.db.enums import (
     Confidence,
@@ -24,6 +25,9 @@ from app.db.enums import (
     WatchKind,
 )
 from app.domain import Fixture, FixtureResult, Market, Selection, Sport
+
+MIN_WEEKDAY: Final = 1
+MAX_WEEKDAY: Final = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +207,17 @@ class SavedQueryDraft:
     markets: tuple[str, ...]
     max_signals: int | None
     sort: SortOrder
-    schedule_cron: str | None = None
+    per_day: bool = False
+    include_no_value: bool = False
+    schedule_weekdays: tuple[int, ...] = ()
+    schedule_at: time | None = None
+
+    def __post_init__(self) -> None:
+        """A schedule is weekdays (ISO 1..7) together with a local time, or neither."""
+        if bool(self.schedule_weekdays) != (self.schedule_at is not None):
+            raise ValueError("schedule_weekdays and schedule_at are set together")
+        if not all(MIN_WEEKDAY <= day <= MAX_WEEKDAY for day in self.schedule_weekdays):
+            raise ValueError("schedule_weekdays must be ISO weekdays 1..7")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -241,3 +255,15 @@ class UserBetRecord:
     profit: Decimal | None
     placed_at: datetime
     settled_at: datetime | None
+    client_token: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SignalNoteRecord:
+    """A user's note on one of their signals."""
+
+    id: int
+    user_id: int
+    signal_id: int
+    text: str
+    created_at: datetime

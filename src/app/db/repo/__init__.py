@@ -6,6 +6,15 @@ counter updates. They return domain objects or frozen DTOs from
 :mod:`app.db.repo.records`, never ORM rows. See ``docs/contracts.md`` §3.
 """
 
+from app.db.repo.catalog import (
+    get_league,
+    get_team,
+    league_refs,
+    league_teams,
+    list_leagues,
+    team_refs,
+    user_ids,
+)
 from app.db.repo.fixtures import (
     finished_fixtures,
     get_fixture_by_id,
@@ -13,6 +22,7 @@ from app.db.repo.fixtures import (
     list_fixtures,
     upsert_live,
 )
+from app.db.repo.notes import add_signal_note, list_signal_notes
 from app.db.repo.odds import DEFAULT_KIND_PRIORITY, latest_odds, odds_history
 from app.db.repo.operations import (
     DEFAULT_CLAIM_LEASE,
@@ -23,6 +33,7 @@ from app.db.repo.operations import (
     complete_recalc,
     create_bet,
     enqueue_recalc,
+    get_bet_by_token,
     list_bets,
     release_recalc,
     settle_bet,
@@ -34,6 +45,7 @@ from app.db.repo.records import (
     SavedQueryDraft,
     SavedQueryRecord,
     SignalDraft,
+    SignalNoteRecord,
     SignalRecord,
     SignalResultRecord,
     SignalVersionRecord,
@@ -80,6 +92,7 @@ __all__ = [
     "SavedQueryDraft",
     "SavedQueryRecord",
     "SignalDraft",
+    "SignalNoteRecord",
     "SignalRecord",
     "SignalResultRecord",
     "SignalVersionRecord",
@@ -88,6 +101,7 @@ __all__ = [
     "UserRecord",
     "UserSettingsRecord",
     "WatchRecord",
+    "add_signal_note",
     "add_watch",
     "bets_for_signal",
     "bets_placed_between",
@@ -99,16 +113,23 @@ __all__ = [
     "enqueue_recalc",
     "ensure_user",
     "finished_fixtures",
+    "get_bet_by_token",
     "get_fixture_by_id",
     "get_fixtures",
+    "get_league",
     "get_saved_query",
     "get_signal",
+    "get_team",
     "get_user",
     "get_user_settings",
     "latest_odds",
+    "league_refs",
+    "league_teams",
     "list_bets",
     "list_fixtures",
+    "list_leagues",
     "list_saved_queries",
+    "list_signal_notes",
     "list_user_signals",
     "list_watchlist",
     "odds_history",
@@ -123,9 +144,11 @@ __all__ = [
     "settle_signal",
     "signal_versions",
     "signals_for_fixtures",
+    "team_refs",
     "unsettled_signals",
     "update_user",
     "upsert_live",
     "upsert_signal",
     "upsert_user_settings",
+    "user_ids",
 ]

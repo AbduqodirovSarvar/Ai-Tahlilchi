@@ -27,6 +27,8 @@ from app.db.schema import (
 from app.domain import FixtureStatus, MarketType, OddsKind, Selection, Sport
 
 PLAN_TABLES = {
+    "pipeline_ledger",
+    "signal_notes",
     "fixtures",
     "odds_snapshots",
     "signals",
