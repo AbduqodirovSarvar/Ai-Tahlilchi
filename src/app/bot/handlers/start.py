@@ -1,6 +1,6 @@
 """``/start``, ``/yordam``, ``/bekor`` and the main-menu buttons of later features.
 
-Menu items whose features arrive in later waves (F6.8, F7) answer with a polite
+Menu items whose features arrive in later waves (F7) answer with a polite
 "tez orada" message but stay wired, so the menu layout is final from day one.
 """
 
@@ -20,9 +20,7 @@ from app.bot.states import drop_draft, load_draft
 PLACEHOLDER_ITEMS: Final = (
     texts.MENU_CUSTOM,
     texts.MENU_TEMPLATES,
-    texts.MENU_TODAY,
     texts.MENU_WATCHLIST,
-    texts.MENU_BETS,
     texts.MENU_REPORT,
 )
 
@@ -68,7 +66,6 @@ def create_router() -> Router:
     router = Router(name="start")
     router.message.register(handle_start, CommandStart())
     router.message.register(handle_help, Command("yordam", "help"))
-    router.message.register(handle_help, F.text == texts.MENU_HELP)
     router.message.register(handle_cancel, Command("bekor", "cancel"))
     router.message.register(handle_placeholder, F.text.in_(PLACEHOLDER_ITEMS))
     return router

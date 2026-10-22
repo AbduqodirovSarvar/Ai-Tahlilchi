@@ -78,9 +78,10 @@
 - [x] F5.4 Validatsiya, qayta urinish, fallback (`LlmService`; gallyutsinatsiya qo'rig'i; `postmortem` minimal)
 - [x] F5.5 Bepul tarif limitlari nazorati (kunlik so'rov/token byudjeti, xotiradagi jurnal)
 - [x] F5.6 Gemini testlari (mock; 27 golden holat, `scripts/llm_eval.py` jonli faqat qo'lda; jonli baholash kalit kelgach bajariladi). T4 QA tuzatish raundi (F-1…F-14: rezerv-hisob limit, tuzilmaviy xato tasnifi, gap boshidagi nom qo'riqi, `reason` qo'riqi, baholangan token) bajarildi: [qa/T4-llm.md](qa/T4-llm.md), [ADR 0009](adr/0009-llm-integration.md)
-- [ ] F6.7 Qayta hisoblash
-- [ ] F6.8 Bugungi signallar va kunlik xabar
-- [ ] F6.9 `/holat`
+- [x] F6.7 Qayta hisoblash: kartadagi 🔄 (karta tahrirlanadi + farq xabari), 🔄 Hammasini yangilash (`recalc_query`/`recalc_window`, fon vazifasi + progress), `/qayta`; cooldown, `BusyError`, `ServiceUnavailableError`, `BudgetExceededError` xabarlari ([ADR 0010](adr/0010-notifier-and-recalc-ux.md)) (bot-engineer)
+- [x] F6.8 ⚡ Bugungi signallar (`list_signals` + `get_signals` ommaviy sahifalash, bo'sh holat) va kunlik xabar (Telegram `Notifier`: kartalar kunlar bo'yicha, ⭐ blok, kechagi natija, shortfall / "Value topilmadi")
+- [x] F6.9 `/holat`: rejim, API limitlari, yangilanish vaqti, oxirgi ishlar va xatolar. LLM byudjeti `SystemStatus` da yo'q: shartnoma so'rovi [ADR 0010](adr/0010-notifier-and-recalc-ux.md) 6-bo'lim
+- [x] T4 bot: `TelegramNotifier` (24h / pre-match / bekor / sevimlilar / natija / admin xabarlari, bloklangan foydalanuvchi → `None`), ✅ Stavka qildim (idempotent `place_bet`) va 🎟 ochiq stavkalar ro'yxati (to'liq F7.5 UI keyin)
 
 ## T5 — Kengaytmalar va deploy
 - [ ] F7.1 Maxsus tahlil

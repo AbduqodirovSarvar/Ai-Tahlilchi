@@ -17,7 +17,7 @@ from aiogram.types import CallbackQuery, Chat, Message, TelegramObject, Update, 
 
 from app.bot import texts
 from app.bot.draft import StaleDraftError
-from app.bot.formatters import budget_message, cooldown_message, validation_message
+from app.bot.formatters import budget_message, cooldown_message, escape, validation_message
 from app.bot.messaging import (
     CALLBACK_ALERT_LIMIT,
     AnswerTracker,
@@ -30,9 +30,11 @@ from app.bot.parsing import InputError
 from app.logging import get_logger
 from app.services.errors import (
     BudgetExceededError,
+    BusyError,
     CooldownActiveError,
     NotFoundError,
     ServiceError,
+    ServiceUnavailableError,
     ValidationFailedError,
 )
 
@@ -167,6 +169,10 @@ def user_message_for(error: Exception) -> str:
             message = cooldown_message(error)
         case BudgetExceededError():
             message = budget_message(error)
+        case BusyError():
+            message = texts.BUSY
+        case ServiceUnavailableError():
+            message = texts.SERVICE_UNAVAILABLE.format(component=escape(error.component))
         case ValidationFailedError():
             message = validation_message(error)
         case NotFoundError():

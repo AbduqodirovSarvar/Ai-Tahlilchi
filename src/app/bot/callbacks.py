@@ -5,6 +5,9 @@ Prefixes are two letters and values are short enum codes or small integers. Cata
 keep the options of the visible page in FSM data and the button carries the option index.
 """
 
+import base64
+import binascii
+
 from aiogram.filters.callback_data import CallbackData
 
 
@@ -91,6 +94,40 @@ class EditCb(CallbackData, prefix="wx"):
 
 class CardCb(CallbackData, prefix="sc"):
     """Signal card buttons: ``recalc``, ``detail``, ``bet`` or ``hide``."""
+
+    action: str
+    signal_id: int
+
+
+class RecalcAllCb(CallbackData, prefix="ra"):
+    """Hammasini yangilash: ``kind`` ``q`` = analysis ``ref`` (query id), ``d`` = digest day.
+
+    ``ref`` is the query id in :func:`encode_ref` form (an ``EntityId`` may contain ``:``,
+    the separator) or an ISO date. 40 bytes of id become at most 54 characters, so the data
+    fits the 64-byte limit next to the two-letter prefix and ``kind``.
+    """
+
+    kind: str
+    ref: str
+
+
+def encode_ref(value: str) -> str:
+    """Make a free-form id safe for ``callback_data`` (URL-safe base64, no padding)."""
+    return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
+
+
+def decode_ref(text: str) -> str | None:
+    """Inverse of :func:`encode_ref`; ``None`` when ``text`` was not produced by it."""
+    standard = text.replace("-", "+").replace("_", "/")
+    try:
+        decoded = base64.b64decode(standard + "=" * (-len(standard) % 4), validate=True)
+        return decoded.decode() or None
+    except (binascii.Error, ValueError):  # ValueError covers non-ASCII text and bad UTF-8
+        return None
+
+
+class BetCb(CallbackData, prefix="bt"):
+    """Stavka prompt: ``ok`` (record with the defaults), ``custom`` or ``cancel``."""
 
     action: str
     signal_id: int

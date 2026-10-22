@@ -15,7 +15,7 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from app.bot import texts
-from app.domain import MarketType, Selection, Sport
+from app.domain import Market, MarketType, Selection, Sport
 from app.services.errors import BudgetExceededError, CooldownActiveError, ValidationFailedError
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
@@ -136,8 +136,13 @@ def _line(value: float | None, *, signed: bool = False) -> str:
 
 def selection_label(signal: SignalView) -> str:
     """Human description of the backed selection (``Total 2.5 dan ko'p``)."""
-    home, away = escape(signal.home_team), escape(signal.away_team)
-    market, selection = signal.market, signal.selection
+    return describe_selection(
+        signal.market, signal.selection, escape(signal.home_team), escape(signal.away_team)
+    )
+
+
+def describe_selection(market: Market, selection: Selection, home: str, away: str) -> str:
+    """Selection text for already escaped team names (or role words when names are unknown)."""
     match market.type:
         case MarketType.MATCH_RESULT:
             by_selection = {

@@ -1,7 +1,7 @@
 """Signal card buttons and "➡️ Yana N ta" result pagination.
 
-🙈 Yashirish is implemented; 🔄 Qayta hisoblash (F6.7), 📋 Batafsil (F7.2) and
-✅ Stavka qildim (F7.5) are wired and answer with a "coming soon" alert until their wave.
+🙈 Yashirish is implemented here; 🔄 Qayta hisoblash lives in ``recalc``, ✅ Stavka qildim
+in ``bets``. 📋 Batafsil (F7.2) is wired and answers with a "coming soon" alert.
 """
 
 from aiogram import Router
@@ -15,7 +15,6 @@ from app.bot.handlers.analysis_run import send_result_page
 from app.bot.messaging import answer_callback, callback_message, edit_html
 from app.bot.states import load_results, save_results
 from app.logging import get_logger
-from app.services.errors import NotFoundError
 from app.services.interfaces import Services, SignalView
 
 logger = get_logger(__name__)
@@ -24,7 +23,7 @@ logger = get_logger(__name__)
 async def on_card(
     callback: CallbackQuery, callback_data: CardCb, services: Services, user_id: int
 ) -> None:
-    """Card buttons; only "🙈 Yashirish" is available in this version."""
+    """Card buttons handled here: "🙈 Yashirish" (📋 Batafsil is still a placeholder)."""
     if callback_data.action != "hide":
         await answer_callback(callback, texts.PLACEHOLDER_ALERT, alert=True)
         return
@@ -36,14 +35,12 @@ async def on_card(
 
 
 async def _fetch(services: Services, user_id: int, signal_ids: tuple[int, ...]) -> list[SignalView]:
-    """Signals still available, in the stored order (a vanished one is skipped)."""
-    signals: list[SignalView] = []
-    for signal_id in signal_ids:
-        try:
-            signals.append(await services.signals.get_signal(user_id, signal_id))
-        except NotFoundError:
-            logger.info("result_signal_missing", signal_id=signal_id)
-    return signals
+    """Signals still available, in the stored order (the batch call skips vanished ones)."""
+    signals = await services.signals.get_signals(user_id, signal_ids)
+    missing = len(signal_ids) - len(signals)
+    if missing:
+        logger.info("result_signals_missing", count=missing)
+    return list(signals)
 
 
 async def on_results_page(

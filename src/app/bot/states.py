@@ -18,6 +18,7 @@ from app.bot.draft import StaleDraftError, WizardDraft
 DRAFT_KEY = "draft"
 RESULTS_KEY = "results"
 SETTINGS_FIELD_KEY = "settings_field"
+BET_KEY = "bet"
 RESULTS_TOKEN_MODULUS = 1000
 """Result tokens cycle: they only have to differ from the previous result's."""
 
@@ -44,6 +45,12 @@ class AnalysisFlow(StatesGroup):
     edit = State()
     template_name = State()
     running = State()
+
+
+class BetFlow(StatesGroup):
+    """🎟 Waiting for the odds (and stake) the user really got, typed as ``1.90 50000``."""
+
+    value_input = State()
 
 
 class SettingsFlow(StatesGroup):
@@ -138,3 +145,38 @@ async def load_results(state: FSMContext) -> StoredResults:
     """The last analysis result (raises :class:`StaleDraftError` if gone)."""
     data = await state.get_data()
     return StoredResults.from_data(data.get(RESULTS_KEY))
+
+
+@dataclass(frozen=True, slots=True)
+class PendingBet:
+    """The bet prompt whose odds/stake the user is typing."""
+
+    signal_id: int
+    message_id: int
+
+
+async def start_bet_input(state: FSMContext, pending: PendingBet) -> None:
+    """Wait for the typed odds/stake of ``pending``."""
+    await state.update_data(
+        {BET_KEY: {"signal_id": pending.signal_id, "message_id": pending.message_id}}
+    )
+    await state.set_state(BetFlow.value_input)
+
+
+async def load_bet_input(state: FSMContext) -> PendingBet:
+    """The prompt being answered (raises :class:`StaleDraftError` if the data is gone)."""
+    data = (await state.get_data()).get(BET_KEY)
+    if not isinstance(data, dict):
+        raise StaleDraftError
+    signal_id, message_id = data.get("signal_id"), data.get("message_id")
+    if not isinstance(signal_id, int) or not isinstance(message_id, int):
+        raise StaleDraftError
+    return PendingBet(signal_id, message_id)
+
+
+async def drop_bet_input(state: FSMContext) -> None:
+    """Leave the typed-bet step."""
+    data = await state.get_data()
+    data.pop(BET_KEY, None)
+    await state.set_state(None)
+    await state.set_data(data)

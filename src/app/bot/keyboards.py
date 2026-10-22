@@ -16,6 +16,7 @@ from aiogram.types import (
 
 from app.bot import texts
 from app.bot.callbacks import (
+    BetCb,
     CalendarCb,
     CardCb,
     ConfirmCb,
@@ -28,11 +29,13 @@ from app.bot.callbacks import (
     NoopCb,
     PickCb,
     ProbabilityCb,
+    RecalcAllCb,
     ResultsCb,
     ScopeCb,
     SettingsCb,
     SortCb,
     SportCb,
+    encode_ref,
 )
 from app.domain import MarketType
 from app.services.interfaces import (
@@ -41,6 +44,8 @@ from app.services.interfaces import (
     RISK_PRESETS,
     RiskProfile,
     ScopeKind,
+    SignalState,
+    SignalView,
     SortKey,
     SportOption,
     horizon_end,
@@ -80,6 +85,8 @@ SETTINGS_TIMEZONE_CHOICES: Final = (
 )
 SETTINGS_RISK_CHOICES: Final = tuple(RISK_PRESETS)
 SETTINGS_FIELDS: Final = tuple(texts.SETTINGS_BUTTONS)
+RECALC_KIND_QUERY: Final = "q"
+RECALC_KIND_DAY: Final = "d"
 MULTI_SELECT_FIELDS: Final = frozenset({"sports", "markets", "leagues"})
 MONEY_FIELDS: Final = frozenset({"bank", "unit", "daily_loss", "weekly_loss"})
 TYPED_FIELDS: Final = frozenset(texts.SETTINGS_INPUT_PROMPTS)
@@ -418,6 +425,52 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
             ],
         ]
     )
+
+
+def signal_keyboard(signal: SignalView) -> InlineKeyboardMarkup:
+    """Card buttons that fit the signal: retro and cancelled signals cannot be recalculated."""
+    return card_keyboard(
+        signal.signal_id, retro=signal.retro or signal.state is SignalState.CANCELLED
+    )
+
+
+def recalc_query_keyboard(query_id: str) -> InlineKeyboardMarkup:
+    """The 🔄 Hammasini yangilash button under an analysis summary."""
+    callback = RecalcAllCb(kind=RECALC_KIND_QUERY, ref=encode_ref(query_id))
+    return _markup([[_button(texts.BTN_RECALC_ALL, callback)]])
+
+
+def recalc_day_keyboard(day: date) -> InlineKeyboardMarkup:
+    """The same button under a daily digest or today's list: recalculates that day."""
+    callback = RecalcAllCb(kind=RECALC_KIND_DAY, ref=day.isoformat())
+    return _markup([[_button(texts.BTN_RECALC_ALL, callback)]])
+
+
+def bet_prompt_keyboard(
+    signal_id: int, odds_text: str, *, can_use_defaults: bool
+) -> InlineKeyboardMarkup:
+    """Confirm with the signal's numbers (when a stake is known), type others, or cancel."""
+    rows: Rows = []
+    if can_use_defaults:
+        rows.append(
+            [
+                _button(
+                    texts.BTN_BET_OK.format(odds=odds_text), BetCb(action="ok", signal_id=signal_id)
+                )
+            ]
+        )
+    rows.append(
+        [
+            _button(texts.BTN_BET_CUSTOM, BetCb(action="custom", signal_id=signal_id)),
+            _button(texts.BTN_BET_CANCEL, BetCb(action="cancel", signal_id=signal_id)),
+        ]
+    )
+    return _markup(rows)
+
+
+def bet_cancel_keyboard(signal_id: int) -> InlineKeyboardMarkup:
+    """Only "❌ Bekor qilish" while the user is typing odds and stake."""
+    return _markup([[_button(texts.BTN_BET_CANCEL, BetCb(action="cancel", signal_id=signal_id))]])
 
 
 def more_results_keyboard(next_page: int, count: int, token: int) -> InlineKeyboardMarkup:

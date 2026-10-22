@@ -57,7 +57,7 @@ async def test_start_from_stranger_gets_no_reply(bot: Bot, session: RecordingSes
     assert session.requests == []
 
 
-@pytest.mark.parametrize("command", ["/yordam", "/help", texts.MENU_HELP])
+@pytest.mark.parametrize("command", ["/yordam", "/help"])
 async def test_help_lists_commands_and_glossary(harness: BotHarness, command: str) -> None:
     methods = await harness.send(command)
 
@@ -71,9 +71,7 @@ async def test_help_lists_commands_and_glossary(harness: BotHarness, command: st
     [
         texts.MENU_CUSTOM,
         texts.MENU_TEMPLATES,
-        texts.MENU_TODAY,
         texts.MENU_WATCHLIST,
-        texts.MENU_BETS,
         texts.MENU_REPORT,
     ],
 )

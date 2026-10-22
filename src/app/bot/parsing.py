@@ -153,6 +153,25 @@ def parse_money(text: str) -> Decimal:
     return amount
 
 
+def parse_bet_input(text: str) -> tuple[float, Decimal | None]:
+    """``1.90`` or ``1.90 50000`` → ``(1.9, None)`` / ``(1.9, Decimal("50000"))``.
+
+    The first word is the odds the user really got; the rest, if any, the stake (spaces
+    inside it are thousands separators).
+    """
+    parts = text.split(maxsplit=1)
+    if not parts:
+        raise InputError(texts.PARSE_EMPTY)
+    try:
+        value = parse_number(parts[0], example="1.90")
+    except InputError:
+        raise InputError(texts.BET_BAD_INPUT.format(value=_quoted(text))) from None
+    if not MIN_ODDS_LIMIT <= value <= MAX_ODDS_LIMIT:
+        raise InputError(texts.BET_BAD_ODDS.format(low=MIN_ODDS_LIMIT, high=f"{MAX_ODDS_LIMIT:g}"))
+    stake = parse_money(parts[1]) if len(parts) > 1 else None
+    return value, stake
+
+
 def parse_odds_range(text: str) -> tuple[float, float]:
     """``1.40-3.00`` → ``(1.4, 3.0)`` within the contract's odds limits."""
     error = InputError(
