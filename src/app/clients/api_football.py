@@ -16,7 +16,7 @@ from itertools import batched
 from typing import Final
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from app.clients.api_football_models import (
     Envelope,
@@ -30,10 +30,10 @@ from app.clients.cache import QueryParams, TtlCache
 from app.clients.http import ApiClient, ProviderConfig, create_http_client
 from app.clients.quota import (
     DEFAULT_MANUAL_RESERVE_SHARE,
-    QuotaGuard,
     QuotaPolicy,
     RequestPurpose,
     UsageStore,
+    shared_guard,
 )
 from app.errors import ExternalServiceError
 from app.logging import get_logger
@@ -48,6 +48,16 @@ MAX_IDS_PER_REQUEST: Final = 20
 # Safety stop for pagination (a league-day of odds is a handful of pages).
 MAX_PAGES: Final = 30
 
+
+def _rate_limited_body(payload: JsonValue) -> str | None:
+    """Per-minute rate limit reported inside an HTTP 200 body: retry it like a 429."""
+    if isinstance(payload, dict):
+        errors = payload.get("errors")
+        if isinstance(errors, dict) and "rateLimit" in errors:
+            return "rate limit reported in body"
+    return None
+
+
 API_FOOTBALL_CONFIG: Final = ProviderConfig(
     name=PROVIDER,
     base_url="https://v3.football.api-sports.io",
@@ -55,6 +65,7 @@ API_FOOTBALL_CONFIG: Final = ProviderConfig(
     requests_per_minute=FREE_PLAN_REQUESTS_PER_MINUTE,
     limit_header="x-ratelimit-requests-limit",
     remaining_header="x-ratelimit-requests-remaining",
+    retryable_body=_rate_limited_body,
 )
 
 
@@ -200,8 +211,10 @@ class ApiFootballClient:
         try:
             envelope = Envelope.model_validate(response.payload)
         except ValidationError as exc:
+            self._api.invalidate(endpoint, params)  # never replay a body we cannot read
             msg = f"{PROVIDER} {endpoint}: unexpected response format ({exc.error_count()} errors)"
             raise ExternalServiceError(msg) from exc
+        envelope = envelope.model_copy(update={"fetched_at": response.fetched_at})
         if envelope.error_messages:
             # An error body (rate limit, plan, bad key) must not be served from cache.
             self._api.invalidate(endpoint, params)
@@ -241,11 +254,19 @@ class ApiFootballClient:
 
 
 def validate_records[M: BaseModel](envelope: Envelope, model: type[M], *, endpoint: str) -> list[M]:
-    """Validate each record of ``envelope``; malformed ones are logged and skipped."""
+    """Validate each record of ``envelope``; malformed ones are logged and skipped.
+
+    Models with a ``fetched_at`` field (odds) get the time the envelope was fetched, so a
+    price served from cache keeps the time it was really taken.
+    """
     records: list[M] = []
+    stamped = envelope.fetched_at is not None and "fetched_at" in model.model_fields
     for index, raw in enumerate(envelope.records):
         try:
-            records.append(model.model_validate(raw))
+            record = model.model_validate(raw)
+            if stamped:
+                record = record.model_copy(update={"fetched_at": envelope.fetched_at})
+            records.append(record)
         except ValidationError as exc:
             logger.warning(
                 "provider_record_skipped",
@@ -274,9 +295,13 @@ def create_api_football_client(
     manual_reserve_share: float = DEFAULT_MANUAL_RESERVE_SHARE,
     config: ProviderConfig = API_FOOTBALL_CONFIG,
 ) -> tuple[ApiFootballClient, httpx.AsyncClient]:
-    """Production wiring: the endpoint client and the HTTP client the caller must close."""
+    """Production wiring: the endpoint client and the HTTP client the caller must close.
+
+    Clients over the same ``store`` share one quota guard, so several clients (bot actions,
+    scheduler, probe) can never overspend the daily limit between them.
+    """
     http = create_http_client(config, api_key)
-    quota = QuotaGuard(
+    quota = shared_guard(
         store,
         QuotaPolicy(daily_limit=daily_limit, manual_reserve_share=manual_reserve_share),
         provider=PROVIDER,

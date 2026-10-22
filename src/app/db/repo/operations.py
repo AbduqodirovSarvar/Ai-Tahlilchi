@@ -92,21 +92,38 @@ async def claim_due_recalcs(
     return [_task(row) for row in rows]
 
 
-async def complete_recalc(session: AsyncSession, task_id: int, *, now: datetime) -> bool:
-    """Mark a claimed task done; ``False`` if it was already done or does not exist."""
+async def complete_recalc(
+    session: AsyncSession, task_id: int, *, now: datetime, claimed_at: datetime
+) -> bool:
+    """Mark a task done if the caller still owns it (``claimed_at`` is its claim time).
+
+    ``False`` when the task is already done, does not exist, or its lease expired and
+    another worker claimed it meanwhile: a slow first worker must not close that claim.
+    """
     result = await session.execute(
         update(ScheduledRecalcRow)
-        .where(ScheduledRecalcRow.id == task_id, ScheduledRecalcRow.done == false())
+        .where(
+            ScheduledRecalcRow.id == task_id,
+            ScheduledRecalcRow.done == false(),
+            ScheduledRecalcRow.done_at == claimed_at,
+        )
         .values(done=True, done_at=now)
     )
     return bool(getattr(result, "rowcount", 0))
 
 
-async def release_recalc(session: AsyncSession, task_id: int) -> bool:
-    """Give a claimed task back (the job failed); it is claimable again at once."""
+async def release_recalc(session: AsyncSession, task_id: int, *, claimed_at: datetime) -> bool:
+    """Give a task back (the job failed); it is claimable again at once.
+
+    Only the current owner (matching ``claimed_at``) can release it.
+    """
     result = await session.execute(
         update(ScheduledRecalcRow)
-        .where(ScheduledRecalcRow.id == task_id, ScheduledRecalcRow.done == false())
+        .where(
+            ScheduledRecalcRow.id == task_id,
+            ScheduledRecalcRow.done == false(),
+            ScheduledRecalcRow.done_at == claimed_at,
+        )
         .values(done_at=None)
     )
     return bool(getattr(result, "rowcount", 0))
@@ -198,16 +215,22 @@ async def bets_for_signal(session: AsyncSession, signal_id: int) -> list[UserBet
     return [_bet(row) for row in rows]
 
 
-async def settle_bet(
+async def settle_bet(  # noqa: PLR0913 - one column per argument
     session: AsyncSession,
     bet_id: int,
     *,
+    user_id: int,
     outcome: Outcome,
     profit: Decimal,
     settled_at: datetime,
 ) -> UserBetRecord | None:
-    """Record a bet's outcome and profit (re-settling corrects it); ``None`` if unknown."""
-    row = await session.get(UserBetRow, bet_id)
+    """Record the outcome and profit of the user's own bet (re-settling corrects it).
+
+    ``None`` if the bet is unknown or belongs to another user.
+    """
+    row = await session.scalar(
+        select(UserBetRow).where(UserBetRow.id == bet_id, UserBetRow.user_id == user_id)
+    )
     if row is None:
         return None
     row.outcome, row.profit, row.settled_at = outcome, profit, settled_at

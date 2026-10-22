@@ -45,7 +45,9 @@
       "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(sed:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(git checkout -- pyproject.toml src/app/pipeline/__init__.py)",
+      "Bash(git clean -fdq -- src/app/pipeline tests/pipeline)"
     ],
     "ask": [
       "Bash(git reset --hard:*)",

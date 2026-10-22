@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -62,7 +63,7 @@ class Harness:
     sleep: RecordingSleep
     store: InMemoryUsageStore
     quota: QuotaGuard
-    cache: TtlCache[JsonValue]
+    cache: TtlCache[Any]
     api: ApiClient
     football: ApiFootballClient
 
@@ -90,7 +91,7 @@ def build_harness(
     quota = QuotaGuard(
         store, QuotaPolicy(daily_limit=daily_limit), provider=PROVIDER, clock=fake_time.utc
     )
-    cache: TtlCache[JsonValue] = TtlCache(clock=fake_time.monotonic)
+    cache: TtlCache[Any] = TtlCache(clock=fake_time.monotonic)
     provider = config or replace(API_FOOTBALL_CONFIG, requests_per_minute=600, burst=100)
     limiter = TokenBucket(
         provider.requests_per_minute,
@@ -106,6 +107,7 @@ def build_harness(
         cache=cache,
         sleep=sleep,
         jitter=lambda: 0.0,
+        clock=fake_time.utc,
     )
     return Harness(fake_time, sleep, store, quota, cache, api, ApiFootballClient(api))
 

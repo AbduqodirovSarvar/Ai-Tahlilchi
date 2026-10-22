@@ -8,6 +8,11 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
+# Offline provider harness (respx router, fake clocks, wired ApiClient) and the SQLite
+# fixtures are shared with tests/clients and tests/db, so the T3 data QA tests use exactly
+# the same building blocks as the unit tests they cross-check.
+from tests.clients.conftest import fake_time, harness, http_client, router  # noqa: F401
+from tests.db.conftest import db_path, db_session, engine  # noqa: F401
 from tests.integration.history_helpers import REPO_ROOT, ImportWorkspace
 
 

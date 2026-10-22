@@ -6,7 +6,7 @@ and status/score merge rules (:func:`app.db.fixture_state.merge_outcome`) as imp
 """
 
 from collections.abc import Collection, Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final
 
 from sqlalchemy import ColumnElement, Select, and_, func, or_, select
@@ -26,6 +26,11 @@ from app.domain import (
     OddsSnapshot,
     Sport,
 )
+
+# The same pairing within this distance is one match seen by two sources (kick-off times
+# and dates differ slightly between providers); further apart it is a real rematch, e.g.
+# the Belgian Pro League play-offs.
+DUPLICATE_KICKOFF_WINDOW: Final = timedelta(days=2)
 
 _EAGER: Final = (
     joinedload(FixtureRow.league),
@@ -146,8 +151,14 @@ async def finished_fixtures(
     The same match may be stored twice when history (football-data) and live data
     (API-Football) both cover it and teams/leagues share one identity
     (:class:`app.sports.team_matching.IdentityMap`). Rows are therefore de-duplicated on
-    ``(league, season, home, away)`` — a pairing is played once per league season — keeping
-    the row whose source comes first in ``preferred_sources`` (others after, by id).
+    ``(league, season, home, away)`` **and** kick-off within
+    :data:`DUPLICATE_KICKOFF_WINDOW`: the same pairing twice in one season but weeks apart
+    (play-offs) is two matches and both are kept. Of a duplicate pair the row whose source
+    comes first in ``preferred_sources`` is kept (others after, by id).
+
+    Only fixtures whose teams were matched across sources merge; an unmatched team keeps
+    its own identity and its matches stay separate rows. Model fitting must read history
+    through this function only, never ``list_fixtures``.
     """
     if not leagues:
         return []
@@ -164,14 +175,25 @@ async def finished_fixtures(
         .order_by(FixtureRow.kickoff_at, FixtureRow.id)
     )
     rank = {source: index for index, source in enumerate(preferred_sources)}
-    best: dict[tuple[int, int, int, int], FixtureRow] = {}
+    chosen: dict[tuple[int, int, int, int], list[FixtureRow]] = {}
     for row in rows:
         key = (row.league_id, row.season, row.home_team_id, row.away_team_id)
-        current = best.get(key)
-        if current is None or rank.get(row.source, len(rank)) < rank.get(current.source, len(rank)):
-            best[key] = row
-    chosen = sorted(best.values(), key=lambda row: (row.kickoff_at, row.id))
-    return [to_record(row) for row in chosen]
+        matches = chosen.setdefault(key, [])
+        twin = next((m for m in matches if _same_match(m, row)), None)
+        if twin is None:
+            matches.append(row)
+        elif rank.get(row.source, len(rank)) < rank.get(twin.source, len(rank)):
+            matches[matches.index(twin)] = row
+    kept = sorted((row for matches in chosen.values() for row in matches), key=_kickoff_order)
+    return [to_record(row) for row in kept]
+
+
+def _same_match(first: FixtureRow, second: FixtureRow) -> bool:
+    return abs(first.kickoff_at - second.kickoff_at) <= DUPLICATE_KICKOFF_WINDOW
+
+
+def _kickoff_order(row: FixtureRow) -> tuple[datetime, int]:
+    return row.kickoff_at, row.id
 
 
 async def upsert_live(

@@ -28,11 +28,14 @@ class FetchPlan:
     injury_fixtures: int = 0  # injuries?fixture: 1 each
     lineup_fixtures: int = 0  # fixtures/lineups?fixture: 1 each
     statistics_fixtures: int = 0  # fixtures/statistics?fixture (xG): 1 each
+    # Cap on xG requests (``FootballAdapter.with_expected_goals(max_requests=...)``);
+    # ``None`` = uncapped, i.e. one per fixture.
+    max_xg_requests: int | None = None
 
     def __post_init__(self) -> None:
         """Reject negative counts and an empty page estimate."""
         for item in fields(self):
-            if getattr(self, item.name) < 0:
+            if (getattr(self, item.name) or 0) < 0:
                 msg = f"{item.name} must be >= 0"
                 raise ValueError(msg)
         if self.odds_pages_per_league_day < 1:
@@ -51,5 +54,12 @@ def estimate_requests(plan: FetchPlan) -> int:
         + plan.odds_league_days * plan.odds_pages_per_league_day
         + plan.injury_fixtures
         + plan.lineup_fixtures
-        + plan.statistics_fixtures
+        + xg_requests(plan)
     )
+
+
+def xg_requests(plan: FetchPlan) -> int:
+    """XG requests ``plan`` will spend: one per fixture, at most ``max_xg_requests``."""
+    if plan.max_xg_requests is None:
+        return plan.statistics_fixtures
+    return min(plan.statistics_fixtures, plan.max_xg_requests)

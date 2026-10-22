@@ -18,6 +18,7 @@ from app.errors import ConfigurationError
 
 type AppEnv = Literal["dev", "prod"]
 type ServicesBackend = Literal["fake"]
+type HandicapConventionName = Literal["home_line", "own_line"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 type SecretName = Literal[
     "telegram_bot_token", "api_football_key", "odds_api_key", "gemini_api_key"
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     # changes the process clock; this one only affects how times are shown to users.
     display_tz: str = "Asia/Tashkent"
     db_path: Path = Path("data/app.db")
+    # How API-Football writes Asian handicap numbers (see docs/api_probe_report.md); set it
+    # before the first real odds are stored, stored lines cannot be re-read afterwards.
+    handicap_convention: HandicapConventionName = "home_line"
     # Which implementation of the service contract the bot talks to. Only the in-memory
     # fake exists until the pipeline-backed services land (T4 adds "real").
     app_services: ServicesBackend = "fake"

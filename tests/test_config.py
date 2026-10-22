@@ -290,3 +290,10 @@ def test_get_settings_reports_invalid_values_without_echoing_them(
     assert "SECRET456" not in message
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__
+
+
+def test_handicap_convention_defaults_to_home_line_and_rejects_typos() -> None:
+    assert make_settings().handicap_convention == "home_line"
+    assert make_settings(handicap_convention="own_line").handicap_convention == "own_line"
+    with pytest.raises(ValidationError):
+        make_settings(handicap_convention="wrong")
