@@ -5,14 +5,11 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Final
-from uuid import uuid4
 
 from app.pipeline import data
-from app.pipeline.ledger import STAMP_DAY, LedgerKey
 from app.pipeline.profile import utc_bounds
 from app.pipeline.settle import settle_manually
 from app.services.errors import (
-    BusyError,
     NotFoundError,
     ValidationFailedError,
 )
@@ -39,8 +36,6 @@ from app.services.real.analysis import window_of
 from app.services.real.core import Core, money, require_signal, to_view
 from app.services.report_math import SignalOutcome, build_report, day_summary, export_file
 
-BET_JOB: Final = "bet"
-NOTE_JOB: Final = "note"
 MAX_BET_LIST: Final = 100
 ALL_BETS: Final = 100_000
 _MANUAL_OUTCOMES: Final = {
@@ -159,14 +154,16 @@ class RealResultService:
     async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None:
         """See :meth:`ResultService.add_note`.
 
-        Notes live in the ledger until the schema has a place for them (ADR 0008).
+        Notes are rows of ``signal_notes`` (ADR 0011), so a note also fits a future signal.
         """
         await require_signal(self._core, user_id, signal_id)
         note = text.strip()
         if not note or len(note) > MAX_NOTE_LENGTH:
             raise ValidationFailedError("text", f"must be 1..{MAX_NOTE_LENGTH} characters")
-        key = LedgerKey(NOTE_JOB, STAMP_DAY, user_id, f"{signal_id}:{uuid4().hex[:8]}")
-        await self._core.ctx.ledger.complete(key, now=self._core.now(), detail=note)
+        async with self._core.ctx.sessions.begin() as session:
+            await data.add_signal_note(
+                session, user_id, signal_id, note, created_at=self._core.now()
+            )
 
     async def day_summary(self, user_id: int, day: date) -> DaySummary:
         """See :meth:`ResultService.day_summary`."""
@@ -196,40 +193,18 @@ class RealBetService:
         if record.retro:
             raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
         await core.ensure_user(user_id)
-        key = None
-        if draft.client_token is not None:
-            key = LedgerKey(BET_JOB, STAMP_DAY, user_id, draft.client_token)
-            if not await core.ctx.ledger.claim(key, now=core.now()):
-                return await self._known(user_id, key)
         stake = draft.stake or await self._default_stake(user_id, record)
-        try:
-            async with core.ctx.sessions.begin() as session:
-                bet = await data.create_bet(
-                    session,
-                    user_id=user_id,
-                    signal_id=record.id,
-                    odds_taken=draft.odds_taken or record.odds,
-                    stake=stake,
-                    placed_at=core.now(),
-                )
-        except Exception:
-            if key is not None:
-                await core.ctx.ledger.release(key)
-            raise
-        if key is not None:
-            await core.ctx.ledger.complete(key, now=core.now(), detail=str(bet.id))
+        async with core.ctx.sessions.begin() as session:
+            bet = await data.create_bet(
+                session,
+                user_id=user_id,
+                signal_id=record.id,
+                odds_taken=draft.odds_taken or record.odds,
+                stake=stake,
+                placed_at=core.now(),
+                client_token=draft.client_token,
+            )
         return self._view(bet, record)
-
-    async def _known(self, user_id: int, key: LedgerKey) -> BetView:
-        """The bet recorded under ``key`` earlier (a repeated tap)."""
-        entry = await self._core.ctx.ledger.get(key)
-        if entry is None or entry.detail is None:
-            raise BusyError(user_id)
-        views = await self._bets(user_id, ALL_BETS)
-        match = next((view for view in views if view.bet_id == int(entry.detail)), None)
-        if match is None:  # pragma: no cover - the bet row vanished
-            raise NotFoundError("bet", entry.detail)
-        return match
 
     async def _default_stake(self, user_id: int, record: data.SignalRecord) -> Decimal:
         unit = (await self._core.profile(user_id)).unit

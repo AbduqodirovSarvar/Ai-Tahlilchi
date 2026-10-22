@@ -30,6 +30,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -65,6 +66,10 @@ SOURCE_LENGTH: Final = 64
 EXTERNAL_ID_LENGTH: Final = 255
 NAME_LENGTH: Final = 255
 SHORT_TEXT_LENGTH: Final = 64
+CLIENT_TOKEN_LENGTH: Final = 64
+LEDGER_JOB_LENGTH: Final = 48
+LEDGER_SUBJECT_LENGTH: Final = 96
+LEDGER_STATUS_LENGTH: Final = 12
 NO_LINE: Final = 0.0
 _LINE_MARKETS_SQL: Final = f"('{MarketType.TOTALS.value}', '{MarketType.ASIAN_HANDICAP.value}')"
 LINE_ONLY_FOR_LINE_MARKETS_SQL: Final = f"market IN {_LINE_MARKETS_SQL} OR line = 0"
@@ -305,7 +310,14 @@ class SavedQueryRow(TimestampMixin, Base):
     markets: Mapped[list[str]] = mapped_column(JSON, default=list)
     max_signals: Mapped[int | None]
     sort: Mapped[SortOrder] = mapped_column(enum_column(SortOrder))
-    schedule_cron: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    per_day: Mapped[bool] = mapped_column(default=False, server_default=false())
+    include_no_value: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # Automatic run: ISO weekdays (1=Mon..7=Sun) at the user's local ``schedule_at``.
+    # An empty list means "not scheduled"; ``schedule_at`` is then NULL (0005).
+    schedule_weekdays: Mapped[list[int]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
+    schedule_at: Mapped[time | None]
 
 
 # --------------------------------------------------------------------------- signals
@@ -413,6 +425,7 @@ class UserBetRow(Base):
     __tablename__ = "user_bets"
     __table_args__ = (
         CheckConstraint("odds_taken > 1", name="odds_above_one"),
+        Index(None, "user_id", "client_token", unique=True),
         Index(None, "user_id", "placed_at"),
         Index(None, "signal_id"),
     )
@@ -426,6 +439,45 @@ class UserBetRow(Base):
     profit: Mapped[Decimal | None]
     placed_at: Mapped[datetime] = mapped_column(default=utcnow)
     settled_at: Mapped[datetime | None]
+    # Client-chosen idempotency token (a Telegram callback id): the same user repeating a
+    # token gets the existing bet. NULL = no token (0006).
+    client_token: Mapped[str | None] = mapped_column(String(CLIENT_TOKEN_LENGTH))
+
+
+class SignalNoteRow(CreatedAtMixin, Base):
+    """A free-text note a user attached to one of their signals (0006)."""
+
+    __tablename__ = "signal_notes"
+    __table_args__ = (Index(None, "signal_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id", ondelete="CASCADE"))
+    text: Mapped[str] = mapped_column(Text)
+
+
+class LedgerRow(Base):
+    """Pipeline idempotency keys, stamps, run status and recent errors (0004).
+
+    Keyed by ``(job, day, user_id, subject)``; ``user_id`` is 0 for system entries, hence
+    no foreign key. Owned by ``app.pipeline.ledger`` (the semantics live there).
+    """
+
+    __tablename__ = "pipeline_ledger"
+    __table_args__ = (
+        UniqueConstraint("job", "day", "user_id", "subject", name="uq_pipeline_ledger_key"),
+        Index(None, "job", "done_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job: Mapped[str] = mapped_column(String(LEDGER_JOB_LENGTH))
+    day: Mapped[date]
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    subject: Mapped[str] = mapped_column(String(LEDGER_SUBJECT_LENGTH))
+    status: Mapped[str] = mapped_column(String(LEDGER_STATUS_LENGTH))
+    claimed_at: Mapped[datetime]
+    done_at: Mapped[datetime | None]
+    detail: Mapped[str | None] = mapped_column(Text)
 
 
 # --------------------------------------------------------------------------- feedback loop

@@ -208,7 +208,7 @@ def _watch_record(row: WatchlistRow) -> WatchRecord:
 
 # --------------------------------------------------------------------------- saved queries
 
-_LIST_FIELDS = ("sports", "scope_ids", "markets")
+_LIST_FIELDS = ("sports", "scope_ids", "markets", "schedule_weekdays")
 
 
 async def save_query(session: AsyncSession, draft: SavedQueryDraft) -> SavedQueryRecord:
@@ -269,7 +269,10 @@ def _query_record(row: SavedQueryRow) -> SavedQueryRecord:
         markets=tuple(row.markets),
         max_signals=row.max_signals,
         sort=row.sort,
-        schedule_cron=row.schedule_cron,
+        per_day=row.per_day,
+        include_no_value=row.include_no_value,
+        schedule_weekdays=tuple(row.schedule_weekdays),
+        schedule_at=row.schedule_at,
     )
     return SavedQueryRecord(
         id=row.id, query=draft, created_at=row.created_at, updated_at=row.updated_at

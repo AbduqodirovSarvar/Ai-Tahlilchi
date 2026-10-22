@@ -1,6 +1,6 @@
 """Real catalog, settings, template, watchlist and status services."""
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from app.domain import MarketType, Sport, normalize_name
@@ -47,9 +47,6 @@ from app.services.real.core import (
     settings_view,
 )
 
-_FLAG_PER_DAY: Final = "per_day"
-_FLAG_NO_VALUE: Final = "no_value"
-_CRON_NOTE: Final = " # "
 SEARCH_DAYS: Final = 366
 
 
@@ -229,44 +226,6 @@ class RealSettingsService:
         return await self.update_settings(user_id, current.with_risk_profile(profile))
 
 
-def encode_schedule(draft: TemplateDraft) -> str | None:
-    """A template's schedule and flags in the ``schedule_cron`` column (ADR 0008)."""
-    flags = [
-        flag
-        for flag, on in (
-            (_FLAG_PER_DAY, draft.query.per_day),
-            (_FLAG_NO_VALUE, draft.query.include_no_value),
-        )
-        if on
-    ]
-    schedule = draft.schedule
-    cron = (
-        ""
-        if schedule is None
-        else f"{schedule.at.minute} {schedule.at.hour} * * "
-        + ",".join(str(day) for day in sorted(schedule.weekdays))
-    )
-    if not cron and not flags:
-        return None
-    return cron + (_CRON_NOTE + " ".join(flags) if flags else "")
-
-
-def decode_schedule(text: str | None) -> tuple[TemplateSchedule | None, bool, bool]:
-    """``(schedule, per_day, include_no_value)`` from a ``schedule_cron`` value."""
-    if not text:
-        return None, False, False
-    cron, _, flag_text = text.partition(_CRON_NOTE.strip())
-    flags = flag_text.split()
-    schedule = None
-    parts = cron.split()
-    if len(parts) == 5:  # noqa: PLR2004 - minute hour * * weekdays
-        schedule = TemplateSchedule(
-            weekdays=frozenset(int(day) for day in parts[4].split(",")),
-            at=time(int(parts[1]), int(parts[0])),
-        )
-    return schedule, _FLAG_PER_DAY in flags, _FLAG_NO_VALUE in flags
-
-
 class RealTemplateService:
     """:class:`~app.services.interfaces.TemplateService`."""
 
@@ -276,7 +235,7 @@ class RealTemplateService:
 
     async def save_template(self, user_id: int, draft: TemplateDraft) -> TemplateView:
         """See :meth:`TemplateService.save_template`."""
-        query, dates = draft.query, draft.query.dates
+        query, dates, schedule = draft.query, draft.query.dates, draft.schedule
         saved = data.SavedQueryDraft(
             user_id=user_id,
             name=draft.name.strip(),
@@ -292,7 +251,10 @@ class RealTemplateService:
             markets=tuple(sorted(market.value for market in query.markets)),
             max_signals=query.max_signals,
             sort=data.SortOrder(query.sort.value),
-            schedule_cron=encode_schedule(draft),
+            per_day=query.per_day,
+            include_no_value=query.include_no_value,
+            schedule_weekdays=tuple(sorted(schedule.weekdays)) if schedule else (),
+            schedule_at=schedule.at if schedule else None,
         )
         async with self._core.ctx.sessions.begin() as session:
             await data.ensure_user(session, user_id, timezone=(await self._tz(user_id)))
@@ -319,7 +281,11 @@ class RealTemplateService:
 
 def _template(record: data.SavedQueryRecord) -> TemplateView:
     saved = record.query
-    schedule, per_day, include_no_value = decode_schedule(saved.schedule_cron)
+    schedule = (
+        None
+        if saved.schedule_at is None
+        else TemplateSchedule(weekdays=frozenset(saved.schedule_weekdays), at=saved.schedule_at)
+    )
     query = AnalysisQuery(
         dates=DateSpec(
             mode=DateMode(saved.date_mode.value),
@@ -334,9 +300,9 @@ def _template(record: data.SavedQueryRecord) -> TemplateView:
         scope_ids=frozenset(str(i) for i in saved.scope_ids),
         markets=frozenset(MarketType(value) for value in saved.markets),
         max_signals=saved.max_signals,
-        per_day=per_day,
+        per_day=saved.per_day,
         sort=SortKey(saved.sort.value),
-        include_no_value=include_no_value,
+        include_no_value=saved.include_no_value,
     )
     return TemplateView(template_id=record.id, name=saved.name, query=query, schedule=schedule)
 

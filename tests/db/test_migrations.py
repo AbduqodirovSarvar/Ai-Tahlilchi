@@ -165,3 +165,175 @@ def test_0003_adds_signal_recommendation_columns_and_keeps_rows(tmp_path: Path) 
     command.downgrade(config, "0002")
     with connect(db_path) as connection:
         assert connection.execute("SELECT count(*) FROM signals").fetchone() == (1,)
+
+
+SEED_SIGNAL = (
+    "INSERT INTO users (id, is_admin, timezone, created_at) VALUES (1, 0, 'UTC', '2024-01-01'),"
+    " (2, 0, 'UTC', '2024-01-01');"
+    "INSERT INTO leagues (id, sport, source, external_id, name, created_at, updated_at)"
+    " VALUES (1, 'football', 's', 'E0', 'EPL', '2024-01-01', '2024-01-01');"
+    "INSERT INTO teams (id, sport, source, external_id, name, normalized_name,"
+    " created_at, updated_at) VALUES"
+    " (1, 'football', 's', 'a', 'A', 'a', '2024-01-01', '2024-01-01'),"
+    " (2, 'football', 's', 'b', 'B', 'b', '2024-01-01', '2024-01-01');"
+    "INSERT INTO fixtures (id, sport, source, external_id, league_id, season, kickoff_at,"
+    " home_team_id, away_team_id, status, created_at, updated_at)"
+    " VALUES (1, 'football', 's', 'f', 1, 2024,"
+    " '2024-01-01', 1, 2, 'scheduled', '2024-01-01', '2024-01-01');"
+    "INSERT INTO signals (id, user_id, fixture_id, market, selection, line, odds, p_model,"
+    " ev, confidence, stake_units, source, status, created_at, updated_at)"
+    " VALUES (1, 1, 1, '1x2', 'home', 0, 2.0, 0.55, 0.1, 'high', '1.0000', 'daily',"
+    " 'active', '2024-01-01', '2024-01-01');"
+)
+
+
+def test_0004_adopts_a_ledger_table_the_pipeline_created_itself(tmp_path: Path) -> None:
+    db_path = tmp_path / "ledger.db"
+    config = alembic_config(db_path)
+    command.upgrade(config, "0003")
+    with connect(db_path) as connection:  # the layout Ledger.ensure_schema used to create
+        connection.executescript(
+            "CREATE TABLE pipeline_ledger (id INTEGER NOT NULL, job VARCHAR(48) NOT NULL,"
+            " day DATE NOT NULL, user_id BIGINT NOT NULL, subject VARCHAR(96) NOT NULL,"
+            " status VARCHAR(12) NOT NULL, claimed_at DATETIME NOT NULL, done_at DATETIME,"
+            " detail TEXT, PRIMARY KEY (id),"
+            " CONSTRAINT uq_pipeline_ledger_key UNIQUE (job, day, user_id, subject));"
+            "CREATE INDEX ix_pipeline_ledger_job_done ON pipeline_ledger (job, done_at);"
+            "INSERT INTO pipeline_ledger (job, day, user_id, subject, status, claimed_at)"
+            " VALUES ('refresh', '2024-01-01', 0, 'x', 'done', '2024-01-01');"
+        )
+    command.upgrade(config, "head")
+    command.check(config)  # the index now has the ORM name: nothing left to autogenerate
+    with connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM pipeline_ledger").fetchone() == (1,)
+    command.downgrade(config, "0003")
+    assert "pipeline_ledger" not in table_names(db_path)
+
+
+def test_0005_converts_cron_text_and_back(tmp_path: Path) -> None:
+    db_path = tmp_path / "queries.db"
+    config = alembic_config(db_path)
+    command.upgrade(config, "0004")
+    cases = {
+        "a": "30 9 * * 1,3,7 # per_day no_value",
+        "b": "0 18 * * 5",
+        "c": " # no_value",
+        "d": None,
+        "e": "garbage # per_day",
+        "f": "99 9 * * 1",
+    }
+    with connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO users (id, is_admin, timezone, created_at) VALUES (1, 0, 'UTC', 'x')"
+        )
+        for name, cron in cases.items():
+            connection.execute(
+                "INSERT INTO saved_queries (user_id, name, date_mode, sports, min_prob, min_ev,"
+                " scope, scope_ids, markets, sort, schedule_cron, updated_at, created_at)"
+                " VALUES (1, ?, 'today', '[]', 0.5, 0.05, 'all', '[]', '[]', 'ev', ?, 'x', 'x')",
+                (name, cron),
+            )
+    command.upgrade(config, "head")
+    command.check(config)
+    with connect(db_path) as connection:
+        rows = {
+            name: (per_day, no_value, weekdays, at)
+            for name, per_day, no_value, weekdays, at in connection.execute(
+                "SELECT name, per_day, include_no_value, schedule_weekdays, schedule_at"
+                " FROM saved_queries"
+            )
+        }
+    assert rows["a"] == (1, 1, "[1, 3, 7]", "09:30:00.000000")
+    assert rows["b"] == (0, 0, "[5]", "18:00:00.000000")
+    assert rows["c"] == (0, 1, "[]", None)
+    assert rows["d"] == (0, 0, "[]", None)
+    assert rows["e"] == (1, 0, "[]", None)  # unparsable schedule: flags survive
+    assert rows["f"] == (0, 0, "[]", None)
+
+    command.downgrade(config, "0004")
+    with connect(db_path) as connection:
+        restored = dict(connection.execute("SELECT name, schedule_cron FROM saved_queries"))
+    assert restored["a"] == "30 9 * * 1,3,7 # per_day no_value"
+    assert restored["b"] == "0 18 * * 5"
+    assert restored["c"] == " # no_value"
+    assert restored["d"] is None
+    assert restored["e"] == " # per_day"
+
+
+def test_0006_moves_tokens_and_notes_out_of_the_ledger_and_back(tmp_path: Path) -> None:
+    db_path = tmp_path / "tokens.db"
+    config = alembic_config(db_path)
+    command.upgrade(config, "0005")
+    ledger_rows = [
+        ("bet", 1, "cb-1", "done", None, "1"),
+        ("bet", 1, "cb-gone", "done", None, "99"),
+        ("bet", 2, "cb-foreign", "done", None, "2"),
+        ("bet", 1, "cb-open", "claimed", None, None),
+        ("note", 1, "1:ab12", "done", "2024-01-02 08:00:00", "late"),
+        ("note", 1, "1:cd34", "done", "2024-01-03 08:00:00", "later"),
+        ("note", 2, "1:ef56", "done", "2024-01-03 08:00:00", "alien"),
+        ("note", 1, "77:aa", "done", "2024-01-03 08:00:00", "orphan"),
+        ("refresh", 0, "keep", "done", "2024-01-01", None),
+    ]
+    with connect(db_path) as connection:
+        connection.executescript(SEED_SIGNAL)
+        connection.executemany(
+            "INSERT INTO user_bets (id, user_id, signal_id, odds_taken, stake, placed_at)"
+            " VALUES (?, 1, 1, 2.0, '1.0000', ?)",
+            [(1, "2024-01-01 10:00:00"), (2, "2024-01-01 11:00:00")],
+        )
+        connection.executemany(
+            "INSERT INTO pipeline_ledger"
+            " (job, day, user_id, subject, status, claimed_at, done_at, detail)"
+            " VALUES (?, '1970-01-01', ?, ?, ?, '2024-01-01', ?, ?)",
+            ledger_rows,
+        )
+    command.upgrade(config, "head")
+    command.check(config)
+    with connect(db_path) as connection:
+        tokens = dict(connection.execute("SELECT id, client_token FROM user_bets"))
+        notes = connection.execute(
+            "SELECT user_id, signal_id, text, created_at FROM signal_notes ORDER BY id"
+        ).fetchall()
+        ledger = connection.execute("SELECT job FROM pipeline_ledger").fetchall()
+    assert tokens == {1: "cb-1", 2: None}
+    assert notes == [
+        (1, 1, "late", "2024-01-02 08:00:00.000000"),
+        (1, 1, "later", "2024-01-03 08:00:00.000000"),
+    ]
+    assert ledger == [("refresh",)]  # moved or obsolete entries are gone, others kept
+
+    command.downgrade(config, "0005")
+    assert "signal_notes" not in table_names(db_path)
+    with connect(db_path) as connection:
+        back = connection.execute(
+            "SELECT job, user_id, subject, detail FROM pipeline_ledger"
+            " WHERE job IN ('bet', 'note') ORDER BY job, id"
+        ).fetchall()
+    assert back == [
+        ("bet", 1, "cb-1", "1"),
+        ("note", 1, "1:1", "late"),
+        ("note", 1, "1:2", "later"),
+    ]
+    command.upgrade(config, "head")  # and forward again, keeping everything
+    with connect(db_path) as connection:
+        assert connection.execute("SELECT count(*) FROM signal_notes").fetchone() == (2,)
+        token = connection.execute("SELECT client_token FROM user_bets WHERE id = 1").fetchone()
+    assert token == ("cb-1",)
+
+
+def test_client_token_is_unique_per_user_in_the_migrated_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "unique.db"
+    command.upgrade(alembic_config(db_path), "head")
+    with connect(db_path) as connection:
+        connection.executescript(SEED_SIGNAL)
+        bet = (
+            "INSERT INTO user_bets (user_id, signal_id, odds_taken, stake, placed_at, client_token)"
+            " VALUES (?, 1, 2.0, '1.0000', '2024-01-01', ?)"
+        )
+        connection.execute(bet, (1, "t"))
+        connection.execute(bet, (2, "t"))  # another user may reuse the token
+        connection.execute(bet, (1, None))
+        connection.execute(bet, (1, None))  # NULLs never collide
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(bet, (1, "t"))

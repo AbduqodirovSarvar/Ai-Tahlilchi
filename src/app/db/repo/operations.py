@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Final
 
 from sqlalchemy import ColumnElement, and_, false, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db._sql import table_of
@@ -161,18 +162,57 @@ async def create_bet(  # noqa: PLR0913 - one column per argument
     odds_taken: float,
     stake: Decimal,
     placed_at: datetime,
+    client_token: str | None = None,
 ) -> UserBetRecord:
-    """Record a bet the user placed."""
+    """Record a bet the user placed.
+
+    With a ``client_token`` this is idempotent per ``(user_id, client_token)``: repeating it
+    (a double tap, a redelivered update, a racing worker) returns the bet stored first and
+    writes nothing, so one tap can never become two bets.
+    """
+    if client_token is not None:
+        existing = await _bet_by_token(session, user_id, client_token)
+        if existing is not None:
+            return _bet(existing)
     row = UserBetRow(
         user_id=user_id,
         signal_id=signal_id,
         odds_taken=odds_taken,
         stake=stake,
         placed_at=placed_at,
+        client_token=client_token,
     )
-    session.add(row)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(row)
+            await session.flush()
+    except IntegrityError:
+        # A concurrent writer won the (user, token) race; anything else is a real error.
+        existing = (
+            None if client_token is None else await _bet_by_token(session, user_id, client_token)
+        )
+        if existing is None:
+            raise
+        return _bet(existing)
     return _bet(row)
+
+
+async def get_bet_by_token(
+    session: AsyncSession, user_id: int, client_token: str
+) -> UserBetRecord | None:
+    """The user's bet placed under ``client_token``, if any."""
+    row = await _bet_by_token(session, user_id, client_token)
+    return None if row is None else _bet(row)
+
+
+async def _bet_by_token(
+    session: AsyncSession, user_id: int, client_token: str
+) -> UserBetRow | None:
+    return await session.scalar(
+        select(UserBetRow).where(
+            UserBetRow.user_id == user_id, UserBetRow.client_token == client_token
+        )
+    )
 
 
 async def list_bets(
@@ -249,4 +289,5 @@ def _bet(row: UserBetRow) -> UserBetRecord:
         profit=row.profit,
         placed_at=row.placed_at,
         settled_at=row.settled_at,
+        client_token=row.client_token,
     )

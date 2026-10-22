@@ -12,37 +12,20 @@ idempotency key of the service contract). It answers four questions:
 - *What went wrong recently?* :meth:`Ledger.record_error`.
 
 Every method commits its own short transaction and takes ``now`` explicitly, so claims can
-be taken *before* any network call (ADR 0007) and tests control time. The table is created
-by :meth:`Ledger.ensure_schema` (``CREATE TABLE IF NOT EXISTS``); it is not an Alembic table
-yet - the data-engineer is asked to adopt it (ADR 0008), after which ``ensure_schema`` is a
-no-op.
+be taken *before* any network call (ADR 0007) and tests control time. The table is
+``app.db.schema.LedgerRow`` (Alembic ``0004``); :meth:`Ledger.ensure_schema` only creates it
+for a database that was never migrated (``CREATE TABLE IF NOT EXISTS``).
 """
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Final
+from typing import Final, cast
 
-from sqlalchemy import (
-    BigInteger,
-    Column,
-    ColumnElement,
-    Date,
-    Index,
-    Integer,
-    MetaData,
-    String,
-    Table,
-    Text,
-    UniqueConstraint,
-    delete,
-    insert,
-    select,
-    update,
-)
+from sqlalchemy import ColumnElement, Table, delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.db.types import UTCDateTime
+from app.db.schema import LEDGER_SUBJECT_LENGTH, Base, LedgerRow
 
 DEFAULT_LEASE: Final = timedelta(minutes=15)
 """A claim older than this is considered abandoned (the worker died) and may be retaken."""
@@ -55,25 +38,10 @@ MAX_KEPT_ERRORS: Final = 100
 STATUS_CLAIMED: Final = "claimed"
 STATUS_DONE: Final = "done"
 STATUS_FAILED: Final = "failed"
-_JOB_LENGTH: Final = 48
-_SUBJECT_LENGTH: Final = 96
+_SUBJECT_LENGTH: Final = LEDGER_SUBJECT_LENGTH
 
-metadata = MetaData()
-ledger_table = Table(
-    "pipeline_ledger",
-    metadata,
-    Column("id", Integer, primary_key=True),
-    Column("job", String(_JOB_LENGTH), nullable=False),
-    Column("day", Date, nullable=False),
-    Column("user_id", BigInteger, nullable=False),
-    Column("subject", String(_SUBJECT_LENGTH), nullable=False),
-    Column("status", String(12), nullable=False),
-    Column("claimed_at", UTCDateTime, nullable=False),
-    Column("done_at", UTCDateTime, nullable=True),
-    Column("detail", Text, nullable=True),
-    UniqueConstraint("job", "day", "user_id", "subject", name="uq_pipeline_ledger_key"),
-    Index("ix_pipeline_ledger_job_done", "job", "done_at"),
-)
+ledger_table: Final = cast("Table", LedgerRow.__table__)
+"""Core view of :class:`~app.db.schema.LedgerRow` (Alembic ``0004``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +106,7 @@ class Ledger:
     async def ensure_schema(engine: AsyncEngine) -> None:
         """Create the table when it does not exist yet (idempotent)."""
         async with engine.begin() as connection:
-            await connection.run_sync(metadata.create_all)
+            await connection.run_sync(Base.metadata.create_all, tables=[ledger_table])
 
     # ------------------------------------------------------------------ idempotency keys
     async def claim(
