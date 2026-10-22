@@ -11,6 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from app.domain import MarketType, Sport
 from app.pipeline import data
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.context import PipelineContext
@@ -32,7 +33,6 @@ from app.services.interfaces import (
     Verdict,
     infer_risk_profile,
 )
-from app.domain import Sport, MarketType
 
 EXPERIMENTAL_SPORTS = frozenset({Sport.HOCKEY, Sport.BASKETBALL, Sport.VOLLEYBALL, Sport.TENNIS})
 

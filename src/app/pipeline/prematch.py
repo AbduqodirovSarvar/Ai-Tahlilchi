@@ -86,7 +86,7 @@ async def _handle(ctx: PipelineContext, delivery: Delivery, task: RecalcTask) ->
     try:
         results, failed = await recalc_signals(ctx, [signal], _OPTIONS[task.kind])
         if failed or not results:
-            raise RuntimeError("recalculation failed")  # noqa: TRY301, TRY003, EM101
+            raise RuntimeError("recalculation failed")
         sent = await _notify(ctx, delivery, task, results[0])
     except Exception as error:  # the task stays claimable; one signal never blocks the rest
         logger.warning("prematch_failed", signal_id=task.signal_id, error=repr(error))

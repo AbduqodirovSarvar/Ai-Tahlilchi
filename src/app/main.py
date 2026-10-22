@@ -11,7 +11,7 @@ import asyncio
 import sys
 from typing import Final
 
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.utils.token import TokenValidationError
 
@@ -20,8 +20,11 @@ from app.bot.messaging import install_flood_control
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 from app.logging import configure_logging, get_logger
+from app.pipeline.runtime import open_runtime
+from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
+from app.services.real import create_real_services
 
 # Not `__name__`: under `python -m app.main` that would be "__main__".
 logger = get_logger("app.main")
@@ -57,7 +60,7 @@ async def connect_bot(token: str) -> Bot:
 
 
 def build_services(settings: Settings) -> Services:
-    """The service implementation selected by ``APP_SERVICES`` (only ``fake`` until T4)."""
+    """The in-memory sample services (``APP_SERVICES=fake``, the default without API keys)."""
     logger.warning("services_backend", backend=settings.app_services, sample_data=True)
     return create_fake_services()
 
@@ -70,12 +73,44 @@ async def run_bot(settings: Settings) -> None:
     """
     token = settings.require_secret("telegram_bot_token")
     admin_ids = settings.require_admin_ids()
+    if settings.app_services == "real":
+        await run_real(settings, token, admin_ids)
+        return
     dispatcher = build_dispatcher(admin_ids, build_services(settings))
+    await poll(dispatcher, token, admin_ids, settings)
+
+
+async def poll(
+    dispatcher: Dispatcher, token: str, admin_ids: frozenset[int], settings: Settings
+) -> None:
+    """Connect the bot and poll until the process is asked to stop."""
     bot = await connect_bot(token)
     install_flood_control(bot)
     logger.info("bot_starting", app_env=settings.app_env, admin_count=len(admin_ids))
     await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     logger.info("bot_stopped")
+
+
+async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) -> None:
+    """Bot over the pipeline-backed services, with the scheduler running beside it.
+
+    The scheduler is stopped (running jobs finish) and the database closed on every exit.
+    Messages the pipeline sends on its own are only logged until the bot provides a
+    ``Notifier`` (ADR 0008).
+    """
+    async with open_runtime(settings) as runtime:
+        system = create_real_services(runtime.ctx)
+        logger.info("services_backend", backend="real", sample_data=False)
+        scheduler = PipelineScheduler(
+            PipelineJobs(runtime.ctx, system.delivery),
+            db_path=settings.db_path,
+            timezone=settings.display_timezone,
+        )
+        scheduler.start()
+        try:
+            await poll(build_dispatcher(admin_ids, system.services), token, admin_ids, settings)
+        finally:
+            await scheduler.stop()
 
 
 def main() -> int:

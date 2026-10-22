@@ -11,12 +11,13 @@ from collections.abc import Sequence
 from typing import Final
 from uuid import uuid4
 
-from app.db.enums import QueryScope, SignalSource as StoredSource, SignalVersionReason, SortOrder
 from app.domain import OddsKind
 from app.logging import get_logger
 from app.pipeline import data
-from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
+from app.pipeline.data import QueryScope, SignalVersionReason, SortOrder
+from app.pipeline.data import SignalSource as StoredSource
 from app.pipeline.detail import VenueStats, build_fixture_card
+from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.pipeline.ledger import STAMP_DAY, LedgerKey
 from app.pipeline.profile import UserProfile
 from app.pipeline.provider import MANUAL
@@ -36,28 +37,30 @@ from app.services.interfaces import (
     AnalysisQuery,
     AnalysisResult,
     AnalysisStage,
+    ConfidenceLevel,
     CostEstimate,
     DateSpec,
     DateWindow,
     EntityId,
     FixtureDetail,
-    ProgressCallback,
-    RecalcBatch,
-    RecalcDiff,
-    RecalcVerdict as ServiceVerdict,
-    ScopeKind,
-    SignalId,
-    SignalNumbers,
-    SortKey,
     FormResult,
     HeadToHead,
     MarketQuote,
     OddsMove,
+    ProgressCallback,
+    RecalcBatch,
+    RecalcDiff,
+    ScopeKind,
     ScoreProbability,
+    SignalId,
+    SignalNumbers,
+    SortKey,
     TeamStats,
 )
-from app.services.real.core import Core, parse_id, parse_ids, require_signal, to_view
-from app.services.interfaces import ConfidenceLevel
+from app.services.interfaces import (
+    RecalcVerdict as ServiceVerdict,
+)
+from app.services.real.core import Core, parse_ids, require_signal, to_view
 
 logger = get_logger(__name__)
 

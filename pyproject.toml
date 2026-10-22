@@ -115,6 +115,11 @@ warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "redundant-self"]
 plugins = ["pydantic.mypy"]
 
+# APScheduler 3 ships no type information.
+[[tool.mypy.overrides]]
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -169,7 +174,6 @@ known_first_party = ["app"]
 # `tzdata` stays: it is loaded implicitly by `zoneinfo`, never imported.
 DEP002 = [
     "aiosqlite",
-    "apscheduler",
     "pandas",
     "scikit-learn",
     "tzdata",
@@ -187,7 +191,7 @@ name = "Layered architecture (higher layers may import lower ones, never the rev
 type = "layers"
 layers = [
     "app.main",
-    "app.bot",
+    "app.bot | app.scheduler",
     "app.services",
     "app.pipeline",
     "app.models | app.sports | app.db | app.llm",
@@ -216,8 +220,11 @@ name = "production code never depends on the fake services"
 type = "forbidden"
 source_modules = [
     "app.pipeline",
+    "app.scheduler",
     "app.services.interfaces",
     "app.services.errors",
+    "app.services.report_math",
+    "app.services.real",
 ]
 forbidden_modules = [
     "app.services.fake",
