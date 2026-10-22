@@ -36,6 +36,8 @@ SUPPORTED_SPORT_MARKETS: Final[dict[Sport, frozenset[MarketType]]] = {
     Sport.FOOTBALL: SUPPORTED_MARKETS
 }
 """Markets each implemented sport can price, known without a configured provider."""
+DEFAULT_DAILY_LIMIT: Final = 100
+"""The provider's free-plan daily request limit, shown when no provider is configured."""
 AUTOMATIC: Final = RequestPurpose.AUTOMATIC
 MANUAL: Final = RequestPurpose.MANUAL
 

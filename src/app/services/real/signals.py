@@ -195,6 +195,7 @@ class RealBetService:
         record = await require_signal(core, user_id, draft.signal_id)
         if record.retro:
             raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
+        await core.ensure_user(user_id)
         key = None
         if draft.client_token is not None:
             key = LedgerKey(BET_JOB, STAMP_DAY, user_id, draft.client_token)

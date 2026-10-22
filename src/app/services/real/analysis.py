@@ -180,6 +180,7 @@ class RealAnalysisService:
         profile = await core.profile(user_id)
         window = window_of(core, query.dates, profile)
         request = build_request(core, profile, query, window)
+        await core.ensure_user(user_id)
 
         async def sink(stage: str, done: int, total: int) -> None:
             await _report(progress, AnalysisStage(stage), done, total)
@@ -311,14 +312,7 @@ class RealAnalysisService:
         return True
 
     def _diff(self, result: RecalcResult) -> RecalcDiff:
-        core = self._core
-        return RecalcDiff(
-            signal=to_view(core, result.after.record, card=result.after),
-            before=_numbers(result.before.record),
-            after=_numbers(result.after.record),
-            verdict=_VERDICTS[result.verdict],
-            recalculated_at=result.recalculated_at,
-        )
+        return recalc_diff(self._core, result)
 
     # ------------------------------------------------------------------ detail
     async def fixture_detail(self, fixture_id: EntityId) -> FixtureDetail:
@@ -388,6 +382,17 @@ def _stats(stats: VenueStats) -> TeamStats:
         goals_against_avg=stats.goals_against,
         xg_for_avg=stats.xg_for,
         xg_against_avg=stats.xg_against,
+    )
+
+
+def recalc_diff(core: Core, result: RecalcResult) -> RecalcDiff:
+    """The contract diff of a pipeline recalculation result."""
+    return RecalcDiff(
+        signal=to_view(core, result.after.record, card=result.after),
+        before=_numbers(result.before.record),
+        after=_numbers(result.after.record),
+        verdict=_VERDICTS[result.verdict],
+        recalculated_at=result.recalculated_at,
     )
 
 

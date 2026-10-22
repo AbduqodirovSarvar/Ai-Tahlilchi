@@ -15,6 +15,7 @@ from app.pipeline import data
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.context import PipelineContext
 from app.pipeline.profile import UserProfile, load_profile
+from app.pipeline.settle import outcome_of
 from app.pipeline.types import SignalCard
 from app.services.errors import NotFoundError, ValidationFailedError
 from app.services.interfaces import (
@@ -56,6 +57,12 @@ class Core:
         """Today's date in ``zone`` according to the injected clock."""
         return self.now().astimezone(zone).date()
 
+    async def ensure_user(self, user_id: int) -> None:
+        """Create the user row on first contact (signals and bets reference it)."""
+        zone = (await self.profile(user_id)).zone.key
+        async with self.ctx.sessions.begin() as session:
+            await data.ensure_user(session, user_id, timezone=zone)
+
     async def profile(self, user_id: int) -> UserProfile:
         """The stored profile of ``user_id`` (defaults for unknown users)."""
         async with self.ctx.sessions() as session:
@@ -94,7 +101,12 @@ def to_view(
     fixture = record.fixture.fixture
     recommended = record.recommended_at is not None and not record.retro
     verdict = None if record.llm_verdict is None else Verdict(record.llm_verdict.value)
-    result = None if record.result is None else ResultMark(record.result.outcome.value)
+    outcome = (
+        record.result.outcome
+        if record.result is not None
+        else (outcome_of(record) if record.retro else None)
+    )
+    result = None if outcome is None else ResultMark(outcome.value)
     return SignalView(
         signal_id=record.id,
         fixture_id=str(record.fixture.id),

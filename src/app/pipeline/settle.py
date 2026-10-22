@@ -21,7 +21,7 @@ without a Pinnacle quote have no CLV.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Final
@@ -97,6 +97,12 @@ def settlement_of(record: SignalRecord) -> Settlement | None:
     if result is None or result.home_score is None or result.away_score is None:
         return None
     return settle_selection(record.market, record.selection, result.home_score, result.away_score)
+
+
+def outcome_of(record: SignalRecord) -> Outcome | None:
+    """The outcome the final score implies for ``record`` (what a retro look-back shows)."""
+    settlement = settlement_of(record)
+    return None if settlement is None else _OUTCOMES[settlement]
 
 
 def profit_of(stake: Decimal, odds: float, settlement: Settlement) -> Decimal:
@@ -268,7 +274,9 @@ async def _announce(
     key = LedgerKey(JOB, day, record.user_id, str(record.id))
     if profile.schedule.is_quiet(now) or not await ctx.ledger.claim(key, now=now):
         return 0
-    card = SignalCard(record=record, bookmaker=ctx.config.bet_bookmaker, no_value=False)
+    card = SignalCard(
+        record=replace(record, result=stored), bookmaker=ctx.config.bet_bookmaker, no_value=False
+    )
     try:
         await delivery.settled(
             record.user_id, SettledDelivery(card=card, profit_units=stored.profit_units), key
