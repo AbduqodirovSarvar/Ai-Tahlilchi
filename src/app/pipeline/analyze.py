@@ -54,6 +54,7 @@ STAGE_COLLECTING: Final = "collecting"
 STAGE_ANALYSING: Final = "analysing"
 STAGE_REVIEWING: Final = "reviewing"
 STAGE_FINISHED: Final = "finished"
+MIN_FIXTURES_FOR_LEAGUE_ODDS: Final = 2
 _NOT_PLAYABLE: Final = frozenset(
     {FixtureStatus.POSTPONED, FixtureStatus.CANCELLED, FixtureStatus.ABANDONED}
 )
@@ -334,13 +335,20 @@ class AnalysisEngine:
             )
         ]
         seasons = len(seasons_between(request.start.date(), request.end.date()))
-        fixture_requests = min(len(uncovered), len(ctx.leagues.canonical_refs()) * seasons)
+        leagues = len(ctx.leagues.canonical_refs())
+        fixture_requests = min(len(uncovered), leagues * seasons)
         odds_refs, odds_days = await self._odds_needs(items, now, source)
         groups: defaultdict[tuple[ExternalRef, date], int] = defaultdict(int)
         for ref, league, day in odds_refs:
             groups[(league, day)] += 1
-        league_days = sum(1 for count in groups.values() if count >= 2)  # noqa: PLR2004
-        singles = sum(count for count in groups.values() if count < 2)  # noqa: PLR2004
+        # Days not fetched yet have no stored fixtures to name: assume one odds request per
+        # league and day (an upper bound).
+        league_days = len(uncovered) * leagues + sum(
+            1 for count in groups.values() if count >= MIN_FIXTURES_FOR_LEAGUE_ODDS
+        )
+        singles = sum(
+            count for count in groups.values() if count < MIN_FIXTURES_FOR_LEAGUE_ODDS
+        )
         result_refs = tuple(
             item.record.fixture.ref
             for item in items
@@ -400,14 +408,17 @@ class AnalysisEngine:
         ctx = self._ctx
         sport, purpose = needs.sport, request.purpose
         await ingest_results(ctx, sport, needs.result_refs, purpose=purpose)
+        refs, days = list(needs.odds_refs), needs.odds_days
         if needs.fixture_days:
             await ingest_fixtures(
                 ctx, sport, min(needs.fixture_days), max(needs.fixture_days), purpose=purpose
             )
+            # Fixtures just stored may need prices that the plan could not name yet.
+            items, _ = await self._collect(request)
+            fresh, days = await self._odds_needs(items, ctx.clock(), ctx.providers[sport].source)
+            refs = [ref for ref, _, _ in fresh]
         kind = OddsKind.RECALC if purpose is MANUAL else OddsKind.MORNING
-        await ingest_odds(
-            ctx, sport, needs.odds_refs, kind=kind, purpose=purpose, days=needs.odds_days
-        )
+        await ingest_odds(ctx, sport, refs, kind=kind, purpose=purpose, days=days)
 
 
 async def _emit(progress: ProgressSink | None, stage: str, done: int, total: int) -> None:

@@ -19,6 +19,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import NullDelivery
 from app.pipeline.ledger import Ledger
 from app.pipeline.provider import SportProvider
+from app.pipeline.review import CandidateReviewer, NoReview
 from app.pipeline.settle import run_settlement
 from app.services.fake import FakeNotifier
 from app.services.real import RealSystem, create_real_services
@@ -88,6 +89,7 @@ async def open_env(
     provider_factory: Callable[[MutableClock], SportProvider] | None = None,
     config: PipelineConfig | None = None,
     reveal_results: bool = True,
+    reviewer: CandidateReviewer | None = None,
 ) -> AsyncIterator[Env]:
     """A fresh copy of the seeded database wired into the real services."""
     shutil.copy(template, target)
@@ -101,6 +103,7 @@ async def open_env(
         providers=providers,
         clock=clock,
         config=config or PipelineConfig(),
+        reviewer=reviewer or NoReview(),
     )
     notifier = FakeNotifier()
     system = create_real_services(ctx, notifier)
