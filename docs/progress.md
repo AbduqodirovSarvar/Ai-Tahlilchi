@@ -95,8 +95,8 @@
 - [ ] F7.8 Ekspress tuzuvchi (ixtiyoriy)
 - [ ] F8.3 Post-mortem
 - [ ] F8.4 Saboqlar
-- [ ] F8.5 `segment_stats`
-- [ ] F8.6 Kalibratsiya
+- [x] F8.5 `segment_stats` (T5: `models/segments.py`, `pipeline/learning.py`, Alembic 0008, ADR 0013)
+- [x] F8.6 Kalibratsiya (T5: `models/calibration.py`, `pipeline/overlay.py`, ADR 0013)
 - [ ] F8.7 Promptga "Tajriba konteksti"
 - [ ] F9.1 VPS xavfsizligi
 - [ ] F9.2 Docker va `/opt/ai-tahlilchi`
