@@ -215,13 +215,9 @@ def _bank_lines(bank: BankView) -> list[str]:
     return lines
 
 
-def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> str:
-    """The bets view: the bank snapshot and the open bets (newest first)."""
-    lines = [texts.BETS_TITLE, *_bank_lines(bank), ""]
-    if not bets:
-        lines.append(texts.BETS_EMPTY)
-        return "\n".join(lines)
-    lines.extend(
+def bet_lines(bets: tuple[BetView, ...] | list[BetView], zone: ZoneInfo) -> list[str]:
+    """One line per bet (newest first), capped at :data:`MAX_LISTED_BETS` with a tail."""
+    lines = [
         texts.BETS_LINE.format(
             fixture=escape(bet.fixture_label),
             selection=_bet_selection(bet),
@@ -230,7 +226,17 @@ def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> st
             date=short_date(bet.placed_at.astimezone(zone).date()),
         )
         for bet in bets[:MAX_LISTED_BETS]
-    )
+    ]
     if len(bets) > MAX_LISTED_BETS:
         lines.append(texts.BETS_MORE.format(count=len(bets) - MAX_LISTED_BETS))
+    return lines
+
+
+def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> str:
+    """The bets view: the bank snapshot and the open bets (newest first)."""
+    lines = [texts.BETS_TITLE, *_bank_lines(bank), ""]
+    if not bets:
+        lines.append(texts.BETS_EMPTY)
+        return "\n".join(lines)
+    lines.extend(bet_lines(bets, zone))
     return "\n".join(lines)

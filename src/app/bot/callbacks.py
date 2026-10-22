@@ -127,7 +127,7 @@ def decode_ref(text: str) -> str | None:
 
 
 class BetCb(CallbackData, prefix="bt"):
-    """Stavka prompt: ``ok`` (record with the defaults), ``custom`` or ``cancel``."""
+    """Stavka prompt: ``ok`` (defaults), ``custom``, ``cancel`` or ``force`` (past a loss limit)."""
 
     action: str
     signal_id: int
@@ -191,6 +191,18 @@ class TplCb(CallbackData, prefix="tp"):
     action: str
     id: int = 0
     value: int = 0
+
+
+class BankCb(CallbackData, prefix="bk"):
+    """🎟 Mening stavkalarim buttons.
+
+    ``open``/``settled``/``chart``/``setup``/``home`` switch screens; ``bet`` opens bet ``id``;
+    ``mark`` settles bet ``id`` by hand with ``value`` ``w``/``l``/``v``/``c`` (cash-out).
+    """
+
+    action: str
+    id: int = 0
+    value: str = ""
 
 
 class NoopCb(CallbackData, prefix="nx"):

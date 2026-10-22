@@ -15,6 +15,7 @@ from aiogram.types import ErrorEvent
 
 from app.bot.handlers import (
     analysis,
+    bank,
     bets,
     custom,
     detail,
@@ -102,6 +103,7 @@ def build_dispatcher(
         recalc,
         today,
         status,
+        bank,
         bets,
         detail,
         custom,

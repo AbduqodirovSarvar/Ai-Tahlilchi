@@ -919,3 +919,59 @@ TPL_SCHEDULE_CLEARED: Final = "🗓 <b>{name}</b>: jadval o'chirildi."
 TPL_PICK_A_DAY: Final = "Kamida bitta kunni belgilang"
 TPL_GONE: Final = "ℹ️ Bu shablon endi yo'q."
 TPL_RUNNING: Final = "💾 Shablon: <b>{name}</b>"
+
+
+# --------------------------------------------------------------------------- bank and bets (F7.5)
+BANK_TITLE: Final = "🎟 <b>Mening stavkalarim</b>"
+BANK_UNIT: Final = "🎲 Unit: <b>{unit}</b>"
+BANK_UNIT_UNSET: Final = "🎲 Unit kiritilmagan: ⚙️ Bank va limitlar."
+BANK_SETTLED: Final = "📊 Yopilgan: {count} ta · ✅ {won} · ❌ {lost} · ↩️ {void} · 💸 {cashout}"
+BANK_PL: Final = "💰 Foyda/zarar (yopilganlar): <b>{profit}</b>{yield_part}"
+BANK_YIELD: Final = " · stavkaga nisbatan {value}"
+BANK_RECENT: Final = "(oxirgi {count} ta stavka bo'yicha)"
+BANK_LIMITS: Final = "🛑 Zarar limiti: bugun {today}/{daily}, hafta {week}/{weekly}"
+BANK_LIMIT_NOT_SET: Final = "belgilanmagan"
+BTN_BANK_OPEN: Final = "🟡 Ochiq ({count})"
+BTN_BANK_SETTLED: Final = "✅ Yopilgan"
+BTN_BANK_CHART: Final = "📈 Bank grafigi"
+BTN_BANK_SETUP: Final = "⚙️ Bank va limitlar"
+BTN_BANK_HOME: Final = "⬅️ Stavkalarim"
+BANK_OPEN_TITLE: Final = (
+    "🟡 <b>Ochiq stavkalar</b> — {count} ta\nNatijani belgilash uchun stavkani tanlang."
+)
+BANK_SETTLED_TITLE: Final = "✅ <b>Yopilgan stavkalar</b> (oxirgi {count} ta)"
+BANK_SETTLED_EMPTY: Final = "Yopilgan stavkalar hali yo'q."
+BANK_SETTLED_LINE: Final = "• {fixture} — {selection} @ {odds} · {stake} → {result} {profit}"
+BANK_BET_TITLE: Final = (
+    "🎟 <b>{fixture}</b>\n"
+    "🎯 {selection} @ <b>{odds}</b> · {stake}\n\n"
+    "O'yin tugagach natijani qo'lda belgilashingiz mumkin. Belgi shu signaldagi barcha "
+    "stavkalarga tegadi."
+)
+BTN_MARK_CASHOUT: Final = "💸 Cashout"
+BANK_MARKED: Final = "✅ Natija belgilandi: {result}"
+BANK_MARK_REFUSED: Final = "O'yin hali boshlanmagan: natijani belgilab bo'lmaydi."
+BANK_CASHOUT_PROMPT: Final = (
+    "💸 Cashout natijasini <b>unit</b> da yozing (foyda musbat, zarar manfiy), "
+    "masalan <code>0.8</code> yoki <code>-0.4</code>."
+)
+BANK_CASHOUT_RANGE: Final = "Cashout natijasi -100 dan 100 gacha unit bo'lishi kerak."
+BANK_NO_SIGNAL: Final = "Bu stavka signalga bog'lanmagan: natijani belgilab bo'lmaydi."
+BANK_NO_CHART: Final = (
+    "📈 Grafik uchun bank (⚙️ Bank va limitlar) va kamida bitta yopilgan stavka kerak."
+)
+BANK_CHART_CAPTION: Final = "📈 Bank: {first} → {last}"
+BANK_SETUP_TITLE: Final = "⚙️ <b>Bank va limitlar</b>\nQaysi qiymatni o'zgartirasiz?"
+BANK_LIMIT_ASK: Final = (
+    "🛑 <b>Zarar limitiga yetdingiz</b> (bugun {today}, hafta {week}).\n"
+    "Qaror sizniki, lekin bugun to'xtab turish tavsiya etiladi. Baribir stavka yozasizmi?"
+)
+BTN_BANK_FORCE: Final = "🛑 Baribir davom etaman"
+BET_LIMIT_FORCED: Final = "🛑 Davom etasiz: qaror sizniki."
+BANK_NOT_FOUND: Final = "ℹ️ Bu stavka topilmadi (o'chirilgan yoki yopilgan)."
+CHART_BANK_TITLE: Final = "Bank o'zgarishi (kun oxiridagi balans)"
+CHART_BANK_START: Final = "boshlang'ich bank"
+CHART_CALIBRATION_TITLE: Final = "Kalibratsiya: model va'dasi va haqiqat"
+CHART_CALIBRATION_X: Final = "Model ehtimolligi, %"
+CHART_CALIBRATION_Y: Final = "Haqiqatda o'tgan, %"
+CHART_YIELD_X: Final = "Yield, %"

@@ -51,6 +51,7 @@ class BetFlow(StatesGroup):
     """🎟 Waiting for the odds (and stake) the user really got, typed as ``1.90 50000``."""
 
     value_input = State()
+    cashout_input = State()
 
 
 class CustomFlow(StatesGroup):
