@@ -5,6 +5,7 @@
 
 from datetime import timedelta
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,3 +117,49 @@ async def test_search_teams_in_database(db_session: AsyncSession) -> None:
     assert by_name["Man United"].ref == ExternalRef("test-source", "Man United")
     assert await search_teams(db_session, "man", sport=Sport.HOCKEY) == []
     assert await search_teams(db_session, "qqqzzz") == []
+
+
+# --------------------------------------------------------------------------- exonyms
+
+EXONYM_TEAMS = [
+    Candidate(1, "Ajax"),
+    Candidate(2, "Bayern München"),
+    Candidate(3, "Paris Saint-Germain"),
+    Candidate(4, "PSV Eindhoven"),
+    Candidate(5, "Manchester City"),
+    Candidate(6, "Manchester United"),
+    Candidate(7, "Real Madrid"),
+    Candidate(8, "Borussia Dortmund"),
+    Candidate(9, "Borussia Mönchengladbach"),
+    Candidate(10, "AC Milan"),
+    Candidate(11, "Inter"),
+    Candidate(12, "Tottenham"),
+]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Аякс", "Ajax"),
+        ("Бавария", "Bayern München"),
+        ("ПСЖ", "Paris Saint-Germain"),
+        ("Ман Сити", "Manchester City"),
+        ("Манчестер Сити", "Manchester City"),
+        ("Ман Юнайтед", "Manchester United"),
+        ("Реал", "Real Madrid"),
+        ("Боруссия Д", "Borussia Dortmund"),
+        ("Боруссия М", "Borussia Mönchengladbach"),
+        ("Тоттенхэм", "Tottenham"),
+        ("Ayaks", "Ajax"),
+        ("Bavariya", "Bayern München"),
+        ("Милан", "AC Milan"),
+        ("Интер", "Inter"),
+    ],
+)
+def test_common_exonyms_and_abbreviations_find_the_club(query: str, expected: str) -> None:
+    assert rank(query, EXONYM_TEAMS, limit=1)[0].name == expected
+
+
+def test_exonym_table_only_adds_candidates() -> None:
+    assert [hit.name for hit in rank("Ajax", EXONYM_TEAMS, limit=1)] == ["Ajax"]
+    assert rank("Аякс", [Candidate(1, "Chelsea")]) == []

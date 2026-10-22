@@ -24,6 +24,7 @@ from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.schema import FixtureRow, LeagueRow, TeamRow
+from app.db.search_aliases import SEARCH_ALIASES
 from app.domain import ExternalRef, Sport, normalize_name
 
 DEFAULT_LIMIT: Final = 10
@@ -80,6 +81,18 @@ def search_key(text: str) -> str:
     return normalize_name(to_latin(text))
 
 
+def _alias_keys() -> dict[str, tuple[str, ...]]:
+    table: dict[str, list[str]] = {}
+    for spelling, targets in SEARCH_ALIASES.items():
+        known = table.setdefault(search_key(spelling), [])
+        known.extend(k for k in map(search_key, targets) if k and k not in known)
+    return {key: tuple(targets) for key, targets in table.items()}
+
+
+# Typed spelling (as a search key) -> search keys of the names the sources use.
+_ALIAS_KEYS: Final = _alias_keys()
+
+
 @dataclass(frozen=True, slots=True)
 class Candidate:
     """Something searchable: an id and its display name."""
@@ -106,13 +119,17 @@ def rank(query: str, candidates: Sequence[Candidate], *, limit: int = DEFAULT_LI
     if not key or limit <= 0:
         return []
     keys = [search_key(candidate.name) for candidate in candidates]
-    scored = process.extract(key, keys, scorer=fuzz.WRatio, limit=None, score_cutoff=0)
-    hits = []
-    for name_key, base, index in scored:
-        score = min(base + _prefix_boost(key, name_key), MAX_SCORE)
-        if score >= MIN_SCORE:
-            candidate = candidates[index]
-            hits.append(Hit(candidate.id, candidate.name, float(score)))
+    best: dict[int, float] = {}
+    for variant in (key, *_ALIAS_KEYS.get(key, ())):
+        scored = process.extract(variant, keys, scorer=fuzz.WRatio, limit=None, score_cutoff=0)
+        for name_key, base, index in scored:
+            score = min(base + _prefix_boost(variant, name_key), MAX_SCORE)
+            best[index] = max(best.get(index, 0.0), float(score))
+    hits = [
+        Hit(candidates[index].id, candidates[index].name, score)
+        for index, score in best.items()
+        if score >= MIN_SCORE
+    ]
     hits.sort(key=lambda hit: (-hit.score, len(hit.name), hit.name))
     return hits[:limit]
 

@@ -258,11 +258,6 @@ def test_cyrillic_query_finds_the_latin_name(query: str, expected: str) -> None:
     assert top(query, limit=1) == [expected]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-T3-S1: no alias/exonym table, so common Cyrillic spellings whose Latin form is "
-    "not a transliteration (Аякс/Ajax, Бавария/Bayern) return nothing",
-)
 @pytest.mark.parametrize(("query", "expected"), [("Аякс", "Ajax"), ("Бавария", "Bayern München")])
 def test_cyrillic_exonyms_find_the_latin_name(query: str, expected: str) -> None:
     candidates = [*CANDIDATES, Candidate(99, "Ajax")]
