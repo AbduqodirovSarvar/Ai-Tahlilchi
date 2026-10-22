@@ -168,7 +168,6 @@ class AnalysisEngine:
             ProviderUnavailableError: a manual request could not fetch what it needs.
         """
         ctx = self._ctx
-        await _emit(progress, STAGE_COLLECTING, 0, 0)
         used_before = (await self._quota(request)).used
         items, _ = await self._collect(request)
         now = ctx.clock()
@@ -177,6 +176,7 @@ class AnalysisEngine:
             items, _ = await self._collect(request)
         used = max((await self._quota(request)).used - used_before, 0)
         analysable = [item for item in items if classify(item.record, now) is not None]
+        await _emit(progress, STAGE_COLLECTING, 0, len(analysable))
         by_fixture, failed = await self._value(request, analysable, now, progress)
         assembly = assemble(by_fixture, request)
         await _emit(progress, STAGE_REVIEWING, len(analysable), len(analysable))

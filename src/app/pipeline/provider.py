@@ -28,10 +28,14 @@ from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.sports.base import FixtureQuery, SportAdapter
 from app.sports.football import FootballAdapter
 from app.sports.football_leagues import LeagueCatalog
-from app.sports.football_mapping import SOURCE
+from app.sports.football_mapping import SOURCE, SUPPORTED_MARKETS
 
 type Purpose = RequestPurpose
 """Who asks: ``AUTOMATIC`` (scheduled jobs) or ``MANUAL`` (the user's actions)."""
+SUPPORTED_SPORT_MARKETS: Final[dict[Sport, frozenset[MarketType]]] = {
+    Sport.FOOTBALL: SUPPORTED_MARKETS
+}
+"""Markets each implemented sport can price, known without a configured provider."""
 AUTOMATIC: Final = RequestPurpose.AUTOMATIC
 MANUAL: Final = RequestPurpose.MANUAL
 

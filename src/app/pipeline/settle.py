@@ -283,3 +283,36 @@ async def _announce(
         raise
     await ctx.ledger.complete(key, now=ctx.clock())
     return 1
+
+
+async def settle_manually(
+    ctx: PipelineContext,
+    record: SignalRecord,
+    outcome: Outcome,
+    *,
+    cashout_units: Decimal | None = None,
+) -> SignalResultRecord:
+    """The user's own result (win, loss, void or cash-out) for ``record`` and its bets.
+
+    A manual result replaces an automatic one and is never overwritten by a later automatic
+    settlement (``settle_signal``). Bets follow: cash-outs scale the realised units to the
+    bet's stake, void returns the stake.
+    """
+    stake = record.stake_units
+    profit = {
+        Outcome.WIN: profit_of(stake, record.odds, Settlement.WIN),
+        Outcome.LOSS: profit_of(stake, record.odds, Settlement.LOSS),
+        Outcome.VOID: Decimal(0),
+        Outcome.CASHOUT: cashout_units or Decimal(0),
+    }[outcome]
+    result = SignalResultRecord(
+        signal_id=record.id,
+        outcome=outcome,
+        source=ResultSource.MANUAL,
+        profit_units=profit,
+        closing_odds=None,
+        clv=None,
+        user_note=None,
+        settled_at=ctx.clock(),
+    )
+    return await _store(ctx, record, result)

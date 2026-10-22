@@ -11,8 +11,6 @@ Usage::
     result = await services.analysis.analyze(user_id, AnalysisQuery(dates=DateSpec.today()))
 """
 
-import csv
-import io
 import itertools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
@@ -114,7 +112,13 @@ from app.services.interfaces import (
     WatchTarget,
     infer_risk_profile,
 )
-from app.services.report_math import SignalOutcome, build_report, day_summary, profit_units
+from app.services.report_math import (
+    SignalOutcome,
+    build_report,
+    day_summary,
+    export_file,
+    profit_units,
+)
 
 type Clock = Callable[[], datetime]
 """Returns the current UTC instant; injected so tests control time."""
@@ -1279,58 +1283,7 @@ class FakeReportService:
 
     async def export(self, user_id: int) -> ExportFile:
         """See :meth:`ReportService.export`."""
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(_EXPORT_HEADER)
-        for row in self._state.outcomes(user_id):
-            writer.writerow(_export_row(row))
-        return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
-
-
-_EXPORT_HEADER: Final = (
-    "signal_id",
-    "kickoff_utc",
-    "sport",
-    "league",
-    "home",
-    "away",
-    "market",
-    "line",
-    "selection",
-    "odds",
-    "probability",
-    "ev",
-    "confidence",
-    "stake_units",
-    "recommended_at",
-    "hidden",
-    "result",
-    "profit_units",
-)
-
-
-def _export_row(row: SignalOutcome) -> tuple[object, ...]:
-    view = row.view
-    return (
-        view.signal_id,
-        view.kickoff.isoformat(),
-        view.sport.value,
-        view.league,
-        view.home_team,
-        view.away_team,
-        view.market.type.value,
-        "" if view.market.line is None else view.market.line,
-        view.selection.value,
-        view.odds,
-        round(view.probability, 4),
-        round(view.ev, 4),
-        view.confidence.value,
-        view.stake_units,
-        "" if view.recommended_at is None else view.recommended_at.isoformat(),
-        view.state is SignalState.HIDDEN,
-        "" if view.result is None else view.result.value,
-        "" if row.profit_units is None else row.profit_units,
-    )
+        return export_file(self._state.outcomes(user_id))
 
 
 class FakeSystemStatusService:
