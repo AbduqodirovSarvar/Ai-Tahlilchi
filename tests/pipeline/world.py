@@ -126,6 +126,11 @@ class World:
         """The seed written to the database."""
         return HistoryBatch(fixtures=self.fixtures, results=self.results, odds=self.odds)
 
+    def history_batch(self) -> HistoryBatch:
+        """Only the finished matches and their results (the provider supplies the rest)."""
+        past = tuple(f for f in self.fixtures if f.status is FixtureStatus.FINISHED)
+        return HistoryBatch(fixtures=past, results=self.results)
+
 
 def build_world() -> World:
     """Generate fixtures, past results, the hidden future results and all prices."""

@@ -1,7 +1,7 @@
 """A wired real-services environment over a seeded temporary SQLite database."""
 
 import shutil
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +13,7 @@ from app.db.engine import create_engine, create_session_factory
 from app.db.history import upsert_batch
 from app.db.repo import upsert_live
 from app.db.schema import Base
+from app.domain import Sport
 from app.pipeline.config import PipelineConfig
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import NullDelivery
@@ -25,7 +26,7 @@ from tests.pipeline.world import START, World, build_world
 from tests.services.contract_suite import MutableClock
 
 
-def build_template(path: Path) -> World:
+def build_template(path: Path, *, history_only: bool = False) -> World:
     """Create the seeded database file once per test session."""
     import asyncio  # noqa: PLC0415
 
@@ -37,7 +38,9 @@ def build_template(path: Path) -> World:
             await connection.run_sync(Base.metadata.create_all)
         await Ledger.ensure_schema(engine)
         async with create_session_factory(engine).begin() as session:
-            await upsert_batch(session, world.batch())
+            await upsert_batch(
+                session, world.history_batch() if history_only else world.batch()
+            )
         await engine.dispose()
 
     asyncio.run(seed())
@@ -82,29 +85,30 @@ async def open_env(
     world: World,
     target: Path,
     *,
-    providers: dict | None = None,  # type: ignore[type-arg]
+    provider_factory: Callable[[MutableClock], SportProvider] | None = None,
     config: PipelineConfig | None = None,
+    reveal_results: bool = True,
 ) -> AsyncIterator[Env]:
     """A fresh copy of the seeded database wired into the real services."""
     shutil.copy(template, target)
     engine = create_engine(target)
     sessions = create_session_factory(engine)
     clock = MutableClock(now=START)
+    providers = {} if provider_factory is None else {Sport.FOOTBALL: provider_factory(clock)}
     ctx = PipelineContext(
         sessions=sessions,
         ledger=Ledger(sessions),
-        providers=providers or {},
+        providers=providers,
         clock=clock,
         config=config or PipelineConfig(),
     )
     notifier = FakeNotifier()
     system = create_real_services(ctx, notifier)
     feed = ResultFeed(ctx, world, NullDelivery())
-    clock.after_advance = feed
+    if reveal_results:
+        clock.after_advance = feed
     try:
         yield Env(ctx, system, notifier, clock, world, engine, sessions, feed)
     finally:
         await engine.dispose()
 
-
-type Providers = dict[object, SportProvider]

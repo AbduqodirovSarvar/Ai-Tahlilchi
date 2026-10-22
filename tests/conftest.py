@@ -57,3 +57,12 @@ def seeded_template(tmp_path_factory: pytest.TempPathFactory) -> "tuple[Path, Wo
 
     path = tmp_path_factory.mktemp("seed") / "template.db"
     return path, build_template(path)
+
+
+@pytest.fixture(scope="session")
+def history_template(tmp_path_factory: pytest.TempPathFactory) -> "tuple[Path, World]":
+    """A database with the played matches only; a scripted provider supplies the rest."""
+    from tests.pipeline.harness import build_template  # noqa: PLC0415
+
+    path = tmp_path_factory.mktemp("history") / "template.db"
+    return path, build_template(path, history_only=True)
