@@ -81,18 +81,6 @@ async def test_hide_button_hides_signal_and_edits_card(harness: BotHarness) -> N
     assert signal.state is SignalState.HIDDEN
 
 
-@pytest.mark.parametrize("action", ["detail"])
-async def test_later_wave_card_buttons_are_placeholders(harness: BotHarness, action: str) -> None:
-    message_id, signal_id = await run_and_get_card(harness)
-
-    methods = await harness.press_data(
-        CardCb(action=action, signal_id=signal_id).pack(), message_id
-    )
-
-    assert len(answers(methods)) == 1
-    assert answers(methods)[0].text == texts.PLACEHOLDER_ALERT
-
-
 async def test_cooldown_error_is_mapped_to_minutes(harness: BotHarness) -> None:
     message_id, signal_id = await run_and_get_card(harness)
     harness.services.signals.hide_signal = AsyncMock(  # type: ignore[method-assign]

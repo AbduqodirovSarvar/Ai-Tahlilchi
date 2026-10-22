@@ -434,6 +434,11 @@ def signal_keyboard(signal: SignalView) -> InlineKeyboardMarkup:
     )
 
 
+def detail_keyboard(signal_id: int) -> InlineKeyboardMarkup:
+    """The detail card's only button: back to the signal card."""
+    return _markup([[_button(texts.BTN_BACK_TO_CARD, CardCb(action="card", signal_id=signal_id))]])
+
+
 def recalc_query_keyboard(query_id: str) -> InlineKeyboardMarkup:
     """The 🔄 Hammasini yangilash button under an analysis summary."""
     callback = RecalcAllCb(kind=RECALC_KIND_QUERY, ref=encode_ref(query_id))

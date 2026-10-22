@@ -7,7 +7,7 @@ or ``&``; values substituted into ``{placeholders}`` are escaped by the formatte
 from typing import Final
 
 from app.domain import MarketType, Selection, Sport
-from app.services.interfaces import ConfidenceLevel, ResultMark, RiskProfile, SortKey
+from app.services.interfaces import ConfidenceLevel, FormResult, ResultMark, RiskProfile, SortKey
 
 # --------------------------------------------------------------------------- main menu
 MENU_ANALYSIS: Final = "📊 Tahlil"
@@ -702,3 +702,53 @@ BETS_LINE: Final = "• {fixture} — {selection} @ {odds} · {stake} · {date}"
 BETS_MORE: Final = "…va yana {count} ta"
 BET_SIDE_HOME: Final = "uy jamoasi"
 BET_SIDE_AWAY: Final = "mehmon jamoasi"
+
+
+# --------------------------------------------------------------------------- detail card (F7.2)
+DETAIL_TITLE: Final = "📋 <b>{fixture}</b>\n🏆 {league} · 🕒 {time}"
+DETAIL_SCORE: Final = "🏁 Hisob: <b>{home}:{away}</b>"
+DETAIL_LINEUPS_CONFIRMED: Final = "✅ Tarkiblar e'lon qilingan"
+DETAIL_LINEUPS_UNKNOWN: Final = "⏳ Tarkiblar hali e'lon qilinmagan"
+DETAIL_FORM_HEADER: Final = "📈 <b>Forma</b> (so'nggi o'yinlar, eskidan yangiga)"
+DETAIL_FORM_LINE: Final = "{team}: {form}"
+DETAIL_NO_DATA: Final = "ma'lumot yo'q"
+FORM_MARKS: Final[dict[FormResult, str]] = {
+    FormResult.WIN: "✅",
+    FormResult.DRAW: "➖",
+    FormResult.LOSS: "❌",
+}
+DETAIL_STATS_HEADER: Final = "📊 <b>Statistika</b> (o'rtacha, o'z roli bo'yicha)"
+DETAIL_STATS_LINE: Final = "{team} ({role}, {matches} o'yin): urgan {gf} · o'tkazgan {ga}{xg}"
+DETAIL_STATS_XG: Final = " · xG {xg_for} / {xg_against}"
+ROLE_HOME: Final = "uyda"
+ROLE_AWAY: Final = "safarda"
+DETAIL_H2H_HEADER: Final = "🤝 <b>Oldingi uchrashuvlar</b>"
+DETAIL_H2H_EMPTY: Final = "🤝 Oldingi uchrashuvlar: ma'lumot yo'q"
+DETAIL_H2H_LINE: Final = "{date} · {home} {home_score}:{away_score} {away}"
+DETAIL_ABSENCES_HEADER: Final = "🩹 <b>Jarohat va diskvalifikatsiyalar</b>"
+DETAIL_ABSENCES_NONE: Final = "🩹 Jarohat va diskvalifikatsiyalar: ma'lum emas"
+DETAIL_ABSENCE_LINE: Final = "• {team}: {player} — {reason}"
+DETAIL_SCORES_HEADER: Final = "🎯 <b>Eng ehtimolli hisoblar</b>"
+DETAIL_SCORE_ITEM: Final = "{home}:{away} — {probability}"
+DETAIL_MARKETS_HEADER: Final = "💹 <b>Barcha bozorlar</b> (model | adolatli koeff. | bukmeker | EV)"
+DETAIL_MARKETS_COLUMNS: Final = "Tanlov               Model Adolatli  Bukm.      EV"
+DETAIL_MARKETS_EMPTY: Final = "💹 Bozorlar jadvali: narxlar hali yo'q"
+DETAIL_NO_PRICE: Final = "—"
+DETAIL_MOVES_HEADER: Final = "📉 <b>Koeffitsient harakati</b> (ertalab → hozir)"
+DETAIL_MOVE_LINE: Final = "• {selection}: {opening} → {current} ({change})"
+DETAIL_AS_OF: Final = "📦 Ma'lumot {time} holatiga"
+DETAIL_MORE: Final = "…va yana {count} ta"
+SHORT_HOME: Final = "1"
+SHORT_AWAY: Final = "2"
+SHORT_DRAW: Final = "X"
+SHORT_DOUBLE: Final[dict[Selection, str]] = {
+    Selection.HOME_OR_DRAW: "1X",
+    Selection.HOME_OR_AWAY: "12",
+    Selection.DRAW_OR_AWAY: "X2",
+}
+SHORT_OVER: Final = "Ko'p {line}"
+SHORT_UNDER: Final = "Kam {line}"
+SHORT_BTTS_YES: Final = "Ikkalasi gol: ha"
+SHORT_BTTS_NO: Final = "Ikkalasi gol: yo'q"
+SHORT_HANDICAP: Final = "Fora {side} ({line})"
+BTN_BACK_TO_CARD: Final = "⬅️ Kartaga qaytish"

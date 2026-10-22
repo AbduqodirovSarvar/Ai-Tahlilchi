@@ -4,7 +4,7 @@
 in ``bets``. 📋 Batafsil (F7.2) is wired and answers with a "coming soon" alert.
 """
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
@@ -23,10 +23,7 @@ logger = get_logger(__name__)
 async def on_card(
     callback: CallbackQuery, callback_data: CardCb, services: Services, user_id: int
 ) -> None:
-    """Card buttons handled here: "🙈 Yashirish" (📋 Batafsil is still a placeholder)."""
-    if callback_data.action != "hide":
-        await answer_callback(callback, texts.PLACEHOLDER_ALERT, alert=True)
-        return
+    """The "🙈 Yashirish" card button (the others have their own handlers)."""
     signal = await services.signals.hide_signal(user_id, callback_data.signal_id)
     await answer_callback(callback, texts.HIDDEN_ALERT)
     message = callback_message(callback)
@@ -76,6 +73,6 @@ async def on_results_page(
 def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="signals")
-    router.callback_query.register(on_card, CardCb.filter())
+    router.callback_query.register(on_card, CardCb.filter(F.action == "hide"))
     router.callback_query.register(on_results_page, ResultsCb.filter())
     return router

@@ -16,6 +16,7 @@ from aiogram.types import ErrorEvent
 from app.bot.handlers import (
     analysis,
     bets,
+    detail,
     fallback,
     quick,
     recalc,
@@ -99,6 +100,7 @@ def build_dispatcher(
         today,
         status,
         bets,
+        detail,
         signals,
         fallback,
     ):

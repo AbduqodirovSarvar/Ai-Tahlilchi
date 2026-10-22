@@ -1077,9 +1077,7 @@ class ExpressContract:
         assert len(by_fixture) >= count
         return list(by_fixture.values())[:count]
 
-    async def test_probability_odds_and_ev_multiply(
-        self, services: Services, user_id: int
-    ) -> None:
+    async def test_probability_odds_and_ev_multiply(self, services: Services, user_id: int) -> None:
         picks = await self.picks_of_different_matches(services, user_id, 3)
 
         express = await services.express.evaluate(user_id, [pick.signal_id for pick in picks])
