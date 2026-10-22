@@ -1,0 +1,64 @@
+{
+  "id": "no_motivation",
+  "description": "Mezbon uchun o'yinning turnir ahamiyati yo'q.",
+  "candidates": [
+    {
+      "candidate_id": "g12",
+      "league": "Premier League",
+      "home_team": "Everton",
+      "away_team": "Chelsea",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 2.4,
+      "p_model": 0.46,
+      "ev": 0.104,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        },
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": {
+    "user_notes": [
+      "Mavsumning oxirgi turi, Everton uchun turnir jadvalidagi o'rin allaqachon aniq."
+    ]
+  },
+  "expected": {
+    "g12": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "motivatsiya"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g12",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "motivatsiya"
+        ],
+        "izoh": "Izohga ko'ra Everton uchun turnir jadvalidagi o'rin aniq, motivatsiya past bo'lishi mumkin."
+      }
+    ]
+  }
+}

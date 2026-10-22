@@ -1,0 +1,56 @@
+{
+  "id": "asian_handicap_normal",
+  "description": "Osiyo handikapi, salbiy omil yo'q.",
+  "candidates": [
+    {
+      "candidate_id": "g21",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "AH",
+      "selection": "home",
+      "odds": 1.95,
+      "p_model": 0.55,
+      "ev": 0.0725,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": [],
+      "line": -1.0
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g21": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": []
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g21",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Liverpool formasi kuchli va tarkib ma'lum. Salbiy omil ko'rinmaydi."
+      }
+    ]
+  }
+}

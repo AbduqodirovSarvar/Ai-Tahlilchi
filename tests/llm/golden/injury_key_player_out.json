@@ -1,0 +1,68 @@
+{
+  "id": "injury_key_player_out",
+  "description": "Asosiy hujumchi jarohat tufayli o'ynamaydi.",
+  "candidates": [
+    {
+      "candidate_id": "g01",
+      "league": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Chelsea",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 2.1,
+      "p_model": 0.55,
+      "ev": 0.155,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        },
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        }
+      ],
+      "absences": [
+        {
+          "team": "Arsenal",
+          "player": "Saka",
+          "status": "out",
+          "reason": "mushak jarohati"
+        }
+      ],
+      "p_market": 0.5
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g01": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "jarohat"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g01",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "jarohat"
+        ],
+        "izoh": "Arsenal asosiy futbolchisi Saka jarohat tufayli o'ynamaydi. Bu hujum kuchiga ta'sir qilishi mumkin."
+      }
+    ]
+  }
+}

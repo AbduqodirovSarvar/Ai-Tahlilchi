@@ -1,0 +1,68 @@
+{
+  "id": "suspended_defender",
+  "description": "Liverpool himoyachisi diskvalifikatsiyada.",
+  "candidates": [
+    {
+      "candidate_id": "g10",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Liverpool",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "away",
+      "odds": 2.6,
+      "p_model": 0.45,
+      "ev": 0.17,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "LDWLD",
+          "goals_for": 5,
+          "goals_against": 7
+        },
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        }
+      ],
+      "absences": [
+        {
+          "team": "Liverpool",
+          "player": "Konate",
+          "status": "suspended",
+          "reason": "qizil kartochka"
+        }
+      ],
+      "p_market": 0.4
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g10": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "diskvalifikatsiya"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g10",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "diskvalifikatsiya"
+        ],
+        "izoh": "Liverpool himoyachisi Konate diskvalifikatsiya tufayli o'ynamaydi. Bu himoya barqarorligiga ta'sir qiladi."
+      }
+    ]
+  }
+}

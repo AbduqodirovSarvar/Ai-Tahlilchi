@@ -1,0 +1,67 @@
+{
+  "id": "doubtful_goalkeeper",
+  "description": "Asosiy darvozabon shubhali.",
+  "candidates": [
+    {
+      "candidate_id": "g14",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Arsenal",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 2.0,
+      "p_model": 0.55,
+      "ev": 0.1,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Arsenal",
+          "results": "WWDWW",
+          "goals_for": 11,
+          "goals_against": 3
+        }
+      ],
+      "absences": [
+        {
+          "team": "Liverpool",
+          "player": "Alisson",
+          "status": "doubtful",
+          "reason": "son daqiqada tekshiruv"
+        }
+      ]
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g14": {
+      "verdict_in": [
+        "ehtiyot",
+        "rad"
+      ],
+      "flags_include": [
+        "jarohat"
+      ]
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g14",
+        "verdict": "ehtiyot",
+        "risk_flags": [
+          "jarohat"
+        ],
+        "izoh": "Liverpool darvozaboni Alisson shubhali, bu noaniqlik tug'diradi."
+      }
+    ]
+  }
+}
