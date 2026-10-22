@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Final, Protocol, Self
+from typing import Final, Protocol, Self, runtime_checkable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain import Market, MarketType, Selection, Sport
@@ -1554,6 +1554,22 @@ class Notifier(Protocol):
 
     async def alert_admin(self, alert: AdminAlert) -> None:
         """Report a system error to the administrators."""
+        ...
+
+
+@runtime_checkable
+class UndeliverableAware(Protocol):
+    """Optional companion of a :class:`Notifier` (contract v1.6): "never retry this user".
+
+    A notifier returns ``None`` both for a passing failure (network, flood control) and for a
+    user who will not receive anything (blocked the bot, deleted the chat). The pipeline
+    retries the first kind with a backoff but must not retry, nor alert the admin about, the
+    second: when a notifier also implements this protocol the pipeline adapter asks it after a
+    ``None`` answer and treats ``True`` as "handled, undeliverable".
+    """
+
+    def is_undeliverable(self, user_id: int) -> bool:
+        """True while messages to ``user_id`` are known to be permanently refused."""
         ...
 
 

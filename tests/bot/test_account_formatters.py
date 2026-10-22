@@ -29,6 +29,7 @@ from app.services.interfaces import (
     BetView,
     ErrorEntry,
     JobStatus,
+    LlmQuota,
     ResultMark,
     SystemStatus,
     UserSettingsView,
@@ -47,9 +48,12 @@ def make_status(**overrides: object) -> SystemStatus:
                 sport=Sport.FOOTBALL,
                 used=66,
                 limit=100,
-                reserved_manual=30,
+                reserved_manual=12,
+                manual_reserve=30,
+                manual_used=12,
             ),
         ),
+        llm=LlmQuota(requests_used=7, requests_limit=250, tokens_used=48_000, tokens_limit=500_000),
         last_refresh_at=NOW - timedelta(hours=2),
         jobs=(
             JobStatus(name="refresh", last_run_at=NOW - timedelta(hours=2), ok=True),
@@ -68,7 +72,10 @@ def test_status_golden() -> None:
         "🟢 Rejim: <b>haqiqiy ma'lumot</b>\n"
         "\n"
         "📡 <b>API limitlari</b> (bugun):\n"
-        "• api-football (⚽ Futbol): ishlatilgan 66/100 · qoldi 34 · qo'lda: 30\n"
+        "• api-football (⚽ Futbol): ishlatilgan 66/100 · qoldi 34\n"
+        "  qo'lda so'rovlar: 12/30 · qo'lda qoldi 18\n"
+        "\n"
+        "🤖 <b>AI (Gemini)</b> (bugun): so'rovlar 7/250 · tokenlar 48000/500000\n"
         "\n"
         "🔄 Ma'lumot oxirgi yangilangan: <b>22.10 12:32</b> (2 soat oldin)\n"
         "\n"
@@ -84,6 +91,23 @@ def test_status_golden() -> None:
     assert telegram_html_problems(text) == []
 
 
+def test_status_manual_reserve_never_goes_negative_and_llm_is_optional() -> None:
+    quota = ApiQuota(
+        provider="p",
+        sport=None,
+        used=5,
+        limit=100,
+        reserved_manual=0,
+        manual_reserve=3,
+        manual_used=9,
+    )
+
+    text = format_status(make_status(quotas=(quota,), llm=None), TASHKENT, NOW, "real")
+
+    assert "qo'lda so'rovlar: 9/3 · qo'lda qoldi 0" in text
+    assert texts.STATUS_LLM_NONE in text
+
+
 def test_status_empty_system_and_fake_mode() -> None:
     empty = SystemStatus(quotas=(), last_refresh_at=None, jobs=(), recent_errors=())
 
@@ -92,6 +116,7 @@ def test_status_empty_system_and_fake_mode() -> None:
     assert texts.STATUS_MODE["fake"] in text
     for line in (
         texts.STATUS_QUOTA_NONE,
+        texts.STATUS_LLM_NONE,
         texts.STATUS_REFRESH_NEVER,
         texts.STATUS_JOBS_NONE,
         texts.STATUS_ERRORS_NONE,

@@ -211,6 +211,14 @@ def _state_flags(signal: SignalView, zone: ZoneInfo) -> list[str]:
     return lines
 
 
+def _moved_odds_lines(signal: SignalView) -> list[str]:
+    """The odds first recommended next to today's, once a recalculation moved them."""
+    recommended = signal.recommended_odds
+    if recommended is None or odds(recommended) == odds(signal.odds):
+        return []
+    return [texts.CARD_ODDS_MOVED.format(recommended=odds(recommended), current=odds(signal.odds))]
+
+
 def _note(text: str | None) -> str | None:
     if text is None or not text.strip():
         return None
@@ -231,6 +239,7 @@ def format_signal_card(signal: SignalView, zone: ZoneInfo) -> str:
             league=escape(signal.league),
         ),
         texts.CARD_PICK.format(selection=selection_label(signal), odds=odds(signal.odds)),
+        *_moved_odds_lines(signal),
         texts.CARD_PROBABILITY.format(
             probability=percent(signal.probability), fair_odds=odds(signal.fair_odds)
         ),
@@ -326,7 +335,20 @@ def format_results_summary(result: AnalysisResult) -> str:
         )
     if result.failed_fixtures:
         lines.append(texts.RESULTS_FAILED.format(count=result.failed_fixtures))
+    lines.extend(_price_lines(result))
     return "\n".join(lines)
+
+
+def _price_lines(result: AnalysisResult) -> list[str]:
+    """Why fixtures were left out for price reasons, and the stale-data warning (v1.5)."""
+    notes = (
+        (result.skipped_no_price, texts.RESULTS_NO_PRICE),
+        (result.skipped_stale_price, texts.RESULTS_STALE_PRICE),
+    )
+    lines = [template.format(count=count) for count, template in notes if count]
+    if result.data_stale:
+        lines.append(texts.RESULTS_DATA_STALE)
+    return lines
 
 
 @dataclass(frozen=True, slots=True)

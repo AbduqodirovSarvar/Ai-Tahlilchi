@@ -11,6 +11,7 @@ before/after numbers readable next to the original.
 """
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Final
 from zoneinfo import ZoneInfo
@@ -58,8 +59,12 @@ MAX_RETRY_AFTER_SECONDS: Final = 60
 """A longer flood wait is not slept through inside a scheduled job: the message is dropped."""
 SEND_ATTEMPTS: Final = 2
 """One send plus one retry after Telegram's ``retry_after``."""
+BLOCKED_TTL_SECONDS: Final = 24 * 60 * 60
+"""A user who blocked the bot is skipped for this long, then tried again (they may have
+unblocked it). Within the period the pipeline is told not to retry (contract v1.6)."""
 
 type Sleep = Callable[[float], Awaitable[None]]
+type Monotonic = Callable[[], float]
 
 
 class TelegramNotifier:
@@ -76,11 +81,14 @@ class TelegramNotifier:
         admin_ids: frozenset[int],
         default_zone: ZoneInfo,
         sleep: Sleep = asyncio.sleep,
+        monotonic: Monotonic = time.monotonic,
     ) -> None:
         """``admin_ids`` receive alerts; ``default_zone`` is used when a user's is unknown."""
         self._admin_ids = admin_ids
         self._default_zone = default_zone
         self._sleep = sleep
+        self._monotonic = monotonic
+        self._blocked_until: dict[int, float] = {}
         self._bot: Bot | None = None
         self._settings: SettingsService | None = None
 
@@ -95,6 +103,20 @@ class TelegramNotifier:
     def attach_settings(self, settings: SettingsService) -> None:
         """Format times in each user's own time zone."""
         self._settings = settings
+
+    def is_undeliverable(self, user_id: int) -> bool:
+        """True while ``user_id`` is known to have blocked the bot (contract v1.6).
+
+        The pipeline then completes the delivery key instead of retrying it for days and
+        alerting the admin about a user who simply left.
+        """
+        until = self._blocked_until.get(user_id)
+        if until is None:
+            return False
+        if self._monotonic() >= until:
+            del self._blocked_until[user_id]
+            return False
+        return True
 
     # ------------------------------------------------------------------ Notifier port
     async def send_daily_digest(
@@ -235,6 +257,9 @@ class TelegramNotifier:
         if bot is None:
             logger.warning("notify_without_bot", user_id=user_id)
             return None
+        if self.is_undeliverable(user_id):
+            logger.debug("notify_skipped_blocked_user", user_id=user_id)
+            return None
         parts = split_message(text)
         first: MessageRef | None = None
         for position, part in enumerate(parts):
@@ -282,6 +307,7 @@ class TelegramNotifier:
                 await self._sleep(float(error.retry_after))
             except TelegramForbiddenError:
                 logger.info("notify_user_blocked_bot", user_id=user_id)
+                self._blocked_until[user_id] = self._monotonic() + BLOCKED_TTL_SECONDS
                 return None
             except TelegramAPIError as error:
                 logger.warning("notify_rejected", user_id=user_id, error=error.message)

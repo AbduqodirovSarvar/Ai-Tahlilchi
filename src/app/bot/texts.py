@@ -233,6 +233,7 @@ CARD_CAUTION: Final = "⚠️ AI ogohlantirishi: ehtiyot bo'ling"
 CARD_RISK_FLAGS: Final = "⚠️ Xavflar: {flags}"
 CARD_DATA_AS_OF: Final = "📦 Ma'lumot {time} holatiga"
 CARD_RESULT: Final = "Natija: {result}"
+CARD_ODDS_MOVED: Final = "📌 Tavsiya koeff.: {recommended} → hozir {current}"
 CARD_HIDDEN: Final = "🙈 Yashirildi: {fixture}"
 CARD_CANCELLED: Final = "🚫 Signal bekor qilingan"
 BTN_RECALC: Final = "🔄 Qayta hisoblash"
@@ -259,6 +260,17 @@ RESULTS_SHORTFALL: Final = (
     "Ro'yxat shartga mos kelmagan o'yinlar bilan to'ldirilmaydi."
 )
 RESULTS_FAILED: Final = "⚠️ {count} ta o'yinni tahlil qilib bo'lmadi, ular o'tkazib yuborildi."
+RESULTS_NO_PRICE: Final = (
+    "💱 {count} ta o'yin: 1xBet narxi yo'q, shuning uchun baholanmadi "
+    "(bukmeker koeffitsient chiqarmagan bo'lishi mumkin)."
+)
+RESULTS_STALE_PRICE: Final = (
+    "⏱ {count} ta o'yin: 1xBet narxi eskirgan, shuning uchun baholanmadi. "
+    "🔄 Qayta hisoblash bilan yangilab ko'ring."
+)
+RESULTS_DATA_STALE: Final = (
+    "📦 Ma'lumot yangilanmadi — eski ma'lumot ishlatildi. Raqamlar eskirgan bo'lishi mumkin."
+)
 RESULTS_EMPTY: Final = (
     "🤷 <b>Value topilmadi.</b>\n"
     "{window} oralig'ida shartlaringizga mos qiymatli tanlov yo'q ({fixtures} ta o'yin "
@@ -621,8 +633,14 @@ STATUS_MODE: Final[dict[str, str]] = {
 }
 STATUS_QUOTA_HEADER: Final = "📡 <b>API limitlari</b> (bugun):"
 STATUS_QUOTA_LINE: Final = (
-    "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining} · qo'lda: {manual}"
+    "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining}\n"
+    "  qo'lda so'rovlar: {manual_used}/{manual_reserve} · qo'lda qoldi {manual_left}"
 )
+STATUS_LLM: Final = (
+    "🤖 <b>AI (Gemini)</b> (bugun): so'rovlar {requests_used}/{requests_limit} · "
+    "tokenlar {tokens_used}/{tokens_limit}"
+)
+STATUS_LLM_NONE: Final = "🤖 AI (Gemini): limit ma'lumoti yo'q."
 STATUS_QUOTA_NONE: Final = "📡 API limitlari: ma'lumot yo'q."
 STATUS_REFRESH: Final = "🔄 Ma'lumot oxirgi yangilangan: <b>{time}</b> ({age})"
 STATUS_REFRESH_NEVER: Final = "🔄 Ma'lumot hali yangilanmagan."

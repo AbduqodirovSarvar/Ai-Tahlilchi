@@ -117,7 +117,9 @@ async def test_status_command_shows_mode_quota_freshness_and_jobs(admin: Client)
 
     (text,) = shown(methods)
     assert "namunaviy ma'lumot" in text
-    assert "ishlatilgan 40/100 · qoldi 60 · qo'lda: 30" in text
+    assert "ishlatilgan 40/100 · qoldi 60" in text
+    assert "qo'lda so'rovlar: 0/30 · qo'lda qoldi 30" in text
+    assert "so'rovlar 12/250" in text
     assert "Ma'lumot oxirgi yangilangan: <b>21.10 08:30</b> (2 soat oldin)" in text
     assert "✅ refresh" in text
     assert texts.STATUS_ERRORS_NONE in text
