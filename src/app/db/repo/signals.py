@@ -182,6 +182,7 @@ def _set_numbers(row: SignalRow, draft: SignalDraft) -> None:
     row.confidence = draft.confidence
     row.stake_units = draft.stake_units
     row.fair_odds = draft.fair_odds
+    row.p_raw = draft.p_raw
     if draft.quoted_at is not None:
         row.quoted_at = draft.quoted_at
     if draft.llm_verdict is not None or draft.llm_note is not None:
@@ -466,6 +467,7 @@ def _record(row: SignalRow, version: int, result: SignalResultRecord | None) -> 
         recommended_odds=row.recommended_odds,
         fair_odds=row.fair_odds,
         quoted_at=row.quoted_at,
+        p_raw=row.p_raw,
     )
 
 
