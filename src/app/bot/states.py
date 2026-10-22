@@ -80,6 +80,12 @@ class ReportFlow(StatesGroup):
     range_input = State()
 
 
+class ExpressFlow(StatesGroup):
+    """🧩 Ekspress: choosing the signals to combine."""
+
+    pick = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 

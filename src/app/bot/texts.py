@@ -1046,3 +1046,41 @@ REPORT_CHART_SEGMENTS: Final = "🧩 Yield: {group} bo'yicha"
 EXPORT_CAPTION_SIGNALS: Final = "📤 Signallar (CSV)"
 EXPORT_CAPTION_BETS: Final = "📤 Stavkalar (CSV)"
 EXPORT_INTRO: Final = "📤 Eksport tayyorlanmoqda…"
+
+
+# --------------------------------------------------------------------------- express (F7.8)
+EXPRESS_PICK: Final = (
+    "🧩 <b>Ekspress tuzuvchi</b>\n"
+    "2–4 ta signalni belgilang (har biri boshqa o'yindan). Tanlangan: {count}"
+)
+EXPRESS_EMPTY: Final = (
+    "🧩 Ekspress uchun kamida 2 ta faol signal kerak (turli o'yinlardan).\n"
+    "Avval 📊 Tahlil yoki ⚡ Bugungi signallar orqali signal oling."
+)
+BTN_EXPRESS: Final = "🧩 Ekspress"
+BTN_EXPRESS_CALC: Final = "🧮 Hisoblash ({count})"
+BTN_EXPRESS_BACK: Final = "⬅️ Tanlashga qaytish"
+BTN_EXPRESS_CLOSE: Final = "❌ Yopish"
+EXPRESS_SAME_MATCH: Final = "Bir o'yindagi bozorlar birlashtirilmaydi: ular o'zaro bog'liq"
+EXPRESS_LIMIT: Final = "Ekspressda ko'pi bilan {max} ta tanlov bo'ladi"
+EXPRESS_NEED_TWO: Final = "Kamida {min} ta tanlov belgilang"
+EXPRESS_RESULT_HEADER: Final = "🧩 <b>Ekspress</b> — {count} ta tanlov"
+EXPRESS_LEG: Final = "{number}. {fixture}: {selection} @ {odds} ({probability})"
+EXPRESS_TOTALS: Final = (
+    "📈 Umumiy koeffitsient: <b>{odds}</b>\n"
+    "🎯 Umumiy ehtimollik: <b>{probability}</b> (adolatli koeff. {fair_odds})\n"
+    "💹 EV: <b>{ev}</b>"
+)
+EXPRESS_NEGATIVE: Final = "❗ Qiymatsiz: bu ekspressning EV si manfiy."
+EXPRESS_YOURS: Final = (
+    "⚠️ Sizning ekspressingiz: {count} ta tanlov, har birining ehtimolligi {low}–{high} "
+    "→ hammasi birdaniga o'tish ehtimolligi atigi {probability}."
+)
+EXPRESS_WARNING: Final = (
+    "⚠️ Eslatma: 3 ta 70% lik tanlovdan tuzilgan ekspressning o'tish ehtimolligi atigi 34%. "
+    "Tanlov qancha ko'p bo'lsa, o'tish ehtimolligi shuncha tez kamayadi."
+)
+EXPRESS_REFUSED: Final = (
+    "🧩 Bu ekspressni hisoblab bo'lmaydi: signal endi tavsiya qilinmaydi, o'yin boshlangan "
+    "yoki bir o'yindan ikkita tanlov bor. Ro'yxatni yangilab, qaytadan tanlang."
+)

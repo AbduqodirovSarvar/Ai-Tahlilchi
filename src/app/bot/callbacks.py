@@ -218,6 +218,17 @@ class ReportCb(CallbackData, prefix="hr"):
     group: str = ""
 
 
+class ExpressCb(CallbackData, prefix="ex"):
+    """🧩 Ekspress buttons.
+
+    ``open`` (under the today list), ``toggle`` (option index), ``calc``, ``back`` (result to
+    picker) and ``close``.
+    """
+
+    action: str
+    index: int = 0
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 

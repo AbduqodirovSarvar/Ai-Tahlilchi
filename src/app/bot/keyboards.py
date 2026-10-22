@@ -24,6 +24,7 @@ from app.bot.callbacks import (
     DateCb,
     EditCb,
     EvCb,
+    ExpressCb,
     MarketCb,
     NavCb,
     NoopCb,
@@ -470,6 +471,17 @@ def recalc_day_keyboard(day: date) -> InlineKeyboardMarkup:
     """The same button under a daily digest or today's list: recalculates that day."""
     callback = RecalcAllCb(kind=RECALC_KIND_DAY, ref=day.isoformat())
     return _markup([[_button(texts.BTN_RECALC_ALL, callback)]])
+
+
+def today_keyboard(day: date) -> InlineKeyboardMarkup:
+    """Under today's list: recalculate everything, or build an express (F7.8)."""
+    callback = RecalcAllCb(kind=RECALC_KIND_DAY, ref=day.isoformat())
+    return _markup(
+        [
+            [_button(texts.BTN_RECALC_ALL, callback)],
+            [_button(texts.BTN_EXPRESS, ExpressCb(action="open"))],
+        ]
+    )
 
 
 def bet_prompt_keyboard(

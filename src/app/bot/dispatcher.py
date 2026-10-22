@@ -19,6 +19,7 @@ from app.bot.handlers import (
     bets,
     custom,
     detail,
+    express,
     fallback,
     quick,
     recalc,
@@ -111,6 +112,7 @@ def build_dispatcher(
         watch,
         templates,
         report,
+        express,
         signals,
         fallback,
     ):
