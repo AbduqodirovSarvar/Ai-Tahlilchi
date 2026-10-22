@@ -1,8 +1,8 @@
 """Container health probe (``python -m app.ops.healthcheck``), used by Docker's HEALTHCHECK.
 
-Healthy means: the database file opens and answers, the scheduler is alive (with the real
-services) and the disk has room. Exit code 0 healthy, 1 unhealthy; one JSON line on stdout
-(also shown by ``docker inspect``) explains every check.
+Healthy means: no configuration error is pending, the database file opens and answers, the
+scheduler is alive (with the real services) and the disk has room. Exit code 0 healthy,
+1 unhealthy; one JSON line on stdout (also shown by ``docker inspect``) explains every check.
 
 Scheduler liveness without touching application code: APScheduler stores each job's
 ``next_run_time`` in the job store after every run, and the ``daily-tick`` job fires every
@@ -20,6 +20,7 @@ import json
 import shutil
 import sqlite3
 import sys
+import tempfile
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import asdict, dataclass
@@ -39,6 +40,8 @@ DEFAULT_MAX_TICK_LAG_MINUTES: Final = 5.0
 DEFAULT_MIN_FREE_MB: Final = 200
 BYTES_PER_MB: Final = 1024 * 1024
 DB_TIMEOUT_SECONDS: Final = 3.0
+CONFIG_ERROR_MARKER_NAME: Final = "ai-tahlilchi-config-error"
+"""Created by ``deploy/entrypoint.sh`` while it waits after exit code 2 (configuration error)."""
 RUN_PREFIX: Final = "run."
 """Ledger prefix of per-job last-run records (``app.pipeline.ledger.RUN_PREFIX``)."""
 
@@ -54,6 +57,14 @@ class CheckResult:
 
 def _connect(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=DB_TIMEOUT_SECONDS)
+
+
+def check_config_marker(directory: Path | None = None) -> CheckResult:
+    """No configuration error is being waited out (the entrypoint leaves a marker file)."""
+    marker = (directory or Path(tempfile.gettempdir())) / CONFIG_ERROR_MARKER_NAME
+    if marker.exists():
+        return CheckResult("config", ok=False, detail="startup failed with a configuration error")
+    return CheckResult("config", ok=True, detail="no configuration error")
 
 
 def check_database(path: Path) -> CheckResult:
@@ -122,8 +133,8 @@ def run_checks(
     min_free_mb: int = DEFAULT_MIN_FREE_MB,
 ) -> list[CheckResult]:
     """All checks in order; the scheduler is checked only when the real services run."""
-    results = [check_database(path)]
-    if results[0].ok and expect_scheduler:
+    results = [check_config_marker(), check_database(path)]
+    if results[1].ok and expect_scheduler:
         results.append(check_scheduler(path, now=now, max_lag_minutes=max_lag_minutes))
     results.append(check_disk(path, min_free_mb=min_free_mb))
     return results

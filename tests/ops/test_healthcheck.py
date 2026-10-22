@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.ops import healthcheck
 from app.ops.healthcheck import (
     TICK_JOB_ID,
+    check_config_marker,
     check_database,
     check_disk,
     check_scheduler,
@@ -43,6 +44,12 @@ def make_jobs_table(path: Path, next_run: datetime | None, job_id: str = TICK_JO
 
 def test_job_id_matches_the_scheduler() -> None:
     assert healthcheck.TICK_JOB_ID == JOB_DAILY_TICK
+
+
+def test_config_error_marker_makes_it_unhealthy(tmp_path: Path) -> None:
+    assert check_config_marker(tmp_path).ok
+    (tmp_path / healthcheck.CONFIG_ERROR_MARKER_NAME).touch()
+    assert not check_config_marker(tmp_path).ok
 
 
 def test_missing_database_is_unhealthy(tmp_path: Path) -> None:
@@ -115,14 +122,14 @@ def test_scheduler_is_checked_only_for_real_services(tmp_path: Path) -> None:
     path = make_db(tmp_path / "a.db")
     fake = run_checks(path, expect_scheduler=False, now=NOW)
     real = run_checks(path, expect_scheduler=True, now=NOW)
-    assert [c.name for c in fake] == ["database", "disk"]
-    assert [c.name for c in real] == ["database", "scheduler", "disk"]
+    assert [c.name for c in fake] == ["config", "database", "disk"]
+    assert [c.name for c in real] == ["config", "database", "scheduler", "disk"]
     assert not all(c.ok for c in real)
 
 
 def test_missing_database_skips_the_scheduler_check(tmp_path: Path) -> None:
     results = run_checks(tmp_path / "none.db", expect_scheduler=True, now=NOW)
-    assert [c.name for c in results] == ["database", "disk"]
+    assert [c.name for c in results] == ["config", "database", "disk"]
 
 
 def test_last_runs_reads_the_ledger_or_nothing(tmp_path: Path) -> None:

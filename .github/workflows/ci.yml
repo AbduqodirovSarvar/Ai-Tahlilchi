@@ -47,6 +47,12 @@ jobs:
         run: uv run lint-imports
       - name: deptry
         run: uv run deptry .
+      - name: shellcheck (deployment and ops scripts)
+        run: shellcheck -x scripts/ops/*.sh deploy/*.sh
+      - name: actionlint (workflows)
+        run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo" -w /repo
+          rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
 
   test:
     name: Tests and coverage
@@ -118,11 +124,17 @@ jobs:
           tags: ai-tahlilchi:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Smoke test (container starts, runs as non-root, fails cleanly without secrets)
+      - name: Smoke test (migrates, runs as non-root, fails cleanly without secrets)
         run: |
-          test "$(docker run --rm ai-tahlilchi:ci id -u)" != "0"
+          test "$(docker run --rm --entrypoint id ai-tahlilchi:ci -u)" != "0"
           set +e
-          docker run --rm --read-only --tmpfs /tmp ai-tahlilchi:ci
+          # /data is a tmpfs owned by the app user (a real deployment mounts the bot-data volume).
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /data:uid=10001,gid=10001 \
+            -e CONFIG_ERROR_BACKOFF_SECONDS=1 ai-tahlilchi:ci
           status=$?
           set -e
           test "$status" -eq 2
+      - name: Smoke test (healthcheck passes on a migrated database)
+        run: |
+          docker run --rm --read-only --tmpfs /tmp --tmpfs /data:uid=10001,gid=10001 \
+            ai-tahlilchi:ci python -m app.ops.healthcheck

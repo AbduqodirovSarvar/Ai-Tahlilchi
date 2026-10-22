@@ -1,0 +1,15 @@
+# Daily database backup (see ai-tahlilchi-backup.timer, scripts/ops/backup.sh).
+# Remote copy: put RCLONE_REMOTE=... (and BACKUP_PING_URL=...) into /opt/ai-tahlilchi/backup.env.
+[Unit]
+Description=AI Tahlilchi database backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=docker
+EnvironmentFile=-/opt/ai-tahlilchi/backup.env
+ExecStart=/opt/ai-tahlilchi/bin/backup.sh
+TimeoutStartSec=30min
+Nice=10

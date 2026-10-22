@@ -61,10 +61,19 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     MPLCONFIGDIR=/tmp/matplotlib
 
 COPY --from=builder /opt/venv /opt/venv
+# Migrations ship with the image: the entrypoint runs `alembic upgrade head` before the app.
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
+COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 WORKDIR /data
 USER app:app
 
-# Exec form: python runs directly under `init` (compose), so SIGTERM reaches aiogram,
-# which stops polling and closes its HTTP session (graceful shutdown).
+# `python -m app.ops.healthcheck`: database reachable, scheduler tick fresh (real services),
+# disk space. start-period covers migrations and startup.
+HEALTHCHECK --interval=60s --timeout=15s --start-period=90s --retries=3     CMD ["python", "-m", "app.ops.healthcheck"]
+
+# The entrypoint migrates, then runs the app as a child and forwards SIGTERM to it (graceful
+# shutdown: polling stops, running scheduler jobs get up to 60 s). Exit codes: see README.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["python", "-m", "app.main"]
