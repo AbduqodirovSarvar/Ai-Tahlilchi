@@ -177,6 +177,10 @@ def dates_keyboard() -> InlineKeyboardMarkup:
                 _button(texts.BTN_TOMORROW, DateCb(choice="tomorrow")),
             ],
             [_button(texts.BTN_WEEKEND, DateCb(choice="weekend")), *days],
+            [
+                _button(texts.BTN_YESTERDAY, DateCb(choice="yesterday")),
+                _button(texts.BTN_LAST_WEEK, DateCb(choice="last_week")),
+            ],
             [_button(texts.BTN_CALENDAR, DateCb(choice="calendar"))],
             nav_row(),
         ]

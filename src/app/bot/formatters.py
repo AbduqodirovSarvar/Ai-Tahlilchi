@@ -32,6 +32,7 @@ from app.services.interfaces import (
     MIN_SEARCH_LENGTH,
     AnalysisResult,
     DateWindow,
+    ResultMark,
     SignalSource,
     SignalState,
     SignalView,
@@ -336,6 +337,7 @@ def format_results_summary(result: AnalysisResult) -> str:
         lines.append(texts.RESULTS_WATCHLIST.format(count=watched))
     if result.retro:
         lines.append(texts.RESULTS_RETRO)
+        lines.extend(_retro_tally(result))
     if regular and result.shortfall and result.requested is not None:
         lines.append(
             texts.RESULTS_SHORTFALL.format(matched=result.matched, requested=result.requested)
@@ -344,6 +346,24 @@ def format_results_summary(result: AnalysisResult) -> str:
         lines.append(texts.RESULTS_FAILED.format(count=result.failed_fixtures))
     lines.extend(price_lines(result))
     return "\n".join(lines)
+
+
+def _retro_tally(result: AnalysisResult) -> list[str]:
+    """How the model's look-back picks turned out: wins, losses and the hit share."""
+    marks = [signal.result for signal in result.signals if not is_watchlist_extra(signal)]
+    won = sum(mark in {ResultMark.WON, ResultMark.HALF_WON} for mark in marks)
+    lost = sum(mark in {ResultMark.LOST, ResultMark.HALF_LOST} for mark in marks)
+    if won + lost == 0:
+        return []
+    extra = ""
+    pending = sum(mark is None for mark in marks)
+    if pending:
+        extra = texts.RESULTS_RETRO_PENDING.format(count=pending)
+    return [
+        texts.RESULTS_RETRO_TALLY.format(
+            won=won, lost=lost, rate=percent(won / (won + lost)), extra=extra
+        )
+    ]
 
 
 def price_lines(result: AnalysisResult) -> list[str]:

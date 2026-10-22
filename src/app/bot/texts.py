@@ -45,6 +45,12 @@ HELP: Final = (
     "/start — bosh menyu\n"
     "/tahlil — tezkor tahlil, masalan:\n"
     "<code>/tahlil 25.10-31.10 futbol 60% Arsenal,Inter</code>\n"
+    "<code>/tahlil Arsenal - Chelsea</code> — maxsus tahlil (EV filtrisiz); retro: "
+    "<code>/tahlil kecha</code>\n"
+    "/kuzat — sevimlilar: <code>/kuzat Barcelona</code>\n"
+    "/bank — bank, stavkalar va grafik\n"
+    "/hisobot — natijalar hisoboti; /eksport — CSV (signallar va stavkalar)\n"
+    "/ekspress — 2–4 signaldan ekspress hisoblash\n"
     "/qayta — bugungi signallarni qayta hisoblash (yoki <code>/qayta ertaga</code>, "
     "<code>/qayta 3kun</code>)\n"
     "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
@@ -258,6 +264,10 @@ RESULTS_HEADER: Final = "📊 <b>Natijalar</b>: {window} · {count} ta signal ·
 RESULTS_RETRO: Final = (
     "🕰 Retro-tahlil: o'tgan o'yinlar, model o'sha paytda nima bergan bo'lardi va natija ✅/❌."
 )
+RESULTS_RETRO_TALLY: Final = (
+    "🧮 O'sha paytdagi tanlovlar: ✅ {won} · ❌ {lost} — o'tish ulushi {rate}{extra}."
+)
+RESULTS_RETRO_PENDING: Final = " · ⏳ {count} ta natijasiz"
 RESULTS_SHORTFALL: Final = (
     "ℹ️ Shartlarga {matched} ta o'yin mos keldi (siz {requested} ta so'ragansiz). "
     "Ro'yxat shartga mos kelmagan o'yinlar bilan to'ldirilmaydi."
@@ -304,6 +314,8 @@ BTN_TODAY: Final = "Bugun"
 BTN_TOMORROW: Final = "Ertaga"
 BTN_WEEKEND: Final = "Dam olish kunlari"
 BTN_NEXT_DAYS: Final = "{days} kun"
+BTN_YESTERDAY: Final = "🕰 Kecha (retro)"
+BTN_LAST_WEEK: Final = "🕰 O'tgan hafta (retro)"
 BTN_CALENDAR: Final = "📅 Oraliq tanlash"
 CALENDAR_PICK_START: Final = "📅 <b>Boshlanish sanasini</b> tanlang:"
 CALENDAR_PICK_END: Final = (
@@ -444,7 +456,7 @@ QUICK_ERROR: Final = (
     "❗ {problem}\n\n"
     "Namuna: <code>/tahlil 25.10-31.10 futbol 60% Arsenal,Inter</code>\n"
     "Qo'shimcha: <code>ev5%</code>, <code>10ta</code>, <code>bugun</code>, <code>ertaga</code>, "
-    "<code>dam</code>, <code>3kun</code>."
+    "<code>dam</code>, <code>3kun</code>; retro: <code>kecha</code>, <code>o'tgan hafta</code>."
 )
 QUICK_TEAM_NOT_FOUND: Final = "«{name}» jamoasi topilmadi. Nomini tekshiring."
 QUICK_TEAM_AMBIGUOUS: Final = "«{name}» noaniq: {options}. Aniqroq yozing."

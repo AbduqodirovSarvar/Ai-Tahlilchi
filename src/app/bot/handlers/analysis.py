@@ -41,6 +41,7 @@ from app.bot.parsing import (
     PERCENT,
     InputError,
     check_window,
+    keyword_spec,
     parse_count,
     parse_date_range,
     parse_percent,
@@ -128,12 +129,15 @@ async def on_date(callback: CallbackQuery, callback_data: DateCb, session: Wizar
         "tomorrow": DateSpec.tomorrow,
         "weekend": DateSpec.weekend,
     }
+    retro = {"yesterday", "last_week"}
     if callback_data.choice == "calendar":
         calendar_draft = replace(draft, calendar_start=None, calendar_month=0)
         await session.go("calendar", calendar_draft)
         return
     if callback_data.choice == "days":
         spec = DateSpec.next_days(callback_data.days)
+    elif callback_data.choice in retro:
+        spec = keyword_spec(callback_data.choice, session.ctx.today)
     else:
         spec = choices.get(callback_data.choice, DateSpec.today)()
     await session.go(next_step("dates", draft), draft.with_dates(spec))
