@@ -141,7 +141,7 @@ async def _notify(
     previous = await ctx.ledger.get(message_key(record.user_id, record.id))
     reply_to = None if previous is None else previous.detail
     try:
-        reference = await _send(ctx, delivery, task, result, key, reply_to)
+        reference = await _send(delivery, task, result, key, reply_to)
     except Exception:
         await ctx.ledger.fail(key, now=ctx.clock())
         raise
@@ -150,8 +150,7 @@ async def _notify(
     return True
 
 
-async def _send(  # noqa: PLR0913 - one value per fact of the message
-    ctx: PipelineContext,
+async def _send(
     delivery: Delivery,
     task: RecalcTask,
     result: RecalcResult,

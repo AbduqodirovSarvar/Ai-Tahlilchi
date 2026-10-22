@@ -57,7 +57,9 @@ class ScriptedService:
         self.batches: list[int] = []
 
     async def review_candidates(
-        self, candidates: Sequence[CandidateInput], context: ExperienceContext | None = None
+        self,
+        candidates: Sequence[CandidateInput],
+        context: ExperienceContext | None = None,  # noqa: ARG002
     ) -> tuple[LlmReview, ...]:
         self.batches.append(len(candidates))
         reviews = []

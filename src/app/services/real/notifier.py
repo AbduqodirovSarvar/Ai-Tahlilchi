@@ -68,7 +68,7 @@ class LogOnlyNotifier:
         cancelled: SignalCancelled,
         *,
         key: DeliveryKey,
-        reply_to: MessageRef | None = None,
+        reply_to: MessageRef | None = None,  # noqa: ARG002 - protocol signature
     ) -> MessageRef | None:
         """Log the cancellation."""
         logger.info("notify_cancelled", user_id=user_id, reason=cancelled.reason, key=key)
@@ -82,7 +82,11 @@ class LogOnlyNotifier:
         return None
 
     async def send_result_settled(
-        self, user_id: int, notice: SettledNotice, *, key: DeliveryKey
+        self,
+        user_id: int,
+        notice: SettledNotice,  # noqa: ARG002 - protocol signature
+        *,
+        key: DeliveryKey,
     ) -> MessageRef | None:
         """Log the settlement."""
         logger.info("notify_settled", user_id=user_id, key=key)

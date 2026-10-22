@@ -39,9 +39,7 @@ def build_template(path: Path, *, history_only: bool = False) -> World:
             await connection.run_sync(Base.metadata.create_all)
         await Ledger.ensure_schema(engine)
         async with create_session_factory(engine).begin() as session:
-            await upsert_batch(
-                session, world.history_batch() if history_only else world.batch()
-            )
+            await upsert_batch(session, world.history_batch() if history_only else world.batch())
         await engine.dispose()
 
     asyncio.run(seed())
@@ -81,7 +79,7 @@ class Env:
 
 
 @asynccontextmanager
-async def open_env(
+async def open_env(  # noqa: PLR0913 - one switch per thing a test may vary
     template: Path,
     world: World,
     target: Path,
@@ -114,4 +112,3 @@ async def open_env(
         yield Env(ctx, system, notifier, clock, world, engine, sessions, feed)
     finally:
         await engine.dispose()
-

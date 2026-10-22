@@ -96,7 +96,7 @@ async def ingest_fixtures(
     return len(fixtures)
 
 
-async def ingest_odds(
+async def ingest_odds(  # noqa: PLR0913 - one fetch described by its parts
     ctx: PipelineContext,
     sport: Sport,
     fixtures: Sequence[ExternalRef],

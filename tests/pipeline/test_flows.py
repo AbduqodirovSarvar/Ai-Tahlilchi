@@ -178,7 +178,7 @@ async def test_a_failed_digest_is_retried_on_the_next_tick(
     await tune(provider_env)
     original = AnalysisEngine.run
 
-    async def broken(self: AnalysisEngine, *args: object, **kwargs: object) -> object:
+    async def broken(*_args: object, **_kwargs: object) -> object:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(AnalysisEngine, "run", broken)
@@ -245,7 +245,8 @@ async def test_watchlist_notifications_follow_line_ups_and_odds_moves(provider_e
     await tune(provider_env)
     services = provider_env.system.services
     league = next(
-        option for option in await services.catalog.list_leagues(Sport.FOOTBALL)
+        option
+        for option in await services.catalog.list_leagues(Sport.FOOTBALL)
         if option.name == "Premier League"
     )
     target = WatchTarget(WatchKind.LEAGUE, league.league_id)

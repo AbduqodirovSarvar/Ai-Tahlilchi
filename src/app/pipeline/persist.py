@@ -117,7 +117,7 @@ def _unchanged(prior: SignalRecord, draft: SignalDraft) -> bool:
     )
 
 
-def _draft(
+def _draft(  # noqa: PLR0913, PLR0917 - everything one draft is made of
     ctx: PipelineContext,
     request: AnalysisRequest,
     pick: Pick,

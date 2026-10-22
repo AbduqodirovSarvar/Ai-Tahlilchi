@@ -339,16 +339,14 @@ class AnalysisEngine:
         fixture_requests = min(len(uncovered), leagues * seasons)
         odds_refs, odds_days = await self._odds_needs(items, now, source)
         groups: defaultdict[tuple[ExternalRef, date], int] = defaultdict(int)
-        for ref, league, day in odds_refs:
+        for _, league, day in odds_refs:
             groups[(league, day)] += 1
         # Days not fetched yet have no stored fixtures to name: assume one odds request per
         # league and day (an upper bound).
         league_days = len(uncovered) * leagues + sum(
             1 for count in groups.values() if count >= MIN_FIXTURES_FOR_LEAGUE_ODDS
         )
-        singles = sum(
-            count for count in groups.values() if count < MIN_FIXTURES_FOR_LEAGUE_ODDS
-        )
+        singles = sum(count for count in groups.values() if count < MIN_FIXTURES_FOR_LEAGUE_ODDS)
         result_refs = tuple(
             item.record.fixture.ref
             for item in items
@@ -415,8 +413,10 @@ class AnalysisEngine:
             )
             # Fixtures just stored may need prices that the plan could not name yet.
             items, _ = await self._collect(request)
-            fresh, days = await self._odds_needs(items, ctx.clock(), ctx.providers[sport].source)
-            refs = [ref for ref, _, _ in fresh]
+            fresh, fresh_days = await self._odds_needs(
+                items, ctx.clock(), ctx.providers[sport].source
+            )
+            refs, days = [ref for ref, _, _ in fresh], tuple(fresh_days)
         kind = OddsKind.RECALC if purpose is MANUAL else OddsKind.MORNING
         await ingest_odds(ctx, sport, refs, kind=kind, purpose=purpose, days=days)
 

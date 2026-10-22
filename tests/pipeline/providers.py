@@ -40,8 +40,16 @@ def _api_fixture(fixture: Fixture, number: int) -> Fixture:
         fixture,
         ref=ExternalRef(SOURCE, str(9000 + number)),
         league=league,
-        home=Team(ref=ExternalRef(SOURCE, f"t-{fixture.home.name}"), sport=Sport.FOOTBALL, name=fixture.home.name),
-        away=Team(ref=ExternalRef(SOURCE, f"t-{fixture.away.name}"), sport=Sport.FOOTBALL, name=fixture.away.name),
+        home=Team(
+            ref=ExternalRef(SOURCE, f"t-{fixture.home.name}"),
+            sport=Sport.FOOTBALL,
+            name=fixture.home.name,
+        ),
+        away=Team(
+            ref=ExternalRef(SOURCE, f"t-{fixture.away.name}"),
+            sport=Sport.FOOTBALL,
+            name=fixture.away.name,
+        ),
     )
 
 
@@ -155,7 +163,10 @@ class ScriptedProvider:
         )
 
     async def enrich_results(
-        self, results: Sequence[FixtureResult], *, purpose: Purpose  # noqa: ARG002
+        self,
+        results: Sequence[FixtureResult],
+        *,
+        purpose: Purpose,  # noqa: ARG002
     ) -> list[FixtureResult]:
         """No xG in the script."""
         return list(results)
@@ -176,8 +187,7 @@ def scripted_provider(world: World, clock: MutableClock) -> ScriptedProvider:
         if snapshot.fixture in by_world
     ]
     results = {
-        by_world[ref]: replace(result, fixture=by_world[ref])
-        for ref, result in world.feed.items()
+        by_world[ref]: replace(result, fixture=by_world[ref]) for ref, result in world.feed.items()
     }
     return ScriptedProvider(
         clock=clock,

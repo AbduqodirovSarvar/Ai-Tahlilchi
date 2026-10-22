@@ -33,12 +33,18 @@ class Verdicts:
         self.verdict = verdict
 
     async def review(self, candidates: Sequence[ReviewCandidate]) -> Mapping[ReviewKey, Review]:
-        return {c.key: Review(verdict=self.verdict, note="Izoh", risk_flags=("rotatsiya",)) for c in candidates}
+        return {
+            c.key: Review(verdict=self.verdict, note="Izoh", risk_flags=("rotatsiya",))
+            for c in candidates
+        }
 
 
 async def analyse(env: Env, **changes: object) -> list:  # type: ignore[type-arg]
     query = AnalysisQuery(
-        dates=DateSpec.next_days(3), min_probability=0.30, min_ev=0.0, **changes  # type: ignore[arg-type]
+        dates=DateSpec.next_days(3),
+        min_probability=0.30,
+        min_ev=0.0,
+        **changes,  # type: ignore[arg-type]
     )
     return list((await env.system.services.analysis.analyze(USER, query)).signals)
 
@@ -131,9 +137,7 @@ def test_refresh_cli_runs_the_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert len(calls) == 1
 
 
-def test_refresh_cli_reports_unexpected_errors(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_refresh_cli_reports_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def broken() -> Settings:
         raise RuntimeError("boom")
 
@@ -148,7 +152,7 @@ async def test_main_runs_the_scheduler_beside_the_real_services(
     started = []
     polled = []
 
-    async def poll(dispatcher: object, token: str, admins: frozenset[int], _s: Settings) -> None:
+    async def poll(_dispatcher: object, token: str, admins: frozenset[int], _s: Settings) -> None:
         polled.append((token, admins))
         started.append(True)
 
@@ -159,4 +163,3 @@ async def test_main_runs_the_scheduler_beside_the_real_services(
 
     assert polled == [("42:TEST", frozenset({1}))]
     assert started == [True]
-

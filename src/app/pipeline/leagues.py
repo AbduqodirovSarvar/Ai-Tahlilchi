@@ -65,8 +65,9 @@ class LeagueDirectory:
         """``fixtures`` with teams and leagues rewritten to their history identity.
 
         ``history`` maps a canonical league reference to the history teams stored for it.
-        Only alias/exact matches are applied (fuzzy ones are reported, not linked); unmatched teams keep their provider identity and
-        are counted in the returned summaries so the caller can log them.
+        Only alias/exact matches are applied (fuzzy ones are reported, not linked); unmatched
+        teams keep their provider identity and are counted in the returned summaries so the
+        caller can log them.
         """
         by_league: dict[ExternalRef, list[Fixture]] = {}
         for fixture in fixtures:

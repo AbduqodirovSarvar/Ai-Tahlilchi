@@ -1,8 +1,8 @@
 """Suite-wide fixtures: isolation from process-global state shared by every test module."""
 
 import logging
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import structlog

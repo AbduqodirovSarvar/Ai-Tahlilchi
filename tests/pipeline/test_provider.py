@@ -68,7 +68,9 @@ async def test_lineups_and_expected_goals(
     assert await provider.lineups_confirmed(FIXTURE, purpose=AUTOMATIC)
     router.get("/fixtures/lineups").respond(json=load("lineups_empty.json"))
     assert not await provider.lineups_confirmed(ExternalRef("api-football", "1"), purpose=AUTOMATIC)
-    results = await provider.adapter(AUTOMATIC).fetch_results([ExternalRef("api-football", "1208021")])
+    results = await provider.adapter(AUTOMATIC).fetch_results(
+        [ExternalRef("api-football", "1208021")]
+    )
     router.get("/fixtures/statistics").respond(json=load("statistics_fixture_1208021.json"))
     enriched = await provider.enrich_results(results, purpose=AUTOMATIC)
     assert len(enriched) == len(results)
@@ -92,7 +94,8 @@ async def test_provider_failures_become_unavailable_errors(router: respx.MockRou
     async with httpx.AsyncClient(base_url=BASE_URL, headers={"x-apisports-key": TEST_KEY}) as http:
         harness = build_harness(FakeTime(), http)
         adapter = GuardedAdapter(
-            FootballProvider(harness.football, clock=harness.time.utc).adapter(MANUAL), "api-football"
+            FootballProvider(harness.football, clock=harness.time.utc).adapter(MANUAL),
+            "api-football",
         )
         assert adapter.sport is Sport.FOOTBALL
         assert adapter.supported_markets()

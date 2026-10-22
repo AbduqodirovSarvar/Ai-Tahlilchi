@@ -1,5 +1,6 @@
-"""Recalculation of stored signals with fresh data (F4.4): the engine behind ``/qayta``,
-the 24-hour update and the pre-match update.
+"""Recalculation of stored signals with fresh data (F4.4).
+
+The engine behind ``/qayta``, the 24-hour update and the pre-match update.
 
 Per fixture (signals of one fixture share the fetch and the model): refresh the fixture's
 status and prices from the provider when the budget allows, price the signals again with the
@@ -171,7 +172,16 @@ async def _recalc_fixture(
             after = await upsert_signal(
                 session, _draft(record, candidate, ctx.config.flat_unit), reason=options.reason
             )
-            results.append(_result(ctx, record, after, candidate, now, (stale, as_of, lineups)))
+            results.append(
+                _result(
+                    ctx,
+                    record,
+                    after,
+                    candidate=candidate,
+                    now=now,
+                    freshness=(stale, as_of, lineups),
+                )
+            )
     return results
 
 
@@ -209,6 +219,7 @@ def _result(  # noqa: PLR0913 - one value per fact of the result
     ctx: PipelineContext,
     before: SignalRecord,
     after: SignalRecord,
+    *,
     candidate: Candidate | None,
     now: datetime,
     freshness: tuple[bool, datetime | None, bool],

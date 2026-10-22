@@ -32,7 +32,9 @@ def ledger(sessions: async_sessionmaker[AsyncSession]) -> Ledger:
 
 
 @pytest.fixture
-async def provider_env(history_template: "tuple[Path, World]", tmp_path: Path) -> AsyncIterator[Env]:
+async def provider_env(
+    history_template: "tuple[Path, World]", tmp_path: Path
+) -> AsyncIterator[Env]:
     """History only plus a scripted provider; results are revealed by the provider."""
     template, world = history_template
     async with open_env(

@@ -45,10 +45,34 @@ LEAGUES = {
     "SP1": ("La Liga", "Spain"),
 }
 TEAM_NAMES = {
-    "E0": ["Arsenal", "Chelsea", "Liverpool", "Man City", "Man United", "Tottenham",
-           "Newcastle", "Aston Villa", "Brighton", "West Ham", "Fulham", "Everton"],
-    "SP1": ["Real Madrid", "Barcelona", "Sevilla", "Valencia", "Betis", "Sociedad",
-            "Villarreal", "Girona", "Getafe", "Celta", "Osasuna", "Mallorca"],
+    "E0": [
+        "Arsenal",
+        "Chelsea",
+        "Liverpool",
+        "Man City",
+        "Man United",
+        "Tottenham",
+        "Newcastle",
+        "Aston Villa",
+        "Brighton",
+        "West Ham",
+        "Fulham",
+        "Everton",
+    ],
+    "SP1": [
+        "Real Madrid",
+        "Barcelona",
+        "Sevilla",
+        "Valencia",
+        "Betis",
+        "Sociedad",
+        "Villarreal",
+        "Girona",
+        "Getafe",
+        "Celta",
+        "Osasuna",
+        "Mallorca",
+    ],
 }
 MARKETS = (
     Market.match_result(),
@@ -132,32 +156,38 @@ class World:
         return HistoryBatch(fixtures=past, results=self.results)
 
 
+def _season(code: str, teams: list[str], season: int) -> list[Fixture]:
+    """Every fixture of one league season (finished before ``START``, scheduled after)."""
+    league = league_of(code)
+    fixtures = []
+    for number, matches in enumerate(_rounds(teams)):
+        day = datetime.combine(round_date(season, number), time(), tzinfo=UTC)
+        for slot, (home, away) in enumerate(matches):
+            kickoff = day + timedelta(hours=KICKOFF_HOURS[slot])
+            fixtures.append(
+                Fixture(
+                    ref=ExternalRef(SOURCE, f"{code}/{season}/{home}/{away}"),
+                    sport=Sport.FOOTBALL,
+                    league=league,
+                    season=season,
+                    kickoff=kickoff,
+                    home=team_of(home),
+                    away=team_of(away),
+                    status=FixtureStatus.SCHEDULED if kickoff > START else FixtureStatus.FINISHED,
+                )
+            )
+    return fixtures
+
+
 def build_world() -> World:
     """Generate fixtures, past results, the hidden future results and all prices."""
     fixtures: list[Fixture] = []
     codes: dict[ExternalRef, str] = {}
     for code, teams in TEAM_NAMES.items():
-        league = league_of(code)
         for season in (2024, 2025, CURRENT_SEASON):
-            for number, matches in enumerate(_rounds(teams)):
-                day = round_date(season, number)
-                for slot, (home, away) in enumerate(matches):
-                    hour = KICKOFF_HOURS[slot]
-                    kickoff = datetime.combine(day, time(), tzinfo=UTC) + timedelta(hours=hour)
-                    fixture = Fixture(
-                        ref=ExternalRef(SOURCE, f"{code}/{season}/{home}/{away}"),
-                        sport=Sport.FOOTBALL,
-                        league=league,
-                        season=season,
-                        kickoff=kickoff,
-                        home=team_of(home),
-                        away=team_of(away),
-                        status=FixtureStatus.SCHEDULED
-                        if kickoff > START
-                        else FixtureStatus.FINISHED,
-                    )
-                    fixtures.append(fixture)
-                    codes[fixture.ref] = code
+            for fixture in _season(code, teams, season):
+                fixtures.append(fixture)
+                codes[fixture.ref] = code
     outcomes = {f.ref: _result(f, codes[f.ref]) for f in fixtures}
     past = tuple(outcomes[f.ref] for f in fixtures if f.status is FixtureStatus.FINISHED)
     feed = {f.ref: outcomes[f.ref] for f in fixtures if f.status is FixtureStatus.SCHEDULED}
@@ -215,4 +245,3 @@ def _quotes(fixture: Fixture, probabilities: dict) -> list[OddsSnapshot]:  # typ
                     )
                 )
     return rows
-

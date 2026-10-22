@@ -60,7 +60,7 @@ async def configure(env: Env) -> None:
     )
 
 
-def won(view: SignalView, home: int, away: int) -> bool:
+def won(view: SignalView, home: int, away: int) -> bool:  # noqa: PLR0911 - one branch per market
     """Plain-arithmetic settlement of the markets the world prices (half lines only)."""
     market, selection = view.market, view.selection
     if market.type is MarketType.MATCH_RESULT:
@@ -80,7 +80,7 @@ def won(view: SignalView, home: int, away: int) -> bool:
     return (home - away - 0.5 > 0) == (selection is Selection.HOME)  # asian handicap -0.5
 
 
-async def test_a_whole_day(env: Env) -> None:
+async def test_a_whole_day(env: Env) -> None:  # noqa: PLR0915 - one scripted day
     services, notifier, clock = env.system.services, env.notifier, env.clock
     await configure(env)
 

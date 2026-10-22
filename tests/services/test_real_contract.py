@@ -28,9 +28,7 @@ from tests.services.contract_suite import (
 
 
 @pytest.fixture
-async def env(
-    seeded_template: tuple[Path, World], tmp_path: Path
-) -> AsyncIterator[Env]:
+async def env(seeded_template: tuple[Path, World], tmp_path: Path) -> AsyncIterator[Env]:
     template, world = seeded_template
     async with open_env(template, world, tmp_path / "real.db") as opened:
         yield opened
