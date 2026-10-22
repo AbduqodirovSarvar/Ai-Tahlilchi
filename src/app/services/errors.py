@@ -54,3 +54,29 @@ class BudgetExceededError(ServiceError):
         super().__init__(f"needs {needed} API requests, {available} available")
         self.needed = needed
         self.available = available
+
+
+class ServiceUnavailableError(ServiceError):
+    """An external dependency (data provider, database) is down; retrying later may work.
+
+    Added in contract v1.2. The bot shows a "try again later" message and keeps its state.
+    """
+
+    def __init__(self, component: str, detail: str = "") -> None:
+        """``component`` names what failed (``api-football``, ``database``); no secrets."""
+        super().__init__(f"{component} unavailable" + (f": {detail}" if detail else ""))
+        self.component = component
+        self.detail = detail
+
+
+class BusyError(ServiceError):
+    """The user already has an analysis running (one concurrent ``analyze`` per user).
+
+    Added in contract v1.2. The second request is refused instead of queued, so a double tap
+    can never spend the API budget twice.
+    """
+
+    def __init__(self, user_id: int) -> None:
+        """Remember whose analysis is running, for the log."""
+        super().__init__(f"an analysis for user {user_id} is already running")
+        self.user_id = user_id

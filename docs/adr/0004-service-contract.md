@@ -46,6 +46,14 @@ Kontekst: sharh hisobotlarni buzishi mumkin bo'lgan yo'llarni topdi — yashiril
 - **Qo'shimcha DTO/metodlar faqat qo'shish orqali:** `date_to` ni ixtiyoriy qilish (standart `None`) mavjud chaqiruvlarni buzmaydi; protokolga `list_sports` qo'shildi (real servis ham uni amalga oshiradi).
 - **Fake hech qachon productionga kirmaydi:** alohida `import-linter` qoidasi.
 
+### 11. v1.2: pipeline → bot kanali, bir vaqtdalik va idempotentlik (T4)
+- **`Notifier` porti** servis shartnomasida (bot amalga oshiradi, pipeline chaqiradi): pipeline Telegram'ni bilmaydi, bot esa jadvalni bilmaydi. Tinch soatlar va idempotentlik **chaqiruvchi** tomonda — notifier oddiy "yubor" bo'lib qoladi va test qilish oson (`FakeNotifier`).
+- **Bir foydalanuvchi — bitta `analyze`**: ikkinchi chaqiruv `BusyError`. Navbatga qo'yish rad etildi: ikki marta bosish byudjetni ikki marta sarflardi.
+- **So'rovsiz qayta hisob** (`recalc_window`, `recalc_signals`): `query_id` xotirada yashamaydi (real serviste ledger'da saqlanadi, restartdan keyin ham ishlaydi), lekin bot "bugungi hammasi" uchun id'ga muhtoj emas.
+- **`place_bet` idempotentligi** mijoz tokeni bilan (callback id): jadvalga ustun qo'shmasdan ledger kaliti orqali; ustun kerak bo'lsa data-engineer ga so'rov (ADR 0008).
+- **Bank** = boshlang'ich bank + yopilgan stavkalar foydasi; tarix har safar qayta hisoblanadi (snapshot yo'q): oddiy va bank tuzatilganda mantiqan izchil.
+- **Oyna qoidalari DTO'da** (`ensure_allowed`): bot va servis bir xil qoidani ishlatadi (qaror #12).
+
 ## Oqibatlar
 - Bot T3 da to'liq ishlay oladi; real servis F4 da shu protokollarni amalga oshiradi va `contract_suite` dan o'tishi shart.
 - Shartnomaga keyin faqat qo'shish mumkin; yangi imkoniyat (masalan, ekspress §6.11, `/ozgarishlar` §6.13 C) yangi protokol yoki metod sifatida qo'shiladi.

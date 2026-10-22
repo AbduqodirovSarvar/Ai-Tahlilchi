@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from app.errors import ConfigurationError
 
 type AppEnv = Literal["dev", "prod"]
-type ServicesBackend = Literal["fake"]
+type ServicesBackend = Literal["fake", "real"]
 type HandicapConventionName = Literal["home_line", "own_line"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 type SecretName = Literal[
@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     # How API-Football writes Asian handicap numbers (see docs/api_probe_report.md); set it
     # before the first real odds are stored, stored lines cannot be re-read afterwards.
     handicap_convention: HandicapConventionName = "home_line"
-    # Which implementation of the service contract the bot talks to. Only the in-memory
-    # fake exists until the pipeline-backed services land (T4 adds "real").
+    # Which implementation of the service contract the bot talks to: the in-memory sample
+    # data ("fake", the default until API keys exist) or the pipeline-backed one ("real").
     app_services: ServicesBackend = "fake"
     healthchecks_url: HttpUrl | None = None
 

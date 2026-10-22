@@ -8,7 +8,6 @@ from decimal import Decimal
 import pytest
 
 from app.domain import Market, MarketType, Selection, Sport
-from app.services._fake_metrics import SignalOutcome, build_report, profit_units
 from app.services._fake_world import FakeQuote, settle, unit_interval
 from app.services.errors import BudgetExceededError
 from app.services.fake import (
@@ -37,6 +36,7 @@ from app.services.interfaces import (
     WatchKind,
     WatchTarget,
 )
+from app.services.report_math import SignalOutcome, build_report, profit_units
 from tests.services.contract_suite import (
     SETTLE_DELAY,
     MutableClock,

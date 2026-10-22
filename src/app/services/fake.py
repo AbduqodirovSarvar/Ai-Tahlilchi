@@ -11,8 +11,6 @@ Usage::
     result = await services.analysis.analyze(user_id, AnalysisQuery(dates=DateSpec.today()))
 """
 
-import csv
-import io
 import itertools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
@@ -24,7 +22,6 @@ from zoneinfo import ZoneInfo
 
 from app.domain import Sport, normalize_name
 from app.logging import get_logger
-from app.services._fake_metrics import SignalOutcome, build_report, day_summary, profit_units
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
     SPORT_MARKETS,
@@ -40,6 +37,7 @@ from app.services._fake_world import (
 )
 from app.services.errors import (
     BudgetExceededError,
+    BusyError,
     CooldownActiveError,
     NotFoundError,
     ValidationFailedError,
@@ -52,6 +50,7 @@ from app.services.interfaces import (
     MIN_SEARCH_LENGTH,
     PRELIMINARY_AFTER,
     RECALC_COOLDOWN,
+    AdminAlert,
     AnalysisProgress,
     AnalysisQuery,
     AnalysisResult,
@@ -64,9 +63,11 @@ from app.services.interfaces import (
     BetView,
     ConfidenceLevel,
     CostEstimate,
+    DailyDigest,
     DateSpec,
     DateWindow,
     DaySummary,
+    DeliveryKey,
     EntityId,
     ExportFile,
     FixtureDetail,
@@ -75,6 +76,7 @@ from app.services.interfaces import (
     FixturePage,
     JobStatus,
     LeagueOption,
+    MessageRef,
     ProgressCallback,
     RecalcBatch,
     RecalcDiff,
@@ -86,10 +88,13 @@ from app.services.interfaces import (
     RiskProfile,
     ScopeKind,
     Services,
+    SettledNotice,
+    SignalCancelled,
     SignalId,
     SignalNumbers,
     SignalSource,
     SignalState,
+    SignalUpdate,
     SignalView,
     SortKey,
     SportOption,
@@ -102,9 +107,17 @@ from app.services.interfaces import (
     Verdict,
     WatchItem,
     WatchKind,
+    WatchlistEvent,
     WatchNotification,
     WatchTarget,
     infer_risk_profile,
+)
+from app.services.report_math import (
+    SignalOutcome,
+    build_report,
+    day_summary,
+    export_file,
+    profit_units,
 )
 
 type Clock = Callable[[], datetime]
@@ -255,6 +268,8 @@ class FakeState:
         self.templates: dict[int, dict[str, TemplateView]] = {}
         self.watchlist: dict[int, dict[WatchTarget, WatchItem]] = {}
         self.bets: dict[BetId, _StoredBet] = {}
+        self.bet_tokens: dict[tuple[int, str], BetId] = {}
+        self.busy: set[int] = set()
         self.next_id = itertools.count(1)
 
     def now(self) -> datetime:
@@ -287,7 +302,7 @@ class FakeState:
         """Concrete window in the user's zone, checked against the horizon."""
         today = self.local_today(settings.zone)
         window = dates.resolve(today)
-        window.ensure_within_horizon(today)
+        window.ensure_allowed(today)
         return window
 
     def fixture(self, fixture_id: EntityId) -> FakeFixture:
@@ -609,7 +624,18 @@ class FakeAnalysisService:
     async def analyze(
         self, user_id: int, query: AnalysisQuery, *, progress: ProgressCallback | None = None
     ) -> AnalysisResult:
-        """See :meth:`AnalysisService.analyze`."""
+        """See :meth:`AnalysisService.analyze` (one at a time per user)."""
+        if user_id in self._state.busy:
+            raise BusyError(user_id)
+        self._state.busy.add(user_id)
+        try:
+            return await self._analyze(user_id, query, progress)
+        finally:
+            self._state.busy.discard(user_id)
+
+    async def _analyze(
+        self, user_id: int, query: AnalysisQuery, progress: ProgressCallback | None
+    ) -> AnalysisResult:
         plan = self._plan(user_id, query)
         available = self._state.budget_remaining()
         if len(plan.keys) > available:
@@ -681,10 +707,53 @@ class FakeAnalysisService:
         owner, signal_ids = self._state.queries.get(query_id, (None, ()))
         if owner != user_id:
             raise NotFoundError("query", query_id)
+        return await self._recalc_batch(user_id, query_id, signal_ids, progress)
+
+    async def recalc_window(
+        self, user_id: int, dates: DateSpec, *, progress: ProgressCallback | None = None
+    ) -> RecalcBatch:
+        """See :meth:`AnalysisService.recalc_window`."""
+        settings = self._state.settings_for(user_id)
+        window = self._state.resolve(dates, settings)
+        signal_ids = tuple(
+            stored.signal_id
+            for stored in self._state.user_signals(user_id)
+            if stored.counts and window.contains(stored.fixture.kickoff, settings.zone)
+        )
+        query_id = f"w:{window.date_from}:{window.date_to}"
+        return await self._recalc_batch(user_id, query_id, signal_ids, progress)
+
+    async def recalc_signals(
+        self,
+        user_id: int,
+        signal_ids: Sequence[SignalId],
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> RecalcBatch:
+        """See :meth:`AnalysisService.recalc_signals`."""
+        own = tuple(
+            dict.fromkeys(
+                signal_id
+                for signal_id in signal_ids
+                if (stored := self._state.signals.get(signal_id)) is not None
+                and stored.user_id == user_id
+                and not stored.retro
+            )
+        )
+        return await self._recalc_batch(user_id, f"s:{len(own)}", own, progress)
+
+    async def _recalc_batch(
+        self,
+        user_id: int,
+        query_id: EntityId,
+        signal_ids: Sequence[SignalId],
+        progress: ProgressCallback | None,
+    ) -> RecalcBatch:
+        """Recalculate ``signal_ids`` once per fixture; cooled-down and started ones are skipped."""
         diffs, cooled, started = [], [], []
         claimed: set[EntityId] = set()
         for done, signal_id in enumerate(signal_ids, start=1):
-            stored = self._state.signals[signal_id]
+            stored = self._state.signal(user_id, signal_id)
             fixture_id = stored.fixture.fixture_id
             if stored.fixture.started(self._state.now()):
                 started.append(signal_id)
@@ -755,6 +824,17 @@ class FakeSignalService:
     async def get_signal(self, user_id: int, signal_id: SignalId) -> SignalView:
         """See :meth:`SignalService.get_signal`."""
         return self._state.view(self._state.signal(user_id, signal_id))
+
+    async def get_signals(
+        self, user_id: int, signal_ids: Sequence[SignalId]
+    ) -> tuple[SignalView, ...]:
+        """See :meth:`SignalService.get_signals`."""
+        found = (self._state.signals.get(signal_id) for signal_id in signal_ids)
+        return tuple(
+            self._state.view(stored)
+            for stored in found
+            if stored is not None and stored.user_id == user_id
+        )
 
     async def list_signals(
         self, user_id: int, dates: DateSpec, *, include_hidden: bool = False
@@ -997,6 +1077,10 @@ class FakeBetService:
         stored = self._state.signal(user_id, draft.signal_id)
         if stored.retro:
             raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
+        if draft.client_token is not None:
+            known = self._state.bet_tokens.get((user_id, draft.client_token))
+            if known is not None:
+                return self.view(self._state.bets[known])
         stake = draft.stake or self._default_stake(user_id, stored)
         bet = _StoredBet(
             bet_id=next(self._state.next_id),
@@ -1007,6 +1091,8 @@ class FakeBetService:
             placed_at=self._state.now(),
         )
         self._state.bets[bet.bet_id] = bet
+        if draft.client_token is not None:
+            self._state.bet_tokens[(user_id, draft.client_token)] = bet.bet_id
         return self.view(bet)
 
     def _default_stake(self, user_id: int, stored: _StoredSignal) -> Decimal:
@@ -1197,58 +1283,7 @@ class FakeReportService:
 
     async def export(self, user_id: int) -> ExportFile:
         """See :meth:`ReportService.export`."""
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(_EXPORT_HEADER)
-        for row in self._state.outcomes(user_id):
-            writer.writerow(_export_row(row))
-        return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
-
-
-_EXPORT_HEADER: Final = (
-    "signal_id",
-    "kickoff_utc",
-    "sport",
-    "league",
-    "home",
-    "away",
-    "market",
-    "line",
-    "selection",
-    "odds",
-    "probability",
-    "ev",
-    "confidence",
-    "stake_units",
-    "recommended_at",
-    "hidden",
-    "result",
-    "profit_units",
-)
-
-
-def _export_row(row: SignalOutcome) -> tuple[object, ...]:
-    view = row.view
-    return (
-        view.signal_id,
-        view.kickoff.isoformat(),
-        view.sport.value,
-        view.league,
-        view.home_team,
-        view.away_team,
-        view.market.type.value,
-        "" if view.market.line is None else view.market.line,
-        view.selection.value,
-        view.odds,
-        round(view.probability, 4),
-        round(view.ev, 4),
-        view.confidence.value,
-        view.stake_units,
-        "" if view.recommended_at is None else view.recommended_at.isoformat(),
-        view.state is SignalState.HIDDEN,
-        "" if view.result is None else view.result.value,
-        "" if row.profit_units is None else row.profit_units,
-    )
+        return export_file(self._state.outcomes(user_id))
 
 
 class FakeSystemStatusService:
@@ -1275,6 +1310,81 @@ class FakeSystemStatusService:
             JobStatus(name="settle", last_run_at=refreshed - timedelta(minutes=30), ok=True),
         )
         return SystemStatus(quotas=(quota,), last_refresh_at=refreshed, jobs=jobs, recent_errors=())
+
+
+@dataclass(frozen=True, slots=True)
+class SentNotification:
+    """One call recorded by :class:`FakeNotifier`."""
+
+    method: str
+    user_id: int | None
+    payload: object
+    key: DeliveryKey | None
+    message: MessageRef | None
+
+
+class FakeNotifier:
+    """Recording :class:`~app.services.interfaces.Notifier` for bot and pipeline tests.
+
+    Every call is appended to :attr:`sent` and answered with a fresh :class:`MessageRef`
+    (chat id = user id), so a test can assert what was announced, to whom and how often.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing sent."""
+        self.sent: list[SentNotification] = []
+        self._ids = itertools.count(1)
+
+    def _record(
+        self, method: str, user_id: int | None, payload: object, key: DeliveryKey | None
+    ) -> MessageRef | None:
+        message = None if user_id is None else MessageRef(user_id, next(self._ids))
+        self.sent.append(SentNotification(method, user_id, payload, key, message))
+        return message
+
+    async def send_daily_digest(
+        self, user_id: int, digest: DailyDigest, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_daily_digest`."""
+        return self._record("daily_digest", user_id, digest, key)
+
+    async def send_signal_update(
+        self,
+        user_id: int,
+        update: SignalUpdate,
+        *,
+        key: DeliveryKey,
+        reply_to: MessageRef | None = None,  # noqa: ARG002 - part of the protocol
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_signal_update`."""
+        return self._record("signal_update", user_id, update, key)
+
+    async def send_signal_cancelled(
+        self,
+        user_id: int,
+        cancelled: SignalCancelled,
+        *,
+        key: DeliveryKey,
+        reply_to: MessageRef | None = None,  # noqa: ARG002 - part of the protocol
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_signal_cancelled`."""
+        return self._record("signal_cancelled", user_id, cancelled, key)
+
+    async def send_watchlist_event(
+        self, user_id: int, event: WatchlistEvent, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_watchlist_event`."""
+        return self._record("watchlist_event", user_id, event, key)
+
+    async def send_result_settled(
+        self, user_id: int, notice: SettledNotice, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_result_settled`."""
+        return self._record("result_settled", user_id, notice, key)
+
+    async def alert_admin(self, alert: AdminAlert) -> None:
+        """See :meth:`Notifier.alert_admin`."""
+        self._record("alert_admin", None, alert, None)
 
 
 def create_fake_services(*, clock: Clock = system_clock) -> Services:

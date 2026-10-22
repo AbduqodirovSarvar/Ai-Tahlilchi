@@ -63,14 +63,14 @@
 - [x] F6.10 Telegram cheklovlari: 4096 bo'lish, `callback_data` ≤ 64 (indekslar, property test), flood control (bir marta qayta urinish), har callbackga `answer()`. Qo'lda sinov: [test_scenarios.md](test_scenarios.md) (jonli sinov token qo'shilgandan keyin)
 
 ## T4 — Tizimni birlashtirish
-- [ ] F4.1 `pipeline/refresh.py`
-- [ ] F4.2 `pipeline/analyze.py`
-- [ ] F4.3 `pipeline/daily.py`
-- [ ] F4.4 `pipeline/recalc.py`
-- [ ] F4.5 `pipeline/prematch.py`, `scheduled_recalcs`
-- [ ] F4.6 `pipeline/settle.py`
-- [ ] F4.7 APScheduler (persistent, idempotent)
-- [ ] F4.8 "Soxta kun" integratsion testi
+- [x] F4.1 `pipeline/refresh.py`: fixtures/natijalar/koeffitsientlar (avtomatik kvota, qadam bo'yicha o'tkazib yuborish), `python -m app.pipeline.refresh` (kodlar 0/1/2, kalit yo'q xabari) ([ADR 0008](adr/0008-pipeline-and-real-services.md))
+- [x] F4.2 `pipeline/analyze.py` + `valuation`/`selection`/`persist`/`modeling`: yagona tahlil yo'li (DC keshi, Pinnacle de-vig, 1xBet narxi, ishonch, flat/Kelly, LLM kancha: `rad` → tavsiya emas), real servislar `app.services.real`
+- [x] F4.3 `pipeline/daily.py`: foydalanuvchi vaqtida, tinch soat, idempotent kalit, catch-up
+- [x] F4.4 `pipeline/recalc.py`: diff + `signal_versions`, yaratilish chegaralari bo'yicha verdikt, zaxira tugasa `data_as_of`, bekor qilish
+- [x] F4.5 `pipeline/prematch.py`, `scheduled_recalcs`: 24 soat va N daqiqa oldin, lease egasi bilan yakunlash, sevimlilar (tarkib, koeffitsient harakati)
+- [x] F4.6 `pipeline/settle.py`: natija (Osiyo yarim natijalari), foyda, CLV, foydalanuvchi stavkalari, qo'lda natija ustuvor
+- [x] F4.7 `app/scheduler.py`: APScheduler + SQLAlchemy jobstore, settle 08:00, refresh 08:30, daqiqalik tick'lar; restartdan keyin saqlanadi; `main` da bot bilan birga (`APP_SERVICES=real`)
+- [x] F4.8 "Soxta kun" e2e (`tests/pipeline/test_day_e2e.py`: refresh → kunlik xabar → pre-match → natija → hisobot, qo'lda tekshirilgan foyda), contract suite real servislarda, idempotentlik, byudjet, LLM yo'q/`rad`/`ehtiyot`, rejalashtiruvchi restarti
 - [x] F5.1 `clients/gemini.py` (async `google-genai` o'rami, `response_schema`, retry, token metrikasi; ADR 0009)
 - [x] F5.2 Prompt shablonlari (`context_check.v1`, `postmortem.v1`, paket ma'lumoti, keshlangan yuklovchi)
 - [x] F5.3 Kirish JSON yig'uvchi (delimitlangan ma'lumot bloki, deterministik token byudjeti, "Tajriba konteksti")

@@ -1,9 +1,12 @@
-"""Report arithmetic of the fake services (private to ``fake``).
+"""Report arithmetic shared by the fake and the real services.
 
-The real numbers will come from the pipeline and models; these simple versions only have to
-be self-consistent so the bot's report screens can be built and tested against them.
+One definition of the metrics (wins, yield, losing streak, calibration, segments), computed
+from :class:`SignalOutcome` rows: a signal card plus its profit and closing-line value. Only
+recommended, non-retro signals are fed in (contract ``docs/contracts.md`` §4).
 """
 
+import csv
+import io
 import itertools
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -14,11 +17,13 @@ from typing import Final
 from app.services.interfaces import (
     CalibrationBucket,
     DaySummary,
+    ExportFile,
     ReportGroup,
     ReportView,
     ResultMark,
     RiskProfile,
     SegmentStat,
+    SignalState,
     SignalView,
 )
 
@@ -182,3 +187,60 @@ def _segment(key: str, rows: Sequence[SignalOutcome]) -> SegmentStat:
         clv=_mean([row.clv for row in rows if row.clv is not None]),
         win_rate=won / decided if decided else None,
     )
+
+
+EXPORT_HEADER: Final = (
+    "signal_id",
+    "kickoff_utc",
+    "sport",
+    "league",
+    "home",
+    "away",
+    "market",
+    "line",
+    "selection",
+    "odds",
+    "probability",
+    "ev",
+    "confidence",
+    "stake_units",
+    "recommended_at",
+    "hidden",
+    "result",
+    "profit_units",
+)
+
+
+def export_row(row: SignalOutcome) -> tuple[object, ...]:
+    """One CSV line of a recommended signal and its settlement."""
+    view = row.view
+    return (
+        view.signal_id,
+        view.kickoff.isoformat(),
+        view.sport.value,
+        view.league,
+        view.home_team,
+        view.away_team,
+        view.market.type.value,
+        "" if view.market.line is None else view.market.line,
+        view.selection.value,
+        view.odds,
+        round(view.probability, 4),
+        round(view.ev, 4),
+        view.confidence.value,
+        view.stake_units,
+        "" if view.recommended_at is None else view.recommended_at.isoformat(),
+        view.state is SignalState.HIDDEN,
+        "" if view.result is None else view.result.value,
+        "" if row.profit_units is None else row.profit_units,
+    )
+
+
+def export_file(rows: Iterable[SignalOutcome]) -> ExportFile:
+    """The ``/eksport`` CSV of ``rows`` (one line per recommended signal)."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_HEADER)
+    for row in rows:
+        writer.writerow(export_row(row))
+    return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
