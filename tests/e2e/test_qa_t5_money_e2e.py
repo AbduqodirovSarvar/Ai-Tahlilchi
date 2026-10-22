@@ -99,7 +99,7 @@ async def test_force_past_the_limit_is_an_explicit_button_that_records_nothing_b
         ("Pacific/Auckland", (2026, 10, 24, 12, 30), (2026, 10, 25, 12, 30), 0, 0),
     ],
 )
-async def test_loss_windows_follow_the_users_time_zone(
+async def test_loss_windows_follow_the_users_time_zone(  # noqa: PLR0913, PLR0917
     real_bot: RealBot,
     zone: str,
     marked_utc: tuple[int, int, int, int, int],

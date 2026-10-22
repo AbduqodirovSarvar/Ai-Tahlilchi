@@ -186,9 +186,7 @@ async def test_report_days_follow_the_local_kickoff_date_in_any_zone(
         day += timedelta(days=1)
 
     assert total == len(signals)
-    whole = await rb.services.reports.report(
-        ADMIN, ReportRequest(date_from=first, date_to=last)
-    )
+    whole = await rb.services.reports.report(ADMIN, ReportRequest(date_from=first, date_to=last))
     assert whole.signals == len(signals)  # the days add up to the range
 
 

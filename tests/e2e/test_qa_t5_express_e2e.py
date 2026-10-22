@@ -121,7 +121,9 @@ def test_leg_count_boundaries_and_unplayable_legs() -> None:
             with pytest.raises(ValidationFailedError):
                 evaluate(views, NOW)
     with pytest.raises(ValidationFailedError, match="correlated"):
-        evaluate([_leg(1, 0.6, 1.8), make_signal(signal_id=9, fixture_id="fx1", kickoff=LATER)], NOW)
+        evaluate(
+            [_leg(1, 0.6, 1.8), make_signal(signal_id=9, fixture_id="fx1", kickoff=LATER)], NOW
+        )
     started = make_signal(signal_id=8, fixture_id="fx8", kickoff=NOW - timedelta(minutes=1))
     with pytest.raises(ValidationFailedError):
         evaluate([_leg(1, 0.6, 1.8), started], NOW)

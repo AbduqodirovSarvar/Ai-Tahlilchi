@@ -1,9 +1,7 @@
 """QA (T5 bot): templates, watchlist, callback_data sizes, message splitting and texts."""
 
 import re
-import zlib
 from datetime import time
-from itertools import count
 
 import pytest
 from aiogram.filters.callback_data import CallbackData
@@ -22,9 +20,9 @@ from app.services.interfaces import (
     WatchKind,
     WatchTarget,
 )
+from tests.bot.fakes import ADMIN_ID
 from tests.e2e.bot_client import Client, answers, buttons_of, shown, telegram_html_problems
 from tests.e2e.real_world import ADMIN, RealBot
-from tests.bot.fakes import ADMIN_ID
 from tests.pipeline.world import TEAM_NAMES
 
 QUERY = AnalysisQuery(dates=DateSpec.next_days(3), min_probability=0.4, min_ev=0.02)
@@ -60,7 +58,9 @@ async def test_an_invalid_schedule_time_keeps_the_editor_and_explains(
     assert saved.schedule is None  # nothing was stored by the failed attempt
 
 
-@pytest.mark.parametrize(("typed", "expected"), [("09:00", time(9)), ("0:00", time(0)), ("23:59", time(23, 59))])
+@pytest.mark.parametrize(
+    ("typed", "expected"), [("09:00", time(9)), ("0:00", time(0)), ("23:59", time(23, 59))]
+)
 async def test_a_valid_schedule_time_is_saved_for_the_chosen_days(
     admin: Client, services: object, typed: str, expected: time
 ) -> None:
@@ -77,9 +77,7 @@ async def test_a_valid_schedule_time_is_saved_for_the_chosen_days(
     assert saved.schedule == TemplateSchedule(weekdays=frozenset({1, 2, 3, 4, 5}), at=expected)
 
 
-async def test_a_schedule_without_any_day_cannot_be_saved(
-    admin: Client, services: object
-) -> None:
+async def test_a_schedule_without_any_day_cannot_be_saved(admin: Client, services: object) -> None:
     await _template(services)
     await admin.send(texts.MENU_TEMPLATES)
     await admin.press("Haftasonasi")
@@ -106,7 +104,7 @@ async def test_saving_a_schedule_twice_keeps_one_template(admin: Client, service
     assert len(await services.templates.list_templates(ADMIN_ID)) == 1  # type: ignore[attr-defined]
 
 
-# --------------------------------------------------------------------------- watchlist (real)
+# watchlist (real services)
 async def _team_names(rb: RealBot) -> list[tuple[str, str]]:
     """(team_id, name) of every team of the seeded world."""
     found: dict[str, str] = {}
@@ -172,15 +170,8 @@ async def test_every_saved_template_has_a_button(real_bot: RealBot) -> None:
     assert len(opens) == 25
 
 
-def _crc_collision() -> tuple[str, str]:
-    seen: dict[int, str] = {}
-    for number in count():
-        candidate = f"team:{number}"
-        checksum = zlib.crc32(candidate.encode())
-        if checksum in seen:
-            return seen[checksum], candidate
-        seen[checksum] = candidate
-    raise AssertionError  # pragma: no cover
+CRC_COLLISION = ("team:29685295", "team:32060020")
+"""Found by a birthday search; crc32 is 32-bit, so a pair appears after ~80k ids."""
 
 
 @pytest.mark.xfail(
@@ -189,7 +180,7 @@ def _crc_collision() -> tuple[str, str]:
     "crc32 (about 1 in 4e9 per pair, easy to construct) address the first entry for both",
 )
 def test_two_entities_with_the_same_crc_are_told_apart() -> None:
-    first_id, second_id = _crc_collision()
+    first_id, second_id = CRC_COLLISION
     items = [
         WatchItem(
             target=WatchTarget(kind=WatchKind.TEAM, entity_id=entity),
@@ -302,7 +293,7 @@ def _strings() -> dict[str, str]:
 
 
 def test_texts_use_one_apostrophe_and_have_no_leftover_placeholders() -> None:
-    odd_quotes = re.compile("[’ʻʼ`‘]")
+    odd_quotes = re.compile("[" + "".join(map(chr, (0x2019, 0x2BB, 0x2BC, 0x2018))) + "`]")
     leftover = re.compile(
         r"tez orada|yaqin kunlarda|coming soon|todo|fixme|lorem|keyingi to'lqin", re.IGNORECASE
     )

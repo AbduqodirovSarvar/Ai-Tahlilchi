@@ -4,6 +4,7 @@ Fake services (fast) except where a persistent FSM database is the point.
 """
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 import pytest
@@ -136,8 +137,19 @@ async def test_opening_another_screen_keeps_the_custom_analysis_running_state(
 
 
 # --------------------------------------------------------------------------- restart
-def _persistent(path: Path) -> SqliteStorage:
-    return SqliteStorage(path)
+@pytest.fixture
+async def persistent() -> AsyncIterator[Callable[[Path], SqliteStorage]]:
+    """Factory of SQLite FSM storages; every one is closed even when the test fails."""
+    opened: list[SqliteStorage] = []
+
+    def make(path: Path) -> SqliteStorage:
+        storage = SqliteStorage(path)
+        opened.append(storage)
+        return storage
+
+    yield make
+    for storage in opened:
+        await storage.close()
 
 
 def _dispatcher(services: Services, storage: SqliteStorage) -> Dispatcher:
@@ -151,11 +163,14 @@ def _dispatcher(services: Services, storage: SqliteStorage) -> Dispatcher:
 
 
 async def test_a_flow_survives_a_restart_with_the_persistent_storage(
-    tmp_path: Path, bot: Bot, session: RecordingSession
+    tmp_path: Path,
+    bot: Bot,
+    session: RecordingSession,
+    persistent: Callable[[Path], SqliteStorage],
 ) -> None:
     services = create_fake_services(clock=fixed_clock)
     await seed_signals(services)
-    first = Client(_dispatcher(services, _persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
+    first = Client(_dispatcher(services, persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
     await first.send(texts.MENU_TEMPLATES)
     await first.send("/ekspress")
     picker = first.last_message_id
@@ -165,7 +180,7 @@ async def test_a_flow_survives_a_restart_with_the_persistent_storage(
     await first.dispatcher.storage.close()
 
     # "restart": brand new dispatcher and storage object over the same file
-    second = Client(_dispatcher(services, _persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
+    second = Client(_dispatcher(services, persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
     methods = await second.press_data(ExpressCb(action="toggle", index=other).pack(), picker)
 
     assert not any(a.show_alert for a in answers(methods))
@@ -181,16 +196,19 @@ async def test_a_flow_survives_a_restart_with_the_persistent_storage(
     "another flow's reset)",
 )
 async def test_a_dead_custom_run_does_not_lock_the_menu_after_a_restart(
-    tmp_path: Path, bot: Bot, session: RecordingSession
+    tmp_path: Path,
+    bot: Bot,
+    session: RecordingSession,
+    persistent: Callable[[Path], SqliteStorage],
 ) -> None:
     services = create_fake_services(clock=fixed_clock)
-    storage = _persistent(tmp_path / "fsm.db")
+    storage = persistent(tmp_path / "fsm.db")
     first = Client(_dispatcher(services, storage), bot, session, ADMIN_ID)
     await first.send(texts.MENU_CUSTOM)
     await storage.set_state(first.storage_key(), "CustomFlow:running")  # the job died with us
     await storage.close()
 
-    second = Client(_dispatcher(services, _persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
+    second = Client(_dispatcher(services, persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
     reply = "\n".join(shown(await second.send(texts.MENU_CUSTOM)))
 
     assert texts.CUSTOM_ALREADY_RUNNING not in reply
@@ -198,16 +216,19 @@ async def test_a_dead_custom_run_does_not_lock_the_menu_after_a_restart(
 
 
 async def test_a_dead_wizard_run_is_recoverable_from_the_menu(
-    tmp_path: Path, bot: Bot, session: RecordingSession
+    tmp_path: Path,
+    bot: Bot,
+    session: RecordingSession,
+    persistent: Callable[[Path], SqliteStorage],
 ) -> None:
     services = create_fake_services(clock=fixed_clock)
-    storage = _persistent(tmp_path / "fsm.db")
+    storage = persistent(tmp_path / "fsm.db")
     first = Client(_dispatcher(services, storage), bot, session, ADMIN_ID)
     await to_confirm(first)
     await storage.set_state(first.storage_key(), "AnalysisFlow:running")
     await storage.close()
 
-    second = Client(_dispatcher(services, _persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
+    second = Client(_dispatcher(services, persistent(tmp_path / "fsm.db")), bot, session, ADMIN_ID)
     message_id, start = first.find_button(texts.BTN_START)
     old = await second.press_data(start, message_id)
     fresh = await second.send(texts.MENU_ANALYSIS)
@@ -333,8 +354,7 @@ async def test_double_tap_on_remove_watch_removes_once_and_reports_gone(
     )
 
     assert not await services.watchlist.list_watchlist(ADMIN_ID)
-    assert texts.UNEXPECTED_ERROR not in "
-".join(shown(first + second))
+    assert texts.UNEXPECTED_ERROR not in "\n".join(shown(first + second))
     assert len(answers(first)) == len(answers(second)) == 1
 
 

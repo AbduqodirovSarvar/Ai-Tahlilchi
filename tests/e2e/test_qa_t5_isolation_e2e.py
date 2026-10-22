@@ -223,7 +223,9 @@ async def test_a_stranger_gets_no_reply_to_any_new_entry_point(real_bot: RealBot
 async def test_a_stranger_in_an_admins_group_chat_is_ignored_too(real_bot: RealBot) -> None:
     rb = real_bot
     await _own_things(rb)
-    group = Client(rb.dispatcher, rb.bot, rb.session, ADMIN, chat_id=-100500, chat_type="supergroup")
+    group = Client(
+        rb.dispatcher, rb.bot, rb.session, ADMIN, chat_id=-100500, chat_type="supergroup"
+    )
 
     assert await group.send(texts.MENU_BETS) == []
     assert await group.send("Arsenal") == []
@@ -260,7 +262,12 @@ async def test_admin_text_flood_is_rate_limited_before_it_hits_the_catalog(
     template, world = seeded_template  # type: ignore[misc]
     limiter = RateLimitMiddleware(capacity=5, refill_per_second=0.0001)
     async with open_real_bot(
-        template, world, Path(str(tmp_path)) / "flood.db", bot, session, rate_limit=limiter  # type: ignore[arg-type]
+        template,
+        world,
+        Path(str(tmp_path)) / "flood.db",
+        bot,
+        session,
+        rate_limit=limiter,  # type: ignore[arg-type]
     ) as rb:
         calls: list[str] = []
         original = rb.services.catalog.search_teams

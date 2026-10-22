@@ -102,7 +102,7 @@ class RealBot:
 
 
 @asynccontextmanager
-async def open_real_bot(
+async def open_real_bot(  # noqa: PLR0913
     template: Path,
     world: World,
     target: Path,
