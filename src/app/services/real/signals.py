@@ -1,6 +1,6 @@
 """Real signal, result, bet and report services (everything that reads stored signals)."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -310,7 +310,7 @@ class RealBetService:
         )
 
 
-def _loss(profits: "Iterable[Decimal]") -> Decimal:  # noqa: UP037
+def _loss(profits: Iterable[Decimal]) -> Decimal:
     return max(-sum(profits, Decimal(0)), Decimal(0))
 
 

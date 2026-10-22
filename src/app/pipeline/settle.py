@@ -226,7 +226,12 @@ async def _store(
         for bet in await bets_for_signal(session, record.id):
             profit = _bet_profit(bet.stake, bet.odds_taken, stored, record, settlement)
             await settle_bet(
-                session, bet.id, outcome=stored.outcome, profit=profit, settled_at=result.settled_at
+                session,
+                bet.id,
+                user_id=record.user_id,
+                outcome=stored.outcome,
+                profit=profit,
+                settled_at=result.settled_at,
             )
     return stored
 

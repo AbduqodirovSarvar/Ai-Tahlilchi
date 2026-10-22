@@ -69,7 +69,11 @@ _SCOPES: Final = {
     ScopeKind.TEAMS: QueryScope.TEAMS,
     ScopeKind.FIXTURES: QueryScope.FIXTURES,
 }
-_SORTS: Final = {SortKey.EV: SortOrder.EV, SortKey.PROBABILITY: SortOrder.PROBABILITY, SortKey.KICKOFF: SortOrder.KICKOFF}
+_SORTS: Final = {
+    SortKey.EV: SortOrder.EV,
+    SortKey.PROBABILITY: SortOrder.PROBABILITY,
+    SortKey.KICKOFF: SortOrder.KICKOFF,
+}
 _VERDICTS: Final = {
     RecalcVerdict.STILL_VALID: ServiceVerdict.STILL_VALID,
     RecalcVerdict.BELOW_THRESHOLD: ServiceVerdict.BELOW_THRESHOLD,
@@ -243,7 +247,11 @@ class RealAnalysisService:
         return await self._batch(user_id, f"w:{window.date_from}:{window.date_to}", ids, progress)
 
     async def recalc_signals(
-        self, user_id: int, signal_ids: Sequence[SignalId], *, progress: ProgressCallback | None = None
+        self,
+        user_id: int,
+        signal_ids: Sequence[SignalId],
+        *,
+        progress: ProgressCallback | None = None,
     ) -> RecalcBatch:
         """See :meth:`AnalysisService.recalc_signals`."""
         ids = tuple(dict.fromkeys(signal_ids))
@@ -268,8 +276,8 @@ class RealAnalysisService:
         started = [r.id for r in records if r.fixture.fixture.kickoff <= now]
         live = [r for r in records if r.fixture.fixture.kickoff > now]
         claimed: dict[int, bool] = {}
-        runnable = []
-        cooled = []
+        runnable: list[data.SignalRecord] = []
+        cooled: list[data.SignalRecord] = []
         for record in live:
             fixture_id = record.fixture.id
             if fixture_id not in claimed:
@@ -351,12 +359,20 @@ class RealAnalysisService:
                 for h, a, p in card.top_scores
             ),
             markets=tuple(
-                MarketQuote(market=q.market, selection=q.selection, probability=q.probability, odds=q.odds, ev=q.ev)
+                MarketQuote(
+                    market=q.market,
+                    selection=q.selection,
+                    probability=q.probability,
+                    odds=q.odds,
+                    ev=q.ev,
+                )
                 for q in card.quotes
                 if 0 < q.probability <= 1
             ),
             odds_moves=tuple(
-                OddsMove(market=m.market, selection=m.selection, opening=m.opening, current=m.current)
+                OddsMove(
+                    market=m.market, selection=m.selection, opening=m.opening, current=m.current
+                )
                 for m in card.odds_moves
             ),
             home_score=None if result is None else result.home_score,
@@ -389,4 +405,3 @@ def _manual_options() -> RecalcOptions:
     return RecalcOptions(
         reason=SignalVersionReason.RECALC, purpose=MANUAL, odds_kind=OddsKind.RECALC
     )
-

@@ -158,9 +158,7 @@ def settings_view(profile: UserProfile) -> UserSettingsView:
 
 def settings_record(user_id: int, view: UserSettingsView) -> data.UserSettingsRecord:
     """The storage record of a settings view (risk profile re-derived from the thresholds)."""
-    profile = infer_risk_profile(
-        view.min_probability, view.min_ev, (view.odds_min, view.odds_max)
-    )
+    profile = infer_risk_profile(view.min_probability, view.min_ev, (view.odds_min, view.odds_max))
     return data.UserSettingsRecord(
         user_id=user_id,
         sports=tuple(sorted(sport.value for sport in view.sports)),
@@ -184,4 +182,3 @@ def settings_record(user_id: int, view: UserSettingsView) -> data.UserSettingsRe
 def money(value: Decimal | None) -> Decimal:
     """``value`` or zero."""
     return Decimal(0) if value is None else value
-

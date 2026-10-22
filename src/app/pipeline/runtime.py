@@ -24,6 +24,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.ledger import Ledger
 from app.pipeline.provider import FootballProvider
 from app.pipeline.review import LlmCandidateReviewer
+from app.sports.football_mapping import HandicapConvention
 
 logger = get_logger(__name__)
 
@@ -52,7 +53,11 @@ async def open_runtime(
             key.get_secret_value(),
             SqlUsageStore(sessions),
         )
-        provider = FootballProvider(client, clock=clock)
+        provider = FootballProvider(
+            client,
+            clock=clock,
+            handicap_convention=HandicapConvention(settings.handicap_convention),
+        )
         providers[provider.sport] = provider
     else:
         logger.warning("pipeline_without_provider", reason="API_FOOTBALL_KEY is not set")

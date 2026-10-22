@@ -81,11 +81,12 @@ async def ingest_fixtures(
         }
     fixtures, summaries = ctx.leagues.canonicalize(fetched, history)
     for summary in summaries:
-        if summary.unmatched or summary.ambiguous:
+        if summary.unmatched or summary.ambiguous or summary.fuzzy:
             logger.warning(
                 "team_matching_incomplete",
                 league=str(summary.league),
                 matched=summary.matched,
+                fuzzy_needs_review=summary.fuzzy,
                 ambiguous=summary.ambiguous,
                 unmatched=summary.unmatched,
             )

@@ -28,7 +28,7 @@ from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.sports.base import FixtureQuery, SportAdapter
 from app.sports.football import FootballAdapter
 from app.sports.football_leagues import LeagueCatalog
-from app.sports.football_mapping import SOURCE, SUPPORTED_MARKETS
+from app.sports.football_mapping import SOURCE, SUPPORTED_MARKETS, HandicapConvention
 
 type Purpose = RequestPurpose
 """Who asks: ``AUTOMATIC`` (scheduled jobs) or ``MANUAL`` (the user's actions)."""
@@ -148,10 +148,13 @@ class FootballProvider:
         *,
         catalog: LeagueCatalog | None = None,
         clock: Clock = system_clock,
+        handicap_convention: HandicapConvention = HandicapConvention.HOME_LINE,
     ) -> None:
         """Serve the tracked leagues of ``catalog`` through ``client``."""
         self._client = client
-        self._base = FootballAdapter(client, catalog=catalog, clock=clock)
+        self._base = FootballAdapter(
+            client, catalog=catalog, clock=clock, handicap_convention=handicap_convention
+        )
 
     @property
     def sport(self) -> Sport:

@@ -27,6 +27,7 @@ class MatchingSummary:
 
     league: ExternalRef
     matched: int
+    fuzzy: int
     ambiguous: int
     unmatched: int
 
@@ -64,7 +65,7 @@ class LeagueDirectory:
         """``fixtures`` with teams and leagues rewritten to their history identity.
 
         ``history`` maps a canonical league reference to the history teams stored for it.
-        Only confident matches are applied; unmatched teams keep their provider identity and
+        Only alias/exact matches are applied (fuzzy ones are reported, not linked); unmatched teams keep their provider identity and
         are counted in the returned summaries so the caller can log them.
         """
         by_league: dict[ExternalRef, list[Fixture]] = {}
@@ -75,12 +76,15 @@ class LeagueDirectory:
         for league, items in by_league.items():
             provider_teams = [team for item in items for team in (item.home, item.away)]
             report = match_teams(provider_teams, list(history.get(league, ())))
-            identity = IdentityMap.from_report(report, self._catalog)
-            teams.update(identity.teams)
+            # Name-similarity-only matches need a human look: never linked silently.
+            teams.update(
+                {m.provider.ref: m.history for m in report.matched if m not in report.fuzzy}
+            )
             summaries.append(
                 MatchingSummary(
                     league=league,
-                    matched=len(report.matched),
+                    matched=len(report.matched) - len(report.fuzzy),
+                    fuzzy=len(report.fuzzy),
                     ambiguous=len(report.ambiguous),
                     unmatched=len(report.unmatched),
                 )

@@ -91,7 +91,7 @@ async def _handle(ctx: PipelineContext, delivery: Delivery, task: RecalcTask) ->
     except Exception as error:  # the task stays claimable; one signal never blocks the rest
         logger.warning("prematch_failed", signal_id=task.signal_id, error=repr(error))
         async with ctx.sessions.begin() as session:
-            await release_recalc(session, task.id)
+            await release_recalc(session, task.id, claimed_at=task.claimed_at or now)
         await ctx.ledger.record_error("prematch", f"signal {task.signal_id}: {error}", now=now)
         return "failed"
     await _finish(ctx, task)
@@ -109,8 +109,9 @@ def _live(signal: SignalRecord, now: datetime) -> bool:
 
 
 async def _finish(ctx: PipelineContext, task: RecalcTask) -> None:
+    claimed = task.claimed_at or ctx.clock()
     async with ctx.sessions.begin() as session:
-        await complete_recalc(session, task.id, now=ctx.clock())
+        await complete_recalc(session, task.id, now=ctx.clock(), claimed_at=claimed)
 
 
 def _worth_a_message(kind: RecalcKind, result: RecalcResult, threshold: float) -> bool:
