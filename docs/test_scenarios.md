@@ -15,8 +15,8 @@
 ## 1. Menyu, `/yordam`, `/bekor` (F6.2)
 | # | Qadam | Kutilgan natija |
 |---|---|---|
-| 1.1 | `ℹ️ Holat / Yordam` yoki `/yordam` | Buyruqlar ro'yxati va EV, CLV, unit, ishonch, ⏳, ❗ izohlari |
-| 1.2 | `🔍 Maxsus tahlil`, `💾 Shablonlarim`, `⚡ Bugungi signallar`, `⭐ Sevimlilar`, `🎟 Mening stavkalarim`, `📈 Hisobot` | Har biri: "🔜 … tez orada qo'shiladi" |
+| 1.1 | `/yordam` | Buyruqlar ro'yxati (`/qayta`, `/holat` bilan) va EV, CLV, unit, ishonch, ⏳, ❗ izohlari |
+| 1.2 | `🔍 Maxsus tahlil`, `💾 Shablonlarim`, `⭐ Sevimlilar`, `📈 Hisobot` (F7) | Har biri: "🔜 … tez orada qo'shiladi" |
 | 1.3 | Oddiy matn "salom" | "🤔 Buni tushunmadim…" |
 | 1.4 | `/bekor` (hech narsa ochiq emas) | "Bekor qilinadigan amal yo'q" |
 | 1.5 | 📊 Tahlil → `/bekor` | "❌ Bekor qilindi", wizard xabarining tugmalari yo'qoladi |
@@ -96,7 +96,7 @@
 | 5.6 | Juda qattiq shartlar (95%, EV 20%) | "🤷 Value topilmadi" va nima qilish bo'yicha maslahat |
 | 5.7 | ⭐ sevimli jamoa o'yini (F7 dan keyin) | Alohida "⭐ Sevimlilar" bloki, son hisobiga kirmaydi |
 | 5.8 | 🙈 Yashirish | Alert "🙈 Signal yashirildi", karta "🙈 Yashirildi: …" ga aylanadi |
-| 5.9 | 🔄 Qayta hisoblash / 📋 Batafsil / ✅ Stavka qildim | Alert "🔜 Bu imkoniyat tez orada qo'shiladi" |
+| 5.9 | 📋 Batafsil (F7.2) | Alert "🔜 Bu imkoniyat tez orada qo'shiladi" (🔄 va ✅ endi ishlaydi: 7 va 9-bo'limlar) |
 | 5.10 | Eski natijadagi [➡️ Yana] ni yangi tahlildan keyin bosish; [➡️ Yana] ni tez ikki marta bosish | Birinchisi "⌛ eskirgan" alerti; ikkinchisida sahifa bir marta yuboriladi |
 
 ## 6. Telegram cheklovlari (F6.10)
@@ -105,3 +105,49 @@
 | 6.1 | Juda uzun matn chiqaradigan holat (masalan, ko'p ligali sozlamalar) | Xabar ≤ 4096 belgili qismlarga bo'linadi, HTML buzilmaydi |
 | 6.2 | Jamoa nomida `<`, `&` (masalan, `/tahlil A&B <X>`) | Matn to'g'ri ko'rinadi, HTML xatosi yo'q |
 | 6.3 | Logda `telegram_flood_control` (ko'p xabar yuborilganda) | Bot kutib, bir marta qayta yuboradi; foydalanuvchi xatoni ko'rmaydi |
+
+## 7. 🔄 Qayta hisoblash (F6.7)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 7.1 | Kartadagi [🔄 Qayta hisoblash] | Darhol toast "⏳ Qayta hisoblanmoqda…"; karta yangi raqamlar bilan tahrirlanadi; ostida javob sifatida farq xabari: `🔄 Arsenal — Chelsea yangilandi (14:32)` / `Koeff.: 1.85 → 1.72   EV: +12.9% → +4.9%` / `Holat: ⚠️ Chegaradan pastga tushdi, tavsiya etilmaydi` (o'zgargan ehtimollik, tavsiya va ishonch alohida satrda) |
+| 7.2 | Shu tugmani 10 daqiqa ichida qayta bosish | "⏳ N daqiqadan keyin qayta urinib ko'ring." (N yuqoriga yaxlitlanadi) |
+| 7.3 | Natijalar xabari ostidagi [🔄 Hammasini yangilash] | "⏳ Qayta hisoblanmoqda…" progress xabari tahrirlanadi, so'ng "✅ Tayyor." va xulosa: yangilandi / o'zgargan soni, o'zgarganlar ro'yxati (≤ 10), cooldown dagilar, boshlangan o'yinlar, xatolar |
+| 7.4 | 7.3 ni darhol takrorlash | "yangilandi 0 ta" va "N ta signal yaqinda yangilangan (bitta o'yin 10 daqiqada bir marta)" |
+| 7.5 | `/qayta`, `/qayta ertaga`, `/qayta 3kun`, `/qayta 25.10-27.10` | Oyna signallari qayta hisoblanadi; signal yo'q bo'lsa "Qayta hisoblanadigan signal topilmadi" |
+| 7.6 | `/qayta Arsenal`, `/qayta 31.02`, `/qayta 60%` | "❗ …" + namuna (`/qayta`, `/qayta ertaga`, …); hech narsa hisoblanmaydi |
+| 7.7 | Tahlil davom etayotganda ▶️ ni ikkinchi marta bosish / ikkinchi qurilmadan tahlil | "⏳ Tahlil allaqachon bajarilmoqda…" (BusyError), API sarfi ikki marta emas |
+| 7.8 | API ishlamayotganda 🔄 yoki tahlil | "🔌 Ma'lumot manbai hozir javob bermayapti (…)…"; holat saqlanadi, tugmalar ishlayveradi |
+| 7.9 | API limiti tugagach 🔄 | Raqamlar o'zgarmaydi, "📦 Yangi ma'lumot olinmadi: raqamlar 09:00 holatiga." |
+| 7.10 | Bot restartidan keyin eski [🔄 Hammasini yangilash] (so'rov yo'qolgan) | "🔎 Topilmadi…" xabari (xato emas) |
+
+## 8. ⚡ Bugungi signallar va `/holat` (F6.8, F6.9)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 8.1 | `⚡ Bugungi signallar` (yoki `/bugun`), signal yo'q | "🤷 Bugun faol signal yo'q…" va nima qilish bo'yicha maslahat |
+| 8.2 | Tahlildan keyin shu tugma | "⚡ Bugungi signallar — N ta", kartalar (tugmalari bilan), [🔄 Hammasini yangilash]; yashirilganlar ko'rinmaydi |
+| 8.3 | 6+ signalda [➡️ Yana] | Keyingi sahifa; bitta ommaviy so'rov (`get_signals`), yo'qolgan signal jim o'tkazib yuboriladi |
+| 8.4 | `/holat` yoki `ℹ️ Holat / Yordam` | Rejim (🧪 namunaviy / 🟢 haqiqiy), API limitlari (ishlatilgan/limit, qoldi, qo'lda), oxirgi yangilanish vaqti va "N soat oldin", oxirgi ishlar ✅/❌, oxirgi xatolar (≤ 5) yoki "yo'q ✅"; oxirida /yordam havolasi |
+| 8.5 | Xato matnida `<`, `&` (masalan, `<timeout>`) | `/holat` da to'g'ri ko'rinadi (escape qilingan) |
+
+## 9. ✅ Stavka qildim va 🎟 Mening stavkalarim
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 9.1 | Kartadagi [✅ Stavka qildim] (unit sozlangan) | Yangi xabar: signal koeffitsienti va tavsiya (summa + unit); [✅ Yozish: 1.85] [✏️ Boshqa koeff./summa] [❌ Bekor qilish] |
+| 9.2 | [✅ Yozish] | Xabar "🎟 Stavka yozildi" ga aylanadi, tugmalar yo'qoladi; zarar limiti bo'lsa "🛑 Diqqat…" qo'shiladi |
+| 9.3 | [✅ Yozish] ni tez ikki marta bosish | Bitta stavka (🎟 ro'yxatida 1 ta) |
+| 9.4 | [✏️ Boshqa…] → `1.95 50000` | Stavka 1.95 va 50 000 bilan yoziladi; summa yozilmasa — tavsiya etilgan summa |
+| 9.5 | Noto'g'ri qiymat (`abc`, `0.5`) | Format ko'rsatiladi, qadam ochiq qoladi; `/bekor` yoki ❌ — chiqish |
+| 9.6 | Unit sozlanmagan yoki tavsiya "stavka qilinmaydi" | [✅ Yozish] yo'q; summani o'zi kiritishi kerak ("💵 Summani o'zingiz kiriting…") |
+| 9.7 | Boshqa oqim (wizard) ochiqligida [✏️ Boshqa…] | Alert "Avval joriy amalni tugating yoki /bekor" |
+| 9.8 | `🎟 Mening stavkalarim` | Balans (boshlang'ich bank + yopilgan stavkalar foydasi), oy foydasi, ochiq stavkalar soni ("balansni kamaytirmaydi"), ochiq stavkalar ro'yxati; bo'sh holat: "Ochiq stavkalar yo'q…" |
+
+## 10. Avtomatik xabarlar (Notifier, `APP_SERVICES=real`)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 10.1 | Sozlangan vaqtda kunlik xabar | Sarlavha ("☀️ Kunlik tahlil — Payshanba, 22.10"), "📆 Kecha: 6 ta signal · 4 ✅ · 2 ❌ · +2.3 unit", natijalar xulosasi ([🔄 Hammasini yangilash]), kunlar bo'yicha kartalar (⭐ blok oxirida); signal yo'q bo'lsa "Value topilmadi" |
+| 10.2 | Tinch soatlarda kunlik xabar | Tinch soat tugagach yuboriladi; 24 soat/pre-match xabarlari tashlanadi (pipeline qo'llaydi) |
+| 10.3 | 24 soat / pre-match yangilanishi | Kunlik xabarga javob (reply) sifatida farq xabari (⏰ / 🔔), kartadagi tugmalar bilan |
+| 10.4 | O'yin qoldirildi/bekor qilindi | "❌ Bekor: …" sabab bilan, javob sifatida |
+| 10.5 | Natija yopildi | "✅ O'tdi — …" / "❌ O'tmadi — …" va foyda unit da |
+| 10.6 | Foydalanuvchi botni bloklagan | Xabar yuborilmaydi, pipeline yiqilmaydi (logda `notify_user_blocked_bot`) |
+| 10.7 | Tizim xatosi (API, Gemini) | Har bir admin'ga "🚨 Tizim xatosi · komponent · vaqt" |
