@@ -224,6 +224,7 @@ source_modules = [
     "app.services.interfaces",
     "app.services.errors",
     "app.services.report_math",
+    "app.services.express_math",
     "app.services.real",
 ]
 forbidden_modules = [

@@ -68,6 +68,9 @@ MAX_ODDS_LIMIT: Final = 100.0
 PREMATCH_MINUTE_CHOICES: Final = frozenset({30, 60, 90})
 MAX_NOTE_LENGTH: Final = 500
 MAX_TEMPLATE_NAME_LENGTH: Final = 64
+MIN_EXPRESS_LEGS: Final = 2
+MAX_EXPRESS_LEGS: Final = 4
+"""An express combines this many signals (plan §6.11), each from a different match."""
 MAX_BET_TOKEN_LENGTH: Final = 64
 """Longest ``BetDraft.client_token`` (a Telegram update or callback id fits easily)."""
 MIN_SEARCH_LENGTH: Final = 2
@@ -1185,6 +1188,40 @@ class BankView:
     loss_limit_reached: bool
 
 
+# --------------------------------------------------------------------------- express
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExpressLeg:
+    """One pick of an express (v1.6): the signal's current odds and model probability."""
+
+    signal_id: SignalId
+    fixture_label: str
+    market: Market
+    selection: Selection
+    odds: float
+    probability: float
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExpressView:
+    """An express built from 2-4 signals of different matches (plan §6.11, v1.6).
+
+    The legs are independent (different matches), so ``combined_probability`` is the product
+    of the leg probabilities and ``combined_odds`` the product of the odds; ``ev`` =
+    ``combined_probability * combined_odds - 1``. Several 70% picks make a much weaker bet
+    (three of them: about 34%), which the bot spells out.
+    """
+
+    legs: tuple[ExpressLeg, ...]
+    combined_odds: float
+    combined_probability: float
+    ev: float
+
+    @property
+    def fair_odds(self) -> float:
+        """Combined odds at which the express would have zero EV."""
+        return 1.0 / self.combined_probability
+
+
 # --------------------------------------------------------------------------- results
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResultMarkRequest:
@@ -1882,6 +1919,25 @@ class ReportService(Protocol):
         """All recommended signals with results as CSV (``/eksport``)."""
         ...
 
+    async def export_bets(self, user_id: int) -> ExportFile:
+        """All of the user's bets, open and settled, as CSV (v1.6)."""
+        ...
+
+
+class ExpressService(Protocol):
+    """Express builder (plan §6.11, v1.6)."""
+
+    async def evaluate(self, user_id: int, signal_ids: Sequence[SignalId]) -> ExpressView:
+        """Combined odds, probability and EV of ``signal_ids``.
+
+        Raises:
+            ValidationFailedError: not :data:`MIN_EXPRESS_LEGS`..:data:`MAX_EXPRESS_LEGS`
+                distinct signals, two picks of one match (correlated markets are never
+                combined), or a pick that is retro, cancelled, settled or already started.
+            NotFoundError: unknown signal or not the user's.
+        """
+        ...
+
 
 class SystemStatusService(Protocol):
     """System health for ``/holat`` (plan §6.12)."""
@@ -1905,3 +1961,4 @@ class Services:
     results: ResultService
     reports: ReportService
     status: SystemStatusService
+    express: ExpressService

@@ -1045,6 +1045,95 @@ class ReportContract:
         assert len(lines) == 1 + len(result.signals)
 
 
+class ExportBetsContract:
+    async def test_bets_export_is_csv_with_one_line_per_bet(
+        self, services: Services, user_id: int
+    ) -> None:
+        empty = await services.reports.export_bets(user_id)
+        assert empty.content.decode("utf-8").strip().splitlines() == [
+            "bet_id,signal_id,fixture,market,line,selection,odds_taken,stake,placed_at,outcome,profit"
+        ]
+        signals = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals
+        for signal in signals[:2]:
+            await services.bets.place_bet(
+                user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(10))
+            )
+
+        exported = await services.reports.export_bets(user_id)
+        lines = exported.content.decode("utf-8").strip().splitlines()
+
+        assert exported.filename == "bets.csv"
+        assert exported.media_type == "text/csv"
+        assert len(lines) == 1 + min(2, len(signals))
+        assert await services.reports.export_bets(OTHER_USER) != exported  # per user
+
+
+class ExpressContract:
+    async def picks_of_different_matches(
+        self, services: Services, user_id: int, count: int
+    ) -> list[SignalView]:
+        signals = (await analyze_week(services, user_id, dates=DateSpec.next_days(7))).signals
+        by_fixture = {signal.fixture_id: signal for signal in signals if signal.recommended}
+        assert len(by_fixture) >= count
+        return list(by_fixture.values())[:count]
+
+    async def test_probability_odds_and_ev_multiply(
+        self, services: Services, user_id: int
+    ) -> None:
+        picks = await self.picks_of_different_matches(services, user_id, 3)
+
+        express = await services.express.evaluate(user_id, [pick.signal_id for pick in picks])
+
+        probability = picks[0].probability * picks[1].probability * picks[2].probability
+        odds = picks[0].odds * picks[1].odds * picks[2].odds
+        assert [leg.signal_id for leg in express.legs] == [pick.signal_id for pick in picks]
+        assert express.combined_probability == pytest.approx(probability)
+        assert express.combined_odds == pytest.approx(odds)
+        assert express.ev == pytest.approx(probability * odds - 1)
+        assert express.fair_odds == pytest.approx(1 / probability)
+
+    async def test_two_picks_of_one_match_are_refused(
+        self, services: Services, user_id: int
+    ) -> None:
+        result = await analyze_week(
+            services, user_id, dates=DateSpec.next_days(3), include_no_value=True
+        )
+        recommended = [signal for signal in result.signals if signal.recommended]
+        twins = next(
+            (a, b)
+            for a in recommended
+            for b in recommended
+            if a.signal_id < b.signal_id and a.fixture_id == b.fixture_id
+        )
+
+        with pytest.raises(ValidationFailedError, match="correlated"):
+            await services.express.evaluate(user_id, [twins[0].signal_id, twins[1].signal_id])
+
+    async def test_leg_count_duplicates_and_unknown_signals(
+        self, services: Services, user_id: int
+    ) -> None:
+        picks = await self.picks_of_different_matches(services, user_id, 5)
+        ids = [pick.signal_id for pick in picks]
+
+        for bad in ([], ids[:1], ids, [ids[0], ids[0]]):
+            with pytest.raises(ValidationFailedError):
+                await services.express.evaluate(user_id, bad)
+        with pytest.raises(NotFoundError):
+            await services.express.evaluate(user_id, [ids[0], 987_654])
+        with pytest.raises(NotFoundError):  # somebody else's signals do not exist for us
+            await services.express.evaluate(OTHER_USER, ids[:2])
+        assert (await services.express.evaluate(user_id, ids[:4])).legs  # the maximum is fine
+
+    async def test_started_matches_cannot_be_combined(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        picks = await self.picks_of_different_matches(services, user_id, 2)
+        await clock.advance_async(timedelta(days=8))
+
+        with pytest.raises(ValidationFailedError):
+            await services.express.evaluate(user_id, [pick.signal_id for pick in picks])
+
+
 class SportsContract:
     async def test_every_sport_is_listed_and_football_is_available(
         self, services: Services
