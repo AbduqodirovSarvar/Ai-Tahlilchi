@@ -5,9 +5,13 @@ Jobs
 - ``settle``: 08:00 every day (display time zone), results -> outcomes, profit, CLV;
 - ``refresh``: 08:30 every day, fixtures/results/odds into the local cache;
 - ``learning``: 09:00 every Monday, segment review and calibration (F8.5, F8.6);
-- ``daily-tick`` and ``recalc-tick``: every minute. The tick *decides* what is due: each user's
-  digest at their own ``send_time`` in their own time zone (changes of settings apply at once,
-  no per-user job to re-register) and the claimed 24-hour/pre-match recalculation tasks.
+- ``feedback``: 08:45 every day, after the results are in: post-mortems of the new losses and the
+  lessons built from them (F8.3, F8.4); ``lessons``: 09:30 every Monday, the lesson maintenance
+  (confirmation and expiry sweep);
+- ``daily-tick``, ``template-tick`` and ``recalc-tick``: every minute. The tick *decides* what is
+  due: each user's digest at their own ``send_time`` in their own time zone, each scheduled
+  template at its weekdays and local time (changes of settings apply at once, no per-user job
+  to re-register) and the claimed 24-hour/pre-match recalculation tasks.
 
 Reliability
 -----------
@@ -50,9 +54,12 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import Delivery
 from app.pipeline.learning import run_learning
+from app.pipeline.lessons import run_lessons
+from app.pipeline.postmortem import run_postmortems
 from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.refresh import refresh
 from app.pipeline.settle import run_settlement
+from app.pipeline.templates import run_due_templates
 
 logger = get_logger(__name__)
 
@@ -60,6 +67,9 @@ SETTLE_AT: Final = time(8, 0)
 LEARNING_AT: Final = time(9, 0)
 LEARNING_WEEKDAY: Final = "mon"
 """The weekly learning review runs after the morning settlement, on Mondays."""
+FEEDBACK_AT: Final = time(8, 45)
+"""Post-mortems run after the settlement (08:00) and the refresh (08:30) of the same morning."""
+LESSONS_AT: Final = time(9, 30)
 REFRESH_AT: Final = time(8, 30)
 DAILY_GRACE_SECONDS: Final = 6 * 3600
 TICK_GRACE_SECONDS: Final = 60
@@ -71,7 +81,19 @@ JOB_REFRESH: Final = "refresh"
 JOB_DAILY_TICK: Final = "daily-tick"
 JOB_RECALC_TICK: Final = "recalc-tick"
 JOB_LEARNING: Final = "learning"
-JOB_NAMES: Final = (JOB_SETTLE, JOB_REFRESH, JOB_DAILY_TICK, JOB_RECALC_TICK, JOB_LEARNING)
+JOB_TEMPLATE_TICK: Final = "template-tick"
+JOB_FEEDBACK: Final = "feedback"
+JOB_LESSONS: Final = "lessons"
+JOB_NAMES: Final = (
+    JOB_SETTLE,
+    JOB_REFRESH,
+    JOB_DAILY_TICK,
+    JOB_TEMPLATE_TICK,
+    JOB_RECALC_TICK,
+    JOB_LEARNING,
+    JOB_FEEDBACK,
+    JOB_LESSONS,
+)
 HEARTBEAT_JOBS: Final = (JOB_SETTLE, JOB_REFRESH)
 """The daily cycle: after each of these ends well, the dead-man's switch is pinged."""
 
@@ -95,12 +117,21 @@ class PipelineJobs:
             JOB_DAILY_TICK: lambda: run_due_digests(ctx, delivery),
             JOB_RECALC_TICK: self._recalc_tick,
             JOB_LEARNING: lambda: run_learning(ctx),
+            JOB_TEMPLATE_TICK: lambda: run_due_templates(ctx, delivery),
+            JOB_FEEDBACK: self._feedback,
+            JOB_LESSONS: lambda: run_lessons(ctx),
         }
 
     async def _recalc_tick(self) -> None:
         """Due 24 h / pre-match recalculations, and the retry of a refresh that was incomplete."""
         await run_due_recalcs(self._ctx, self._delivery)
         await refresh(self._ctx, retry_only=True)
+
+    async def _feedback(self) -> None:
+        """Explain the new losses, then rebuild the lessons if there is new evidence."""
+        report = await run_postmortems(self._ctx)
+        if report.explained or report.copied:
+            await run_lessons(self._ctx)
 
     async def run(self, name: str) -> None:
         """Run job ``name``; failures are recorded and reported, never raised."""
@@ -277,7 +308,25 @@ class PipelineScheduler:
                 ),
                 DAILY_GRACE_SECONDS,
             ),
+            (
+                JOB_FEEDBACK,
+                CronTrigger(
+                    hour=FEEDBACK_AT.hour, minute=FEEDBACK_AT.minute, timezone=self._timezone
+                ),
+                DAILY_GRACE_SECONDS,
+            ),
+            (
+                JOB_LESSONS,
+                CronTrigger(
+                    day_of_week=LEARNING_WEEKDAY,
+                    hour=LESSONS_AT.hour,
+                    minute=LESSONS_AT.minute,
+                    timezone=self._timezone,
+                ),
+                DAILY_GRACE_SECONDS,
+            ),
             (JOB_DAILY_TICK, IntervalTrigger(seconds=TICK_SECONDS), TICK_GRACE_SECONDS),
+            (JOB_TEMPLATE_TICK, IntervalTrigger(seconds=TICK_SECONDS), TICK_GRACE_SECONDS),
             (JOB_RECALC_TICK, IntervalTrigger(seconds=TICK_SECONDS), TICK_GRACE_SECONDS),
         ):
             self._ensure_job(name, trigger, grace)
