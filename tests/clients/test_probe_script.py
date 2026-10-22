@@ -174,3 +174,47 @@ def test_recordings_are_valid_json(script: ModuleType, tmp_path: Path) -> None:
     recorder.save("fixtures/lineups", {}, Envelope.model_validate(load("lineups_empty.json")))
     saved = json.loads((tmp_path / "fixtures-lineups_all.json").read_text(encoding="utf-8"))
     assert saved["get"] == "fixtures/lineups"
+
+
+# --------------------------------------------------------------------------- fix round
+
+
+def test_report_states_the_supported_convention_and_how_to_set_it(script: ModuleType) -> None:
+    from app.sports.football_mapping import HandicapConvention  # noqa: PLC0415
+
+    report = script.ProbeReport(season=2024, checked_at=NOW, configured_convention="own_line")
+    report.handicap = {HandicapConvention.HOME_LINE: (6, 6), HandicapConvention.OWN_LINE: (1, 6)}
+    text = script.render_report(report)
+    assert "tasdiqlaydi" in text
+    assert "HANDICAP_CONVENTION" in text
+    assert "DIQQAT" in text  # configured own_line, prices say home_line
+    assert "birinchi haqiqiy koeffitsient" in text
+
+
+def test_report_without_evidence_does_not_pick_a_convention(script: ModuleType) -> None:
+    text = script.render_report(script.ProbeReport(season=2024, checked_at=NOW))
+    assert "aniq ko'rsatmadi" in text
+
+
+async def test_probe_spend_goes_through_the_shared_usage_counter(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    from app.clients.quota import UsageKey  # noqa: PLC0415
+    from app.db.api_usage import SqlUsageStore  # noqa: PLC0415
+    from app.db.engine import create_engine, create_session_factory  # noqa: PLC0415
+    from app.db.schema import Base  # noqa: PLC0415
+
+    db = tmp_path / "app.db"
+    engine = create_engine(db)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    store, usage_engine = await script.usage_store(db, NOW)
+    assert isinstance(store, SqlUsageStore)
+    key = UsageKey(NOW.date(), "api-football", "football")
+    await store.add(key, requests=3, manual=3)
+    await usage_engine.dispose()
+    assert (await SqlUsageStore(create_session_factory(engine)).get(key)).requests_used == 3
+    await engine.dispose()
+    memory, none = await script.usage_store(tmp_path / "missing.db", NOW)
+    assert none is None
+    assert not isinstance(memory, SqlUsageStore)

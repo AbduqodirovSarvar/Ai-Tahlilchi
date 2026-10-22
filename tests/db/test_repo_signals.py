@@ -231,7 +231,7 @@ async def test_settlement_and_unsettled(db_session: AsyncSession) -> None:
     assert await settle_signal(db_session, manual) == manual
     api = replace(manual, outcome=Outcome.LOSS, source=ResultSource.API)
     assert (await settle_signal(db_session, api)).outcome is Outcome.WIN  # manual wins
-    assert await set_result_note(db_session, first.id, "omadsizlik")
+    assert await set_result_note(db_session, first.id, "omadsizlik", user_id=USER)
     record = await get_signal(db_session, first.id)
     assert record is not None
     assert record.result is not None
@@ -240,7 +240,7 @@ async def test_settlement_and_unsettled(db_session: AsyncSession) -> None:
     corrected = await settle_signal(db_session, correction)
     assert (corrected.outcome, corrected.user_note) == (Outcome.VOID, "omadsizlik")
     assert await unsettled_signals(db_session, kicked_off_before=after_first) == []
-    assert not await set_result_note(db_session, 999_999, "x")
+    assert not await set_result_note(db_session, 999_999, "x", user_id=USER)
 
 
 @pytest.mark.parametrize("missing_threshold", ["min_prob", "odds_max"])

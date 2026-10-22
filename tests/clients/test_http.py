@@ -87,15 +87,34 @@ async def test_429_honours_retry_after(harness: Harness, router: respx.MockRoute
     assert harness.sleep.delays == [7.0]
 
 
-async def test_retry_after_is_capped(harness: Harness, router: respx.MockRouter) -> None:
-    router.get("/fixtures").mock(
+async def test_retry_after_beyond_the_cap_fails_fast(
+    harness: Harness, router: respx.MockRouter
+) -> None:
+    route = router.get("/fixtures").mock(
         side_effect=[
             httpx.Response(429, headers={"Retry-After": "86400"}),
             httpx.Response(200, json=load("fixtures_empty.json")),
         ]
     )
+    with pytest.raises(ProviderUnavailableError, match="86400"):
+        await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
+    assert route.call_count == 1
+    assert harness.sleep.delays == []
+    assert not harness.api.cached("fixtures", PARAMS)
+
+
+async def test_retry_after_at_the_cap_is_still_honoured(
+    harness: Harness, router: respx.MockRouter
+) -> None:
+    cap = API_FOOTBALL_CONFIG.max_retry_after_seconds
+    router.get("/fixtures").mock(
+        side_effect=[
+            httpx.Response(503, headers={"Retry-After": str(int(cap))}),
+            httpx.Response(200, json=load("fixtures_empty.json")),
+        ]
+    )
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
-    assert harness.sleep.delays == [API_FOOTBALL_CONFIG.max_retry_after_seconds]
+    assert harness.sleep.delays == [cap]
 
 
 async def test_timeouts_are_retried_and_exhaustion_raises(

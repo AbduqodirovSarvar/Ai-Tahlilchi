@@ -7,14 +7,21 @@ model to use history when pricing a live fixture. Matching order:
 1. curated alias table (:data:`TEAM_ALIASES`, API-Football name → football-data name);
 2. exact match of :func:`~app.domain.normalize_name` keys;
 3. fuzzy match (``rapidfuzz`` WRatio) above ``threshold`` with a clear ``margin`` over the
-   runner-up.
+   runner-up. WRatio scores a name that is a prefix of another at exactly 90, so the
+   threshold sits above that (``Inter`` is not ``Internacional``). Names that differ in a
+   squad marker (``B``, ``II``, ``U23``, ``Youth``, ``Women``...) are never candidates for
+   each other (``Real Sociedad`` is not ``Real Sociedad B``).
 
 A history team is never claimed by two provider teams; such conflicts and near-ties are
 reported as ambiguous, low scores as unmatched. **Nothing is merged silently**: the caller
-gets a :class:`TeamMatchReport` to log/review and an :class:`IdentityMap` built from the
-confident matches only. Match one league at a time to keep candidates relevant.
+gets a :class:`TeamMatchReport` to log/review (fuzzy matches are logged on their own and
+listed in :attr:`TeamMatchReport.fuzzy`) and an :class:`IdentityMap` built from the
+confident matches only. Candidates are never taken from another league:
+:func:`match_leagues` matches each league's teams against that league's history only
+(:func:`match_teams` itself matches whatever lists it is given, so pass one league).
 """
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -24,11 +31,20 @@ from typing import Final
 from rapidfuzz import fuzz, process
 
 from app.domain import ExternalRef, Fixture, League, Team, normalize_name
+from app.logging import get_logger
 from app.sports.football_leagues import LeagueCatalog
 
-DEFAULT_THRESHOLD: Final = 90.0
+logger = get_logger(__name__)
+
+# WRatio gives a prefix/substring pair (Inter / Internacional, Juventus / Juventus U23) 90.
+DEFAULT_THRESHOLD: Final = 92.0
 DEFAULT_MARGIN: Final = 5.0
 _FUZZY_CANDIDATES: Final = 2
+# Tokens that make a team a different squad of the same club.
+_SQUAD_MARKERS: Final = frozenset(
+    {"b", "c", "ii", "iii", "jong", "youth", "reserves", "reserve", "women", "ladies", "w"}
+)
+_AGE_GROUP: Final = re.compile(r"u\d{2}")
 
 # API-Football spelling → football-data.co.uk spelling, only where they differ beyond
 # accents/punctuation. Built from knowledge of both sources for the ten default leagues;
@@ -44,6 +60,28 @@ _ALIASES: Final[Mapping[str, str]] = {
     "Stoke City": "Stoke",
     "Oxford United": "Oxford",
     "Queens Park Rangers": "QPR",
+    # Longer provider spellings of a history name: fuzzy matching scores these exactly 90
+    # (prefix) and refuses them on purpose, so they are listed explicitly.
+    "Tottenham Hotspur": "Tottenham",
+    "Brighton & Hove Albion": "Brighton",
+    "West Ham United": "West Ham",
+    "Leeds United": "Leeds",
+    "Wolverhampton Wanderers": "Wolves",
+    "Newcastle United": "Newcastle",
+    "Leicester City": "Leicester",
+    "Norwich City": "Norwich",
+    "Swansea City": "Swansea",
+    "Cardiff City": "Cardiff",
+    "Ipswich Town": "Ipswich",
+    "Luton Town": "Luton",
+    "Coventry City": "Coventry",
+    "Derby County": "Derby",
+    "Huddersfield Town": "Huddersfield",
+    "Birmingham City": "Birmingham",
+    "West Bromwich Albion": "West Brom",
+    "Blackburn Rovers": "Blackburn",
+    "Preston North End": "Preston",
+    "Plymouth Argyle": "Plymouth",
     # Spain
     "Athletic Club": "Ath Bilbao",
     "Atletico Madrid": "Ath Madrid",
@@ -53,6 +91,24 @@ _ALIASES: Final[Mapping[str, str]] = {
     "Granada CF": "Granada",
     "Real Sociedad": "Sociedad",
     "Rayo Vallecano": "Vallecano",
+    "Real Valladolid": "Valladolid",
+    "Deportivo Alaves": "Alaves",
+    "Real Mallorca": "Mallorca",
+    "Real Zaragoza": "Zaragoza",
+    "Real Oviedo": "Oviedo",
+    "Sevilla FC": "Sevilla",
+    "Valencia CF": "Valencia",
+    "Villarreal CF": "Villarreal",
+    "Getafe CF": "Getafe",
+    "Girona FC": "Girona",
+    "Cadiz CF": "Cadiz",
+    "Elche CF": "Elche",
+    "CA Osasuna": "Osasuna",
+    "UD Las Palmas": "Las Palmas",
+    "CD Leganes": "Leganes",
+    "Levante UD": "Levante",
+    "UD Almeria": "Almeria",
+    "FC Barcelona": "Barcelona",
     # Germany
     "Bayern München": "Bayern Munich",
     "Borussia Dortmund": "Dortmund",
@@ -66,6 +122,15 @@ _ALIASES: Final[Mapping[str, str]] = {
     "FC St. Pauli": "St Pauli",
     "SV Darmstadt 98": "Darmstadt",
     "Hamburger SV": "Hamburg",
+    "VfB Stuttgart": "Stuttgart",
+    "VfL Wolfsburg": "Wolfsburg",
+    "VfL Bochum": "Bochum",
+    "SC Freiburg": "Freiburg",
+    "FC Augsburg": "Augsburg",
+    "FC Schalke 04": "Schalke 04",
+    "Hertha Berlin": "Hertha",
+    "Hannover 96": "Hannover",
+    "Karlsruher SC": "Karlsruhe",
     # Italy
     "AC Milan": "Milan",
     "AS Roma": "Roma",
@@ -75,27 +140,60 @@ _ALIASES: Final[Mapping[str, str]] = {
     "Paris Saint Germain": "Paris SG",
     "Saint Etienne": "St Etienne",
     "Clermont Foot": "Clermont",
+    "Olympique Marseille": "Marseille",
+    "Olympique Lyonnais": "Lyon",
+    "AS Monaco": "Monaco",
+    "Stade Rennais": "Rennes",
+    "OGC Nice": "Nice",
+    "Lille OSC": "Lille",
+    "RC Lens": "Lens",
+    "RC Strasbourg": "Strasbourg",
+    "FC Nantes": "Nantes",
+    "Stade de Reims": "Reims",
     # Netherlands
     "RKC Waalwijk": "Waalwijk",
     "PEC Zwolle": "Zwolle",
     "FC Twente": "Twente",
     "FC Utrecht": "Utrecht",
     "Almere City FC": "Almere City",
+    "PSV": "PSV Eindhoven",
+    "FC Groningen": "Groningen",
+    "SC Heerenveen": "Heerenveen",
+    "NEC Nijmegen": "Nijmegen",
+    "Heracles Almelo": "Heracles",
+    "Fortuna Sittard": "For Sittard",
     # Portugal
     "FC Porto": "Porto",
     "Sporting CP": "Sp Lisbon",
     "SC Braga": "Sp Braga",
+    "SL Benfica": "Benfica",
+    "Vitoria Guimaraes": "Guimaraes",
     # Belgium
     "Club Brugge KV": "Club Brugge",
     "KV Mechelen": "Mechelen",
     "OH Leuven": "Oud-Heverlee Leuven",
     "Standard Liege": "Standard",
     "Union St. Gilloise": "St. Gilloise",
+    "RSC Anderlecht": "Anderlecht",
+    "KRC Genk": "Genk",
+    "KAA Gent": "Gent",
+    "Royal Antwerp": "Antwerp",
+    "Sporting Charleroi": "Charleroi",
+    "KVC Westerlo": "Westerlo",
+    "KV Kortrijk": "Kortrijk",
+    "Sint-Truiden": "St Truiden",
+    "Cercle Brugge KSV": "Cercle Brugge",
+    "SV Zulte-Waregem": "Waregem",
     # Turkey
     "Istanbul Basaksehir": "Basaksehir",
     "Gaziantep FK": "Gaziantep",
     "Göztepe": "Goztep",
     "Adana Demirspor": "Ad. Demirspor",
+    "Fenerbahce SK": "Fenerbahce",
+    "Besiktas JK": "Besiktas",
+    "Caykur Rizespor": "Rizespor",
+    "Fatih Karagumruk": "Karagumruk",
+    "MKE Ankaragucu": "Ankaragucu",
 }
 TEAM_ALIASES: Final[Mapping[str, str]] = {
     normalize_name(provider): normalize_name(history) for provider, history in _ALIASES.items()
@@ -136,6 +234,11 @@ class TeamMatchReport:
     ambiguous: tuple[AmbiguousMatch, ...] = ()
     unmatched: tuple[Team, ...] = ()
 
+    @property
+    def fuzzy(self) -> tuple[TeamMatch, ...]:
+        """Matches found by name similarity alone: the ones worth a human look."""
+        return tuple(match for match in self.matched if match.method is MatchMethod.FUZZY)
+
 
 def match_teams(
     provider_teams: Iterable[Team],
@@ -163,6 +266,14 @@ def match_teams(
             unmatched.append(provider)
     claims = Counter(match.history.ref for match in candidates)
     matched = [match for match in candidates if claims[match.history.ref] == 1]
+    for match in matched:
+        if match.method is MatchMethod.FUZZY:
+            logger.warning(
+                "team_match_fuzzy",
+                provider=match.provider.name,
+                history=match.history.name,
+                score=match.score,
+            )
     ambiguous.extend(
         AmbiguousMatch(match.provider, (match.history,))
         for match in candidates
@@ -196,8 +307,10 @@ def _fuzzy(
     limits: tuple[float, float],
 ) -> TeamMatch | AmbiguousMatch | None:
     threshold, margin = limits
+    markers = squad_markers(provider.normalized_name)
+    comparable = [choice for choice in choices if squad_markers(choice) == markers]
     ranked = process.extract(
-        provider.normalized_name, choices, scorer=fuzz.WRatio, limit=_FUZZY_CANDIDATES
+        provider.normalized_name, comparable, scorer=fuzz.WRatio, limit=_FUZZY_CANDIDATES
     )
     if not ranked or ranked[0][1] < threshold:
         return None
@@ -208,6 +321,47 @@ def _fuzzy(
         tied = [key for key, score, _ in ranked if best_score - score < margin]
         return AmbiguousMatch(provider, tuple(team for key in tied for team in by_key[key]))
     return TeamMatch(provider, teams[0], MatchMethod.FUZZY, float(best_score))
+
+
+def squad_markers(normalized_name: str) -> frozenset[str]:
+    """Squad markers in a normalized name (``real sociedad b`` -> ``{'b'}``)."""
+    return frozenset(
+        token
+        for token in normalized_name.split()
+        if token in _SQUAD_MARKERS or _AGE_GROUP.fullmatch(token)
+    )
+
+
+def match_leagues(
+    provider_teams: Mapping[ExternalRef, Sequence[Team]],
+    history_teams: Mapping[ExternalRef, Sequence[Team]],
+    *,
+    aliases: Mapping[str, str] = TEAM_ALIASES,
+    threshold: float = DEFAULT_THRESHOLD,
+    margin: float = DEFAULT_MARGIN,
+) -> TeamMatchReport:
+    """:func:`match_teams` per league: teams are only compared within the same league.
+
+    Both mappings are keyed by one shared league reference (map a provider league to its
+    history league with the catalog first). A league missing on the history side leaves its
+    provider teams unmatched. This is what keeps ``Real Madrid`` (La Liga) away from a
+    same-named club of another country.
+    """
+    reports = [
+        match_teams(
+            teams,
+            history_teams.get(league, ()),
+            aliases=aliases,
+            threshold=threshold,
+            margin=margin,
+        )
+        for league, teams in provider_teams.items()
+    ]
+    return TeamMatchReport(
+        tuple(match for report in reports for match in report.matched),
+        tuple(item for report in reports for item in report.ambiguous),
+        tuple(team for report in reports for team in report.unmatched),
+    )
 
 
 @dataclass(frozen=True, slots=True)

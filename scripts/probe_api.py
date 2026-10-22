@@ -29,8 +29,12 @@ from pathlib import Path
 from typing import Final
 
 from pydantic import JsonValue
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.clients.api_football import (
+    PROVIDER,
+    QUOTA_SPORT,
     ApiFootballClient,
     ApiFootballError,
     create_api_football_client,
@@ -44,8 +48,10 @@ from app.clients.api_football_models import (
     TeamStatisticsItem,
 )
 from app.clients.cache import QueryParams
-from app.clients.quota import InMemoryUsageStore, RequestPurpose
-from app.config import get_settings
+from app.clients.quota import InMemoryUsageStore, RequestPurpose, UsageKey, UsageStore
+from app.config import Settings, get_settings
+from app.db.api_usage import SqlUsageStore
+from app.db.engine import create_session_factory, create_usage_engine
 from app.domain import BOOKMAKER_1XBET, BOOKMAKER_BET365, BOOKMAKER_PINNACLE
 from app.errors import ConfigurationError, ExternalServiceError
 from app.logging import configure_logging, get_logger
@@ -108,6 +114,7 @@ class ProbeReport:
     lineups: bool | None = None
     handicap: dict[HandicapConvention, tuple[int, int]] = field(default_factory=dict)
     requests_used: int = 0
+    configured_convention: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -323,9 +330,40 @@ def render_report(report: ProbeReport) -> str:
         lines.append(f"- `{convention}`: {plausible}/{total} juftlik ishonchli marjada")
     if not report.handicap:
         lines.append("- tekshirilmadi (kelgusi o'yin yoki koeffitsient topilmadi)")
-    lines += ["", "Ko'proq ishonchli juftlik bergan yozilish to'g'ri (ADR 0007).", ""]
+    lines += handicap_verdict(report)
     lines += [f"- {note}" for note in report.notes]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def handicap_verdict(report: ProbeReport) -> list[str]:
+    """Which reading the real prices support and how to configure it (Uzbek)."""
+    lines = ["", "Ko'proq ishonchli juftlik bergan yozilish to'g'ri (ADR 0007).", ""]
+    ranked = sorted(report.handicap.items(), key=lambda item: item[1][0], reverse=True)
+    if (
+        not ranked
+        or ranked[0][1][0] == 0
+        or (len(ranked) > 1 and ranked[0][1][0] == ranked[1][1][0])
+    ):
+        lines.append(
+            "**Xulosa:** haqiqiy narxlar konvensiyani aniq ko'rsatmadi. `HANDICAP_CONVENTION` "
+            "ni o'zgartirmang va probeni boshqa o'yin bilan qayta ishga tushiring."
+        )
+    else:
+        right = ranked[0][0]
+        lines.append(f"**Xulosa:** haqiqiy narxlar `{right}` ni tasdiqlaydi.")
+        if report.configured_convention not in (None, right.value):
+            lines.append(
+                f"**DIQQAT:** sozlama `{report.configured_convention}`, narxlar esa `{right}` "
+                "ni ko'rsatadi."
+            )
+    lines += [
+        "",
+        "Sozlash: `.env` ga `HANDICAP_CONVENTION=home_line` yoki `own_line` yozing. Buni "
+        "**birinchi haqiqiy koeffitsient bazaga yozilishidan oldin** qiling: saqlangan "
+        "chiziqlarni keyin qayta o'qib bo'lmaydi.",
+        "",
+    ]
+    return lines
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -357,14 +395,39 @@ def select_leagues(option: str | None) -> list[TrackedLeague]:
     return chosen
 
 
-async def run(args: argparse.Namespace, api_key: str, now: datetime) -> ProbeReport:
+async def usage_store(db_path: Path | None, now: datetime) -> tuple[UsageStore, AsyncEngine | None]:
+    """The shared daily counter (``api_usage``) when the database is migrated, else memory.
+
+    The probe spends real quota; going through the same store as the application keeps the
+    day's count (and the manual reserve) honest.
+    """
+    if db_path is None or not await asyncio.to_thread(db_path.exists):
+        return InMemoryUsageStore(), None
+    engine = create_usage_engine(db_path)
+    store = SqlUsageStore(create_session_factory(engine))
+    try:
+        await store.get(UsageKey(now.date(), PROVIDER, QUOTA_SPORT))
+    except OperationalError:
+        await engine.dispose()
+        logger.warning("probe_usage_in_memory", reason="api_usage table missing: run alembic")
+        return InMemoryUsageStore(), None
+    return store, engine
+
+
+async def run(
+    args: argparse.Namespace, api_key: str, now: datetime, settings: Settings | None = None
+) -> ProbeReport:
     """Build the client, run the probe, write the report."""
-    client, http = create_api_football_client(api_key, InMemoryUsageStore())
+    store, engine = await usage_store(settings.db_path if settings else None, now)
+    client, http = create_api_football_client(api_key, store)
     try:
         recorder = Recorder(None if args.no_record else args.record_dir)
         report = await run_probe(client, select_leagues(args.leagues), recorder=recorder, now=now)
+        report.configured_convention = settings.handicap_convention if settings else None
     finally:
         await http.aclose()
+        if engine is not None:
+            await engine.dispose()
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(render_report(report), encoding="utf-8")
     return report
@@ -384,7 +447,7 @@ def main(argv: Sequence[str] | None = None, *, now: datetime | None = None) -> i
         return EXIT_CONFIGURATION_ERROR
     try:
         select_leagues(args.leagues)
-        report = asyncio.run(run(args, api_key, now or datetime.now(UTC)))
+        report = asyncio.run(run(args, api_key, now or datetime.now(UTC), settings))
     except ConfigurationError as exc:
         logger.error("probe_not_run", reason=str(exc))
         return EXIT_CONFIGURATION_ERROR

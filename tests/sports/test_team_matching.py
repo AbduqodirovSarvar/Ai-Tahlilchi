@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime
 
 import pytest
+import structlog
 
 from app.domain import ExternalRef, Fixture, League, Sport, Team
 from app.sports.football_leagues import (
@@ -16,7 +17,9 @@ from app.sports.team_matching import (
     TEAM_ALIASES,
     IdentityMap,
     MatchMethod,
+    match_leagues,
     match_teams,
+    squad_markers,
 )
 
 
@@ -93,6 +96,7 @@ def test_aliases_exact_and_fuzzy_matches() -> None:
             api_team(33, "Manchester United"),
             api_team(42, "Arsenal"),
             api_team(47, "Tottenham Hotspur"),
+            api_team(34, "Newcastle Utd"),
             api_team(65, "Nottingham Forest"),
             api_team(62, "Sheffield Utd"),
         ],
@@ -101,7 +105,9 @@ def test_aliases_exact_and_fuzzy_matches() -> None:
     methods = {m.provider.name: (m.history.name, m.method) for m in report.matched}
     assert methods["Manchester United"] == ("Man United", MatchMethod.ALIAS)
     assert methods["Arsenal"] == ("Arsenal", MatchMethod.EXACT)
-    assert methods["Tottenham Hotspur"] == ("Tottenham", MatchMethod.FUZZY)
+    assert methods["Tottenham Hotspur"] == ("Tottenham", MatchMethod.ALIAS)  # prefix: not fuzzy
+    assert methods["Newcastle Utd"] == ("Newcastle", MatchMethod.FUZZY)
+    assert [m.provider.name for m in report.fuzzy] == ["Newcastle Utd"]
     assert methods["Nottingham Forest"] == ("Nott'm Forest", MatchMethod.ALIAS)
     assert methods["Sheffield Utd"] == ("Sheffield United", MatchMethod.ALIAS)
     assert report.unmatched == ()
@@ -115,19 +121,21 @@ def test_unknown_team_is_reported_unmatched() -> None:
 
 def test_close_candidates_are_ambiguous_not_merged() -> None:
     report = match_teams(
-        [api_team(1, "Manchester")], [fd_team("Manchester A"), fd_team("Manchester B")]
+        [api_team(1, "Atletico Madrid")], [fd_team("Atletico Madri"), fd_team("Atletico Madrd")]
     )
     assert report.matched == ()
     assert len(report.ambiguous) == 1
     assert {team.name for team in report.ambiguous[0].candidates} == {
-        "Manchester A",
-        "Manchester B",
+        "Atletico Madri",
+        "Atletico Madrd",
     }
 
 
 def test_two_provider_teams_claiming_one_history_team_are_ambiguous() -> None:
     report = match_teams(
-        [api_team(1, "Wolves"), api_team(2, "Wolverhampton Wolves")], [fd_team("Wolves")]
+        [api_team(1, "Wolves"), api_team(2, "Wolverhampton Wolves")],
+        [fd_team("Wolves")],
+        aliases={"wolverhampton wolves": "wolves"},
     )
     assert report.matched == ()
     assert {a.provider.name for a in report.ambiguous} == {"Wolves", "Wolverhampton Wolves"}
@@ -185,3 +193,69 @@ def test_identity_map_rewrites_matched_teams_and_tracked_leagues() -> None:
     )
     assert identity.provider_ref(ExternalRef("football-data", "Fulham")) is None
     assert IdentityMap.from_report(report).leagues == {}
+
+
+# --------------------------------------------------------------------------- fix round
+
+
+@pytest.mark.parametrize(
+    ("provider", "history"),
+    [
+        ("Inter", ["Internacional", "Milan"]),
+        ("Juventus", ["Juventus U23", "Milan"]),
+        ("Real Sociedad", ["Real Sociedad B", "Betis"]),
+        ("Real Madrid", ["Real Madrid Castilla", "Betis"]),
+    ],
+)
+def test_prefix_and_squad_names_are_not_fuzzy_matched(provider: str, history: list[str]) -> None:
+    report = match_teams([api_team(1, provider)], [fd_team(name) for name in history], aliases={})
+    assert report.matched == ()
+
+
+@pytest.mark.parametrize(
+    ("provider", "history"),
+    [
+        ("Real Sociedad B", "Real Sociedad"),
+        ("Juventus U23", "Juventus"),
+        ("Ajax II", "Ajax"),
+        ("Barcelona Women", "Barcelona"),
+        ("Jong Ajax", "Ajax"),
+    ],
+)
+def test_a_squad_marker_never_matches_the_senior_team(provider: str, history: str) -> None:
+    report = match_teams([api_team(1, provider)], [fd_team(history)], aliases={})
+    assert report.matched == ()
+
+
+def test_the_same_squad_marker_is_comparable() -> None:
+    report = match_teams([api_team(1, "Real Sociedad B")], [fd_team("Real Sociedad B")], aliases={})
+    assert [m.method for m in report.matched] == [MatchMethod.EXACT]
+    assert squad_markers("juventus u23") == {"u23"}
+    assert squad_markers("manchester united") == frozenset()
+
+
+def test_fuzzy_matches_are_logged_separately_and_listed() -> None:
+    with structlog.testing.capture_logs() as logs:
+        report = match_teams(
+            [api_team(1, "Newcastle Utd"), api_team(2, "Arsenal")], HISTORY, aliases={}
+        )
+    fuzzy = [entry for entry in logs if entry["event"] == "team_match_fuzzy"]
+    assert [(e["provider"], e["history"]) for e in fuzzy] == [("Newcastle Utd", "Newcastle")]
+    assert [m.provider.name for m in report.fuzzy] == ["Newcastle Utd"]
+
+
+def test_teams_are_only_matched_within_their_own_league() -> None:
+    spain, england = ExternalRef("lg", "SP1"), ExternalRef("lg", "E0")
+    report = match_leagues(
+        {spain: [api_team(1, "Newcastle Utd")]}, {england: [fd_team("Newcastle")]}
+    )
+    assert report.matched == ()
+    assert [team.name for team in report.unmatched] == ["Newcastle Utd"]
+    report = match_leagues(
+        {england: [api_team(2, "Newcastle Utd")], spain: [api_team(3, "Betis")]},
+        {england: [fd_team("Newcastle")], spain: [fd_team("Betis")]},
+    )
+    assert {m.provider.name: m.history.name for m in report.matched} == {
+        "Newcastle Utd": "Newcastle",
+        "Betis": "Betis",
+    }

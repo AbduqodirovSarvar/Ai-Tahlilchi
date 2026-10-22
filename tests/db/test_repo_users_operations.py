@@ -225,9 +225,12 @@ async def test_recalc_queue_claims_each_task_once(db_session: AsyncSession) -> N
     assert [t.id for t in claimed] == [day.id, pre.id]  # earliest first
     assert all(t.claimed_at is not None and not t.done for t in claimed)
     assert await claim_due_recalcs(db_session, now=KICKOFF - timedelta(minutes=29)) == []
-    assert await complete_recalc(db_session, day.id, now=KICKOFF)
-    assert not await complete_recalc(db_session, day.id, now=KICKOFF)
-    assert await release_recalc(db_session, pre.id)
+    owned = {task.id: task.claimed_at for task in claimed}
+    assert owned[day.id] is not None
+    assert owned[pre.id] is not None
+    assert await complete_recalc(db_session, day.id, now=KICKOFF, claimed_at=owned[day.id])
+    assert not await complete_recalc(db_session, day.id, now=KICKOFF, claimed_at=owned[day.id])
+    assert await release_recalc(db_session, pre.id, claimed_at=owned[pre.id])
     reclaimed = await claim_due_recalcs(db_session, now=KICKOFF, limit=1)
     assert [t.id for t in reclaimed] == [pre.id]
 
@@ -243,8 +246,9 @@ async def test_expired_claim_can_be_taken_again(db_session: AsyncSession) -> Non
 async def test_enqueue_is_idempotent_and_reopens_on_new_time(db_session: AsyncSession) -> None:
     signal_id = await make_signal(db_session)
     task = await enqueue_recalc(db_session, signal_id, kind=RecalcKind.PREMATCH, run_at=NOW)
-    await claim_due_recalcs(db_session, now=NOW)
-    await complete_recalc(db_session, task.id, now=NOW)
+    (claimed,) = await claim_due_recalcs(db_session, now=NOW)
+    assert claimed.claimed_at is not None
+    await complete_recalc(db_session, task.id, now=NOW, claimed_at=claimed.claimed_at)
     same = await enqueue_recalc(db_session, signal_id, kind=RecalcKind.PREMATCH, run_at=NOW)
     assert (same.id, same.done) == (task.id, True)
     moved = NOW + timedelta(hours=2)
@@ -279,7 +283,12 @@ async def test_bets(db_session: AsyncSession) -> None:
     )
     assert [b.id for b in await list_bets(db_session, USER)] == [second.id, first.id]
     settled = await settle_bet(
-        db_session, first.id, outcome=Outcome.WIN, profit=Decimal("2.625"), settled_at=NOW
+        db_session,
+        first.id,
+        user_id=USER,
+        outcome=Outcome.WIN,
+        profit=Decimal("2.625"),
+        settled_at=NOW,
     )
     assert settled is not None
     assert settled.profit == Decimal("2.6250")
@@ -288,7 +297,9 @@ async def test_bets(db_session: AsyncSession) -> None:
     window = await bets_placed_between(db_session, USER, start=NOW, end=NOW + timedelta(minutes=30))
     assert [b.id for b in window] == [first.id]
     assert (
-        await settle_bet(db_session, 999, outcome=Outcome.LOSS, profit=Decimal(-1), settled_at=NOW)
+        await settle_bet(
+            db_session, 999, user_id=USER, outcome=Outcome.LOSS, profit=Decimal(-1), settled_at=NOW
+        )
         is None
     )
 

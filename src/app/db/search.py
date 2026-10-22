@@ -16,13 +16,15 @@ The pure functions (:func:`to_latin`, :func:`to_cyrillic`, :func:`search_key`,
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from rapidfuzz import fuzz, process
-from sqlalchemy import or_, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.schema import FixtureRow, LeagueRow, TeamRow
+from app.db.search_aliases import SEARCH_ALIASES
 from app.domain import ExternalRef, Sport, normalize_name
 
 DEFAULT_LIMIT: Final = 10
@@ -79,6 +81,18 @@ def search_key(text: str) -> str:
     return normalize_name(to_latin(text))
 
 
+def _alias_keys() -> dict[str, tuple[str, ...]]:
+    table: dict[str, list[str]] = {}
+    for spelling, targets in SEARCH_ALIASES.items():
+        known = table.setdefault(search_key(spelling), [])
+        known.extend(k for k in map(search_key, targets) if k and k not in known)
+    return {key: tuple(targets) for key, targets in table.items()}
+
+
+# Typed spelling (as a search key) -> search keys of the names the sources use.
+_ALIAS_KEYS: Final = _alias_keys()
+
+
 @dataclass(frozen=True, slots=True)
 class Candidate:
     """Something searchable: an id and its display name."""
@@ -105,13 +119,17 @@ def rank(query: str, candidates: Sequence[Candidate], *, limit: int = DEFAULT_LI
     if not key or limit <= 0:
         return []
     keys = [search_key(candidate.name) for candidate in candidates]
-    scored = process.extract(key, keys, scorer=fuzz.WRatio, limit=None, score_cutoff=0)
-    hits = []
-    for name_key, base, index in scored:
-        score = min(base + _prefix_boost(key, name_key), MAX_SCORE)
-        if score >= MIN_SCORE:
-            candidate = candidates[index]
-            hits.append(Hit(candidate.id, candidate.name, float(score)))
+    best: dict[int, float] = {}
+    for variant in (key, *_ALIAS_KEYS.get(key, ())):
+        scored = process.extract(variant, keys, scorer=fuzz.WRatio, limit=None, score_cutoff=0)
+        for name_key, base, index in scored:
+            score = min(base + _prefix_boost(variant, name_key), MAX_SCORE)
+            best[index] = max(best.get(index, 0.0), float(score))
+    hits = [
+        Hit(candidates[index].id, candidates[index].name, score)
+        for index, score in best.items()
+        if score >= MIN_SCORE
+    ]
     hits.sort(key=lambda hit: (-hit.score, len(hit.name), hit.name))
     return hits[:limit]
 
@@ -162,22 +180,32 @@ async def search_teams(
 
 
 async def _latest_leagues(session: AsyncSession, team_ids: Iterable[int]) -> dict[int, str]:
-    """Name of the league of each team's most recent fixture (one query)."""
+    """Name of the league of each team's most recent fixture (one grouped query).
+
+    Aggregates in SQL (latest kick-off per team and league) instead of loading the whole
+    fixture history of the teams.
+    """
     ids = list(team_ids)
     if not ids:
         return {}
+    appearances = union_all(
+        select(
+            FixtureRow.home_team_id.label("team_id"),
+            FixtureRow.league_id.label("league_id"),
+            FixtureRow.kickoff_at.label("kickoff_at"),
+        ).where(FixtureRow.home_team_id.in_(ids)),
+        select(FixtureRow.away_team_id, FixtureRow.league_id, FixtureRow.kickoff_at).where(
+            FixtureRow.away_team_id.in_(ids)
+        ),
+    ).subquery()
+    latest = func.max(appearances.c.kickoff_at)
     rows = await session.execute(
-        select(FixtureRow.home_team_id, FixtureRow.away_team_id, LeagueRow.name)
-        .join(LeagueRow, FixtureRow.league_id == LeagueRow.id)
-        .where(or_(FixtureRow.home_team_id.in_(ids), FixtureRow.away_team_id.in_(ids)))
-        .order_by(FixtureRow.kickoff_at.desc())
+        select(appearances.c.team_id, LeagueRow.name, latest)
+        .join(LeagueRow, appearances.c.league_id == LeagueRow.id)
+        .group_by(appearances.c.team_id, LeagueRow.id, LeagueRow.name)
     )
-    wanted = set(ids)
-    leagues: dict[int, str] = {}
-    for home_id, away_id, league in rows:
-        for team_id in (home_id, away_id):
-            if team_id in wanted:
-                leagues.setdefault(team_id, league)
-        if len(leagues) == len(wanted):
-            break
-    return leagues
+    newest: dict[int, tuple[datetime, str]] = {}
+    for team_id, league, kickoff in rows:
+        if team_id not in newest or kickoff > newest[team_id][0]:
+            newest[team_id] = (kickoff, league)
+    return {team_id: league for team_id, (_, league) in newest.items()}

@@ -15,6 +15,7 @@ is when API-Sports resets its counters.
 """
 
 import asyncio
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -229,16 +230,25 @@ class QuotaGuard:
             counts = await self._store.add(key, requests=requests, manual=manual)
             return QuotaStatus(key, counts, self._policy)
 
-    async def reconcile(self, *, provider_limit: int, provider_remaining: int) -> QuotaStatus:
-        """Adopt the provider's own count when it is higher than ours.
+    async def reconcile(
+        self, key: UsageKey, *, provider_limit: int, provider_remaining: int
+    ) -> QuotaStatus:
+        """Adopt the provider's own count for ``key``'s day when it is higher than ours.
 
         Another consumer of the same key (or requests lost in a crash) may have spent
         requests we never counted; the provider's numbers are authoritative upwards only,
         so a provider reset at a slightly different moment never hands out extra quota.
+
+        ``key`` is the one :meth:`charge` returned for the request whose response carried
+        these numbers. A response that arrives after UTC midnight describes the *previous*
+        day's counter: applying it to the new day would wrongly burn the new day's quota,
+        so it is ignored. The adopted count never exceeds the daily limit.
         """
-        used = max(provider_limit - provider_remaining, 0)
+        used = min(max(provider_limit - provider_remaining, 0), self._policy.daily_limit)
         async with self._lock:
-            key = self._key()
+            today = self._key()
+            if key != today:
+                return QuotaStatus(today, await self._store.get(today), self._policy)
             counts = await self._store.raise_floor(key, used)
             return QuotaStatus(key, counts, self._policy)
 
@@ -248,3 +258,31 @@ class QuotaGuard:
             raise QuotaExceededError(
                 provider=self._provider, purpose=purpose, needed=requests, available=available
             )
+
+
+_SHARED_GUARDS: weakref.WeakKeyDictionary[
+    UsageStore, dict[tuple[str, str, QuotaPolicy], QuotaGuard]
+] = weakref.WeakKeyDictionary()
+
+
+def shared_guard(
+    store: UsageStore,
+    policy: QuotaPolicy,
+    *,
+    provider: str,
+    sport: str = NOT_SPORT_SPECIFIC,
+    clock: UtcClock = _utc_now,
+) -> QuotaGuard:
+    """The one :class:`QuotaGuard` of (``store``, ``provider``, ``sport``, ``policy``).
+
+    Check-and-charge is atomic only inside one guard (its lock). Two guards over the same
+    counters could both pass the check and overspend, so production wiring obtains guards
+    here: every client built over the same store shares the same lock. ``clock`` only
+    applies when the guard is created.
+    """
+    guards = _SHARED_GUARDS.setdefault(store, {})
+    key = (provider, sport, policy)
+    guard = guards.get(key)
+    if guard is None:
+        guard = guards[key] = QuotaGuard(store, policy, provider=provider, sport=sport, clock=clock)
+    return guard
