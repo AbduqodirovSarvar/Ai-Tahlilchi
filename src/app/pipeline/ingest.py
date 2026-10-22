@@ -154,7 +154,10 @@ async def _with_xg(
         return results
     head, tail = results[:limit], results[limit:]
     try:
-        return [*await provider.enrich_results(head, purpose=purpose), *tail]
+        return [
+            *await provider.enrich_results(head, purpose=purpose, max_requests=limit),
+            *tail,
+        ]
     except PipelineError as error:
         logger.warning("xg_unavailable", error=str(error))
         return results

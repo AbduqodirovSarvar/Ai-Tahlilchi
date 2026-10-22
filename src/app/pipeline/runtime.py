@@ -19,7 +19,7 @@ from app.db.engine import create_engine_from_settings, create_session_factory
 from app.llm.service import create_llm_service
 from app.logging import get_logger
 from app.pipeline.clock import Clock, system_clock
-from app.pipeline.config import PipelineConfig
+from app.pipeline.config import PipelineConfig, StakingMode
 from app.pipeline.context import PipelineContext
 from app.pipeline.ledger import Ledger
 from app.pipeline.provider import FootballProvider
@@ -66,7 +66,7 @@ async def open_runtime(
         ledger=Ledger(sessions),
         providers=providers,
         clock=clock,
-        config=config or PipelineConfig(),
+        config=config or PipelineConfig(staking=StakingMode(settings.staking_mode)),
         reviewer=LlmCandidateReviewer(create_llm_service(settings)),
     )
     try:

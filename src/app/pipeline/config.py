@@ -43,6 +43,10 @@ class PipelineConfig:
     """Most newly finished fixtures per refresh for which expected goals are fetched."""
     fixtures_ttl: timedelta = timedelta(hours=12)
     odds_ttl: timedelta = timedelta(hours=3)
+    max_quote_age: timedelta = timedelta(hours=6)
+    """Oldest bookmaker quote a decision may use (twice ``odds_ttl``); older = no decision."""
+    max_quote_skew: timedelta = timedelta(hours=3)
+    """Largest gap between the bet quote and the anchor quote it is compared with."""
     match_duration: timedelta = timedelta(hours=2)
     """After this the match is considered over (pending results, settle candidates)."""
     daily_catch_up: timedelta = timedelta(hours=12)
@@ -58,6 +62,9 @@ class PipelineConfig:
         """Reject values that would make a job meaningless."""
         if not 0.0 <= self.model_weight <= 1.0:
             msg = f"model_weight must be within [0, 1], got {self.model_weight}"
+            raise ConfigurationError(msg)
+        if self.max_quote_age <= timedelta(0) or self.max_quote_skew <= timedelta(0):
+            msg = "max_quote_age and max_quote_skew must be positive"
             raise ConfigurationError(msg)
         if self.refresh_days_ahead < 1 or self.odds_days_ahead < 1:
             msg = "refresh_days_ahead and odds_days_ahead must be at least 1"

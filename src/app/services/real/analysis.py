@@ -81,6 +81,7 @@ _VERDICTS: Final = {
     RecalcVerdict.STILL_VALID: ServiceVerdict.STILL_VALID,
     RecalcVerdict.BELOW_THRESHOLD: ServiceVerdict.BELOW_THRESHOLD,
     RecalcVerdict.CANCELLED: ServiceVerdict.CANCELLED,
+    RecalcVerdict.NO_PRICE: ServiceVerdict.NO_PRICE,
 }
 _FORMS: Final = {"win": FormResult.WIN, "draw": FormResult.DRAW, "loss": FormResult.LOSS}
 
@@ -205,6 +206,9 @@ class RealAnalysisService:
             api_requests_used=outcome.api_requests_used,
             failed_fixtures=outcome.failed_fixtures,
             retro=window.is_retro(core.local_today(profile.zone)),
+            skipped_no_price=outcome.skipped_no_price,
+            skipped_stale_price=outcome.skipped_stale_price,
+            data_stale=outcome.data_stale,
         )
 
     async def _remember(self, user_id: int, outcome: AnalysisOutcome) -> EntityId:

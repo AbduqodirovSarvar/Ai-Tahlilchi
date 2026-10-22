@@ -1,9 +1,10 @@
 """Odds reads: the current price per selection and full price histories."""
 
 from collections.abc import Collection, Iterable, Sequence
+from datetime import datetime
 from typing import Final
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.mappers import odds_from_row
@@ -29,6 +30,7 @@ async def latest_odds(
     *,
     kinds: Sequence[OddsKind] = DEFAULT_KIND_PRIORITY,
     bookmakers: Collection[str] = (),
+    taken_before: datetime | None = None,
 ) -> dict[ExternalRef, list[OddsSnapshot]]:
     """One price per (fixture, bookmaker, market, line, selection).
 
@@ -39,9 +41,10 @@ async def latest_odds(
     (any kind, listed ones only); if none is complete, the kind with most selections (ties:
     earlier in ``kinds``). Within the kind the latest ``taken_at`` per selection wins. Kinds
     not listed are ignored (``kinds=(OddsKind.CLOSING,)`` gives closing prices only). One
-    query for all fixtures.
+    query for all fixtures. With ``taken_before`` only snapshots taken earlier count, except
+    ``closing`` ones (a late re-sent price cannot replace the one before kick-off).
     """
-    rows, refs = await _odds_rows(session, fixtures, kinds, bookmakers)
+    rows, refs = await _odds_rows(session, fixtures, kinds, bookmakers, taken_before)
     priority = {kind: index for index, kind in enumerate(kinds)}
     groups: dict[_Group, dict[OddsKind, dict[str, OddsSnapshotRow]]] = {}
     for row in rows:
@@ -81,7 +84,7 @@ async def odds_history(
     bookmakers: Collection[str] = (),
 ) -> list[OddsSnapshot]:
     """Every stored price of one fixture, oldest first (line movement, CLV)."""
-    rows, _ = await _odds_rows(session, [fixture], kinds, bookmakers)
+    rows, _ = await _odds_rows(session, [fixture], kinds, bookmakers, None)
     ordered = sorted(rows, key=lambda row: (row.taken_at, *_display_order(row)))
     return [odds_from_row(row, fixture=fixture) for row in ordered]
 
@@ -91,6 +94,7 @@ async def _odds_rows(
     fixtures: Iterable[ExternalRef],
     kinds: Sequence[OddsKind],
     bookmakers: Collection[str],
+    taken_before: datetime | None,
 ) -> tuple[list[OddsSnapshotRow], dict[int, ExternalRef]]:
     wanted = set(fixtures)
     if not wanted or not kinds:
@@ -112,6 +116,10 @@ async def _odds_rows(
     )
     if bookmakers:
         query = query.where(OddsSnapshotRow.bookmaker.in_(list(bookmakers)))
+    if taken_before is not None:
+        query = query.where(
+            or_(OddsSnapshotRow.kind == OddsKind.CLOSING, OddsSnapshotRow.taken_at < taken_before)
+        )
     return list((await session.scalars(query)).all()), refs
 
 

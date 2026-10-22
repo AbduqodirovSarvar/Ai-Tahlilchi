@@ -338,13 +338,6 @@ def test_the_model_is_asked_for_matches_before_tomorrow_only(scenario) -> None: 
     assert set(models.calls) == {date(2026, 10, 22)}  # as_of is exclusive: strictly before it
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F5: SignalView.fair_odds is 1/probability; for a quarter-line handicap the "
-        "probability counts half wins, so it is not the zero-EV price the contract promises"
-    ),
-)
 def test_fair_price_of_a_quarter_line_is_the_zero_ev_price(scenario) -> None:  # type: ignore[no-untyped-def]
     _, views, _ = scenario
     view = views[HANDICAP, Selection.HOME]

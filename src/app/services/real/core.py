@@ -133,9 +133,11 @@ def to_view(
         state=SignalState(record.status.value),
         result=result,
         version=max(record.version, 1),
-        data_as_of=None if card is None else card.data_as_of,
+        data_as_of=record.quoted_at if card is None else card.data_as_of,
         source=SignalSource(record.source.value),
         recommended_at=record.recommended_at if recommended else None,
+        recommended_odds=record.recommended_odds if recommended else None,
+        zero_ev_odds=record.fair_odds,
     )
 
 

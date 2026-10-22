@@ -64,6 +64,16 @@ class Review:
     risk_flags: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class LlmUsage:
+    """Today's language-model usage against its daily caps (for ``/holat``)."""
+
+    requests_used: int
+    requests_limit: int
+    tokens_used: int
+    tokens_limit: int
+
+
 class CandidateReviewer(Protocol):
     """Reviews a batch of candidates in one call (one LLM request for all of them)."""
 
@@ -86,6 +96,17 @@ class LlmCandidateReviewer:
         """Review through ``service`` with an optional experience block (F8 fills it)."""
         self._service = service
         self._context = context
+
+    def usage(self) -> LlmUsage:
+        """Today's requests and tokens against the daily caps."""
+        snapshot = self._service.budget.snapshot()
+        limits = self._service.budget.limits
+        return LlmUsage(
+            requests_used=snapshot.requests,
+            requests_limit=limits.max_requests_per_day,
+            tokens_used=snapshot.tokens,
+            tokens_limit=limits.max_tokens_per_day,
+        )
 
     async def review(self, candidates: Sequence[ReviewCandidate]) -> Mapping[ReviewKey, Review]:
         """Verdicts by candidate, from as many LLM requests as the batch size needs."""
@@ -139,6 +160,11 @@ class NoReview:
     async def review(self, candidates: Sequence[ReviewCandidate]) -> Mapping[ReviewKey, Review]:  # noqa: ARG002 - protocol signature
         """No reviews."""
         return {}
+
+
+def llm_usage(reviewer: CandidateReviewer) -> LlmUsage | None:
+    """The language-model usage of ``reviewer``, ``None`` when it is not an LLM one."""
+    return reviewer.usage() if isinstance(reviewer, LlmCandidateReviewer) else None
 
 
 async def review_safely(

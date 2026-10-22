@@ -13,6 +13,12 @@ This is the F4.2 calculation chain, expressed only in ``app.models`` functions:
 Markets without a market anchor are skipped unless ``allow_model_only`` (custom analysis,
 where a model-only number is shown with the lowest trust). Nothing here knows about users,
 thresholds or the database.
+
+Prices are only compared when they are close in time: the user's bookmaker quote must be
+younger than ``config.max_quote_age`` (otherwise the fixture is skipped as ``stale_price``),
+and an anchor quote taken more than ``config.max_quote_skew`` away from it is not used (the
+market then has no anchor), so a fresh 1xBet price is never judged against an old Pinnacle
+one or the other way round.
 """
 
 from collections.abc import Mapping, Sequence
@@ -33,6 +39,7 @@ from app.models import (
     ModelInputError,
     UnknownTeamError,
     asian_expected_value,
+    asian_fair_odds,
     asian_kelly_fraction,
     assess_confidence,
     capped_fraction,
@@ -54,6 +61,7 @@ FLAG_MODEL_MARKET_GAP: Final = "model_market_gap"
 FLAG_NO_MARKET_REFERENCE: Final = "no_market_reference"
 
 SKIP_NO_PRICE: Final = "no_price"
+SKIP_STALE_PRICE: Final = "stale_price"
 SKIP_NO_MODEL: Final = "no_model"
 SKIP_THIN_HISTORY: Final = "thin_history"
 SKIP_UNKNOWN_TEAM: Final = "unknown_team"
@@ -78,6 +86,17 @@ class Candidate:
     outcomes: AsianOutcomeProbabilities
     assessment: ConfidenceAssessment
     anchored: bool
+    quoted_at: datetime
+    """When the user's bookmaker price was taken (the card's ``data_as_of``)."""
+
+    @property
+    def fair_odds(self) -> float | None:
+        """Odds at which the selection has zero EV for the ensemble (``None`` if undefined)."""
+        try:
+            fair = asian_fair_odds(self.outcomes)
+        except ModelInputError:
+            return None
+        return fair if fair > 1.0 else None
 
     @property
     def confidence(self) -> ConfidenceLevel:
@@ -115,17 +134,32 @@ class ValuationInput:
     markets: frozenset[MarketType]
     lineups_known: bool = False
     allow_model_only: bool = False
+    require_fresh: bool = True
+    """Refuse prices older than ``max_quote_age``; off for a look-back at a finished match."""
 
 
-def value_fixture(item: ValuationInput, config: PipelineConfig) -> Valuation:
-    """Candidates for every selection the user's bookmaker prices (see module docstring)."""
-    bet_quotes = {
+def _bet_quotes(item: ValuationInput, config: PipelineConfig) -> dict[Market, MarketQuote] | str:
+    """The user's bookmaker's fresh quotes by market, or the ``SKIP_*`` code why there are none."""
+    priced = {
         quote.market: quote
         for quote in item.quotes
         if quote.bookmaker == config.bet_bookmaker and quote.market.type in item.markets
     }
-    if not bet_quotes:
-        return Valuation(skip=SKIP_NO_PRICE)
+    if not priced:
+        return SKIP_NO_PRICE
+    fresh = {
+        market: quote
+        for market, quote in priced.items()
+        if not item.require_fresh or item.now - quote.taken_at <= config.max_quote_age
+    }
+    return fresh or SKIP_STALE_PRICE
+
+
+def value_fixture(item: ValuationInput, config: PipelineConfig) -> Valuation:
+    """Candidates for every selection the user's bookmaker prices (see module docstring)."""
+    bet_quotes = _bet_quotes(item, config)
+    if isinstance(bet_quotes, str):
+        return Valuation(skip=bet_quotes)
     model = item.fitted.model
     if model is None:
         return Valuation(skip=SKIP_NO_MODEL)
@@ -139,7 +173,7 @@ def value_fixture(item: ValuationInput, config: PipelineConfig) -> Valuation:
         return Valuation(skip=SKIP_UNKNOWN_TEAM, min_team_matches=played)
     except ModelInputError:
         return Valuation(skip=SKIP_MODEL_ERROR, min_team_matches=played)
-    fair = _fair(item.quotes, predicted)
+    fair = _fair(_aligned(item.quotes, bet_quotes, config), predicted)
     ensembled = ensemble_markets(predicted, fair, config.model_weight)
     candidates: list[Candidate] = []
     for market, quote in bet_quotes.items():
@@ -158,6 +192,23 @@ def value_fixture(item: ValuationInput, config: PipelineConfig) -> Valuation:
             )
         )
     return Valuation(candidates=tuple(candidates), min_team_matches=played)
+
+
+def _aligned(
+    quotes: Sequence[MarketQuote], bet_quotes: Mapping[Market, MarketQuote], config: PipelineConfig
+) -> list[MarketQuote]:
+    """Quotes the fair price may be built from: the anchors close in time to the bet quote."""
+    aligned = []
+    for quote in quotes:
+        bet = bet_quotes.get(quote.market)
+        if bet is None:
+            continue
+        if (
+            quote.bookmaker == config.bet_bookmaker
+            or abs(quote.taken_at - bet.taken_at) <= config.max_quote_skew
+        ):
+            aligned.append(quote)
+    return aligned
 
 
 def _fair(
@@ -212,6 +263,7 @@ def _candidates(
                 outcomes=outcomes,
                 assessment=assessment,
                 anchored=fair is not None,
+                quoted_at=quote.taken_at,
             )
         )
     return result
@@ -237,6 +289,5 @@ def stake_units(
         return Decimal(0)
     if config.staking is StakingMode.KELLY and bank is not None and unit is not None:
         fraction = capped_fraction(asian_kelly_fraction(candidate.outcomes, candidate.odds))
-        units = (stake_amount(bank, fraction) / unit).quantize(KELLY_UNIT_STEP, rounding=ROUND_DOWN)
-        return max(units, KELLY_UNIT_STEP)
+        return (stake_amount(bank, fraction) / unit).quantize(KELLY_UNIT_STEP, rounding=ROUND_DOWN)
     return config.flat_unit

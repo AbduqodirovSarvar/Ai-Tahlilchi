@@ -77,11 +77,11 @@ async def test_a_daily_refresh_of_ten_leagues_stays_within_forty_requests(tmp_pa
                 page = await list_fixtures(session, start=NOW, end=NOW + timedelta(days=4))
 
     assert summary.ok, summary
-    # 3 day-requests + 1 results request (20 ids) + 8 xG (the adapter's cap) + 20 league-day odds
-    assert spent == 3 + 1 + 8 + 20
+    # 3 day-requests + 1 results request (20 ids) + 10 xG (xg_per_refresh) + 20 league-day odds
+    assert spent == 3 + 1 + 10 + 20
     assert spent <= REQUEST_BUDGET
     assert api.wire.count("/fixtures") == 4
-    assert api.wire.count("/fixtures/statistics") == 8
+    assert api.wire.count("/fixtures/statistics") == 10
     assert api.wire.count("/odds") == 20
     # 20 results; 60 fixtures; 20 league-days x 2 fixtures x 2 bookmakers x 3 selections
     assert (summary.fixtures, summary.results, summary.odds) == (60, 20, 240)
@@ -93,13 +93,6 @@ async def test_a_daily_refresh_of_ten_leagues_stays_within_forty_requests(tmp_pa
     assert fake_time.now == NOW
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F6: PipelineConfig.xg_per_refresh=10 is documented as the xG budget of a refresh, "
-        "but ingest passes no max_requests to with_expected_goals, whose default is 8"
-    ),
-)
 async def test_the_configured_xg_budget_is_the_one_spent(tmp_path: Path) -> None:
     async with api_over_respx(NOW) as (api, _):
         yesterday = fill(api)
@@ -149,7 +142,7 @@ async def test_busy_leagues_with_paged_odds_can_pass_forty_but_never_the_automat
         status = await api.harness.quota.status()
 
     spent = len(api.wire.seen)
-    assert spent == 3 + 1 + 8 + 20 * 2  # documented finding: the 40 budget assumes one page
+    assert spent == 3 + 1 + 10 + 20 * 2  # documented finding: the 40 budget assumes one page
     assert spent > REQUEST_BUDGET
     assert summary.ok  # still inside the automatic quota (70)
     assert status.counts.requests_used == spent <= int(100 * AUTOMATIC_SHARE)

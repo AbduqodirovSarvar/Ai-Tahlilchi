@@ -62,14 +62,6 @@ async def test_a_restart_never_duplicates_or_loses_a_job(tmp_path: Path) -> None
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "QA-T4-F3: registering with replace_existing=True on every start recomputes next_run_time, "
-        "so a settle/refresh run missed while the process was down (inside misfire_grace_time) is "
-        "silently dropped instead of being run on restart (F4.7: 'o'tkazib yuborilgan vazifalar')"
-    ),
-)
 @pytest.mark.parametrize("name", [JOB_SETTLE, JOB_REFRESH])
 async def test_a_daily_job_missed_while_down_runs_after_the_restart(
     tmp_path: Path, name: str

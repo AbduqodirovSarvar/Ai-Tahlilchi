@@ -14,9 +14,9 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from enum import StrEnum
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from app.db.enums import Confidence, SignalStatus, SignalVersionReason
 from app.db.repo import (
@@ -35,10 +35,12 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.errors import PipelineError
 from app.pipeline.ingest import ingest_odds, ingest_results, provider_of
 from app.pipeline.odds import current_quotes, data_as_of, load_decision_snapshots
+from app.pipeline.persist import refresh_quote_time, unchanged
+from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.provider import Purpose
 from app.pipeline.selection import passes
 from app.pipeline.types import AnalysisRequest, SignalCard
-from app.pipeline.valuation import Candidate, ValuationInput, value_fixture
+from app.pipeline.valuation import Candidate, ValuationInput, stake_units, value_fixture
 
 logger = get_logger(__name__)
 
@@ -59,6 +61,8 @@ class RecalcVerdict(StrEnum):
     STILL_VALID = "still_valid"
     BELOW_THRESHOLD = "below_threshold"
     CANCELLED = "cancelled"
+    NO_PRICE = "no_price"
+    """The user's bookmaker has no fresh price any more: the stored numbers are unconfirmed."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -167,10 +171,16 @@ async def _recalc_fixture(
     by_key = {(c.market, c.selection): c for c in valuation.candidates}
     results = []
     async with ctx.sessions.begin() as session:
+        profiles = {user: await load_profile(session, user) for user in {r.user_id for r in group}}
         for record in group:
             candidate = by_key.get((record.market, record.selection))
-            after = await upsert_signal(
-                session, _draft(record, candidate, ctx.config.flat_unit), reason=options.reason
+            draft = _draft(ctx, record, candidate, profiles[record.user_id])
+            # A rerun that finds the same numbers (a retry after a failed message) must not
+            # pile up identical versions.
+            after = (
+                await refresh_quote_time(session, record, draft)
+                if unchanged(record, draft)
+                else await upsert_signal(session, draft, reason=options.reason)
             )
             results.append(
                 _result(
@@ -185,8 +195,15 @@ async def _recalc_fixture(
     return results
 
 
-def _draft(record: SignalRecord, candidate: Candidate | None, _unit: Decimal) -> SignalDraft:
-    """The signal's new numbers; unchanged ones when it can no longer be priced."""
+def _draft(
+    ctx: PipelineContext, record: SignalRecord, candidate: Candidate | None, profile: UserProfile
+) -> SignalDraft:
+    """The signal's new numbers; unchanged ones when it can no longer be priced.
+
+    The stake is advised afresh from the new numbers with the same staking rule as a new
+    signal; a non-positive EV keeps the stake already advised (a signal that was recommended
+    never ends up with a zero stake, and the next positive EV is not stuck at zero).
+    """
     thresholds = record.thresholds or FALLBACK_THRESHOLDS
     if candidate is None:
         odds, probability, ev, confidence = (
@@ -195,10 +212,13 @@ def _draft(record: SignalRecord, candidate: Candidate | None, _unit: Decimal) ->
             record.ev,
             record.confidence,
         )
+        stake, fair_odds, quoted_at = record.stake_units, record.fair_odds, record.quoted_at
     else:
         odds, probability, ev = candidate.odds, candidate.probability, candidate.ev
         confidence = Confidence(candidate.confidence.value)
-    stake = record.stake_units if ev > 0 else Decimal(0)
+        advised = stake_units(candidate, ctx.config, bank=profile.bank, unit=profile.unit)
+        stake = advised if advised > 0 and record.recommended_at is not None else record.stake_units
+        fair_odds, quoted_at = candidate.fair_odds, candidate.quoted_at
     return SignalDraft(
         user_id=record.user_id,
         fixture_id=record.fixture.id,
@@ -212,6 +232,8 @@ def _draft(record: SignalRecord, candidate: Candidate | None, _unit: Decimal) ->
         source=record.source,
         thresholds=thresholds,
         recommended_at=record.recommended_at,
+        fair_odds=fair_odds,
+        quoted_at=quoted_at,
     )
 
 
@@ -226,7 +248,7 @@ def _result(  # noqa: PLR0913 - one value per fact of the result
 ) -> RecalcResult:
     stale, as_of, lineups = freshness
     thresholds = before.thresholds or FALLBACK_THRESHOLDS
-    valid = candidate is not None and passes(candidate, _probe(thresholds))
+    verdict = _verdict(candidate, thresholds)
     flags = () if candidate is None else candidate.risk_flags
     bookmaker = ctx.config.bet_bookmaker
     return RecalcResult(
@@ -238,11 +260,20 @@ def _result(  # noqa: PLR0913 - one value per fact of the result
             risk_flags=flags,
             data_as_of=as_of,
         ),
-        verdict=RecalcVerdict.STILL_VALID if valid else RecalcVerdict.BELOW_THRESHOLD,
+        verdict=verdict,
         recalculated_at=now,
         stale=stale,
         lineups_confirmed=lineups,
     )
+
+
+def _verdict(candidate: Candidate | None, thresholds: Thresholds) -> RecalcVerdict:
+    """No price -> ``NO_PRICE``; valid only with a market anchor (never a model-only EV)."""
+    if candidate is None:
+        return RecalcVerdict.NO_PRICE
+    if candidate.anchored and passes(candidate, _probe(thresholds)):
+        return RecalcVerdict.STILL_VALID
+    return RecalcVerdict.BELOW_THRESHOLD
 
 
 def _probe(thresholds: Thresholds) -> AnalysisRequest:
@@ -251,7 +282,7 @@ def _probe(thresholds: Thresholds) -> AnalysisRequest:
         user_id=0,
         start=datetime.min.replace(tzinfo=UTC),
         end=datetime.max.replace(tzinfo=UTC),
-        zone=UTC,  # type: ignore[arg-type]
+        zone=ZoneInfo("UTC"),
         sports=frozenset({Sport.FOOTBALL}),
         markets=frozenset(),
         min_probability=thresholds.min_prob,

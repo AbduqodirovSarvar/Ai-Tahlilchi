@@ -550,6 +550,7 @@ VERDICT_LABELS: Final[dict[str, str]] = {
     "still_valid": "✅ Kuchda",
     "below_threshold": "⚠️ Chegaradan pastga tushdi, tavsiya etilmaydi",
     "cancelled": "❌ Signal bekor qilindi",
+    "no_price": "⚠️ Bukmekerda yangi narx yo'q, raqamlar tasdiqlanmadi",
 }
 RECALC_BATCH_HEADER: Final = (
     "🔄 <b>Qayta hisoblash tugadi:</b> yangilandi {updated} ta, raqami o'zgargan {changed} ta."

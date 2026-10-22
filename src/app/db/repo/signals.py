@@ -9,13 +9,15 @@ time, together with the thresholds of that moment. Later drafts never move or cl
 A retro draft (fixture already started) never overwrites a non-retro signal.
 
 Reports read only recommended, non-retro signals and **include hidden ones** (hiding is a
-view preference, not a selection decision).
+view preference, not a selection decision). A *cancelled* signal (its match was postponed,
+called off or abandoned) stays out of reports and settlement until its match is played; a
+match that was called off or abandoned voids it (settlement), a played one settles it normally.
 """
 
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, func, inspect, select, update
+from sqlalchemy import ColumnElement, func, inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -31,9 +33,12 @@ from app.db.repo.records import (
     Thresholds,
 )
 from app.db.schema import FixtureRow, SignalResultRow, SignalRow, SignalVersionRow, utcnow
+from app.domain import FixtureStatus
 from app.errors import DataError
 
 _VERSION_ATTEMPTS = 3
+_RESOLVED_FIXTURES = (FixtureStatus.FINISHED, FixtureStatus.CANCELLED, FixtureStatus.ABANDONED)
+"""Fixture states in which a cancelled signal can still get a result (played or voided)."""
 
 _EAGER = (
     joinedload(SignalRow.fixture).joinedload(FixtureRow.league),
@@ -151,6 +156,7 @@ def _new_row(draft: SignalDraft) -> SignalRow:
         source=draft.source,
         status=SignalStatus.ACTIVE,
         recommended_at=draft.recommended_at,
+        recommended_odds=None if draft.recommended_at is None else draft.odds,
     )
     _set_numbers(row, draft)
     _set_thresholds(row, draft.thresholds)
@@ -163,6 +169,7 @@ def _update_row(row: SignalRow, draft: SignalDraft) -> None:
         row.source = draft.source
     if row.recommended_at is None and draft.recommended_at is not None:
         row.recommended_at = draft.recommended_at
+        row.recommended_odds = draft.odds
         _set_thresholds(row, draft.thresholds)
     elif None in (row.min_prob, row.min_ev, row.odds_min, row.odds_max):  # pre-0003 rows
         _set_thresholds(row, draft.thresholds)
@@ -174,6 +181,9 @@ def _set_numbers(row: SignalRow, draft: SignalDraft) -> None:
     row.ev = draft.ev
     row.confidence = draft.confidence
     row.stake_units = draft.stake_units
+    row.fair_odds = draft.fair_odds
+    if draft.quoted_at is not None:
+        row.quoted_at = draft.quoted_at
     if draft.llm_verdict is not None or draft.llm_note is not None:
         row.llm_verdict = draft.llm_verdict
         row.llm_note = draft.llm_note
@@ -196,6 +206,15 @@ async def _latest_version(session: AsyncSession, signal_id: int) -> int:
 async def _require(session: AsyncSession, signal_id: int) -> SignalRecord:
     records = await _load(session, SignalRow.id == signal_id)
     return records[0]
+
+
+async def touch_signal_quote_time(
+    session: AsyncSession, signal_id: int, quoted_at: datetime
+) -> None:
+    """Record a newer price time for a signal whose numbers did not change (no new version)."""
+    await session.execute(
+        update(SignalRow).where(SignalRow.id == signal_id).values(quoted_at=quoted_at)
+    )
 
 
 async def get_signal(
@@ -232,6 +251,16 @@ async def list_user_signals(  # noqa: PLR0913 - explicit filters instead of a qu
     return await _load(session, *conditions)
 
 
+def _not_pending_cancellation() -> ColumnElement[bool]:
+    """Not cancelled, or cancelled but the match was played / called off for good."""
+    return or_(
+        SignalRow.status != SignalStatus.CANCELLED,
+        SignalRow.fixture_id.in_(
+            select(FixtureRow.id).where(FixtureRow.status.in_(_RESOLVED_FIXTURES))
+        ),
+    )
+
+
 async def report_signals(
     session: AsyncSession,
     user_id: int,
@@ -255,6 +284,7 @@ async def report_signals(
         SignalRow.recommended_at.is_not(None),
         SignalRow.source != SignalSource.RETRO,
         SignalRow.fixture_id.in_(fixture_window),
+        _not_pending_cancellation(),
     )
 
 
@@ -284,6 +314,7 @@ async def unsettled_signals(
         SignalRow.recommended_at.is_not(None),
         SignalRow.source != SignalSource.RETRO,
         SignalRow.id.not_in(select(SignalResultRow.signal_id)),
+        _not_pending_cancellation(),
         SignalRow.fixture_id.in_(
             select(FixtureRow.id).where(FixtureRow.kickoff_at < kicked_off_before)
         ),
@@ -432,6 +463,9 @@ def _record(row: SignalRow, version: int, result: SignalResultRecord | None) -> 
         created_at=row.created_at,
         updated_at=row.updated_at,
         result=result,
+        recommended_odds=row.recommended_odds,
+        fair_odds=row.fair_odds,
+        quoted_at=row.quoted_at,
     )
 
 

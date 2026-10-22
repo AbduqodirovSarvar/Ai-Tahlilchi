@@ -49,6 +49,8 @@ class AnalysisRequest:
     prematch_minutes: int | None = None
     purpose: Purpose = MANUAL
     fetch: bool = True
+    skip_retro: bool = False
+    """Leave out fixtures that already started (the daily digest has no use for look-backs)."""
 
     @property
     def thresholds(self) -> Thresholds:
@@ -83,6 +85,12 @@ class AnalysisOutcome:
     requested: int | None
     api_requests_used: int
     failed_fixtures: int = 0
+    skipped_no_price: int = 0
+    """Fixtures left out because the user's bookmaker has no (fresh) price for them."""
+    skipped_stale_price: int = 0
+    """Fixtures left out because the bookmaker's price is too old to decide on."""
+    data_stale: bool = False
+    """Provider data the run wanted could not be refreshed (budget spent or provider down)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

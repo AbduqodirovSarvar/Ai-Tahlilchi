@@ -167,6 +167,7 @@ class ScriptedProvider:
         results: Sequence[FixtureResult],
         *,
         purpose: Purpose,  # noqa: ARG002
+        max_requests: int,  # noqa: ARG002
     ) -> list[FixtureResult]:
         """No xG in the script."""
         return list(results)

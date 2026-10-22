@@ -72,6 +72,7 @@
 - [x] F4.6 `pipeline/settle.py`: natija (Osiyo yarim natijalari), foyda, CLV, foydalanuvchi stavkalari, qo'lda natija ustuvor
 - [x] F4.7 `app/scheduler.py`: APScheduler + SQLAlchemy jobstore, settle 08:00, refresh 08:30, daqiqalik tick'lar; restartdan keyin saqlanadi; `main` da bot bilan birga (`APP_SERVICES=real`)
 - [x] F4.8 "Soxta kun" e2e (`tests/pipeline/test_day_e2e.py`: refresh → kunlik xabar → pre-match → natija → hisobot, qo'lda tekshirilgan foyda), contract suite real servislarda, idempotentlik, byudjet, LLM yo'q/`rad`/`ehtiyot`, rejalashtiruvchi restarti
+- [x] T4 pipeline fix round (pipeline-engineer, 2026-10-22): kod sharhi R1-R7 va QA F-1...F-12 tuzatildi (retro kesimi, stavka qayta hisobi, yopilgan signalga stavka, yetkazish qayta urinishi va backoff, `stop()` kutishi va o'tkazib yuborilgan jobs, eskirgan narx, foyda/CLV birinchi koeffitsientda, NO_PRICE, `SystemStatus.llm`/`ApiQuota` bo'linishi); strict xfail lar olib tashlandi; shartnoma v1.5, Alembic `0007`, [ADR 0008](adr/0008-pipeline-and-real-services.md) qo'shimchasi
 - [x] F5.1 `clients/gemini.py` (async `google-genai` o'rami, `response_schema`, retry, token metrikasi; ADR 0009)
 - [x] F5.2 Prompt shablonlari (`context_check.v1`, `postmortem.v1`, paket ma'lumoti, keshlangan yuklovchi)
 - [x] F5.3 Kirish JSON yig'uvchi (delimitlangan ma'lumot bloki, deterministik token byudjeti, "Tajriba konteksti")

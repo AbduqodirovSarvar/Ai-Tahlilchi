@@ -83,6 +83,8 @@ class SignalDraft:
     recommended_at: datetime | None = None
     llm_verdict: LlmVerdict | None = None
     llm_note: str | None = None
+    fair_odds: float | None = None
+    quoted_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -123,6 +125,18 @@ class SignalRecord:
     created_at: datetime
     updated_at: datetime
     result: SignalResultRecord | None
+    recommended_odds: float | None = None
+    fair_odds: float | None = None
+    quoted_at: datetime | None = None
+
+    @property
+    def first_odds(self) -> float:
+        """The odds profit and CLV are judged on: the first recommended ones (decision #17).
+
+        ``odds`` follows recalculations; a signal that was never recommended has no
+        recommended odds, so its current ``odds`` stand in.
+        """
+        return self.odds if self.recommended_odds is None else self.recommended_odds
 
     @property
     def retro(self) -> bool:

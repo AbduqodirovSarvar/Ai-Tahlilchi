@@ -12,6 +12,7 @@ from app.domain import FixtureStatus, Sport
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.daily import run_due_digests
 from app.pipeline.errors import ProviderUnavailableError
+from app.pipeline.ledger import backoff
 from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.profile import default_request, load_profile
 from app.pipeline.refresh import refresh
@@ -187,6 +188,10 @@ async def test_a_failed_digest_is_retried_on_the_next_tick(
     assert [e[1] for e in await provider_env.ctx.ledger.recent_errors()] == ["daily"]
 
     monkeypatch.setattr(AnalysisEngine, "run", original)
+    too_soon = await run_due_digests(provider_env.ctx, provider_env.system.delivery)
+    assert too_soon.sent == ()  # the retry waits for its backoff
+
+    provider_env.clock.advance(backoff(1))
     retried = await run_due_digests(provider_env.ctx, provider_env.system.delivery)
     assert retried.sent == (USER,)
 
@@ -198,6 +203,8 @@ async def test_updates_during_quiet_hours_are_not_sent_but_numbers_stay_fresh(
     await tune(provider_env, quiet_hours=QuietHours(time(0), time(23, 59)))
     await refresh(provider_env.ctx)
     ids = await recommend(provider_env)
+    provider = scripted(provider_env)  # the market moves, so a recalculation has news to store
+    provider.odds = [replace(row, odds=round(row.odds * 1.08, 2)) for row in provider.odds]
 
     silent = notified = 0
     for _ in range(24):

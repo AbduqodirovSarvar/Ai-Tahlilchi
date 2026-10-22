@@ -16,7 +16,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from app.db.repo import upsert_live
-from app.domain import BOOKMAKER_1XBET, HistoryBatch, OddsKind, Selection
+from app.domain import BOOKMAKER_1XBET, BOOKMAKER_PINNACLE, HistoryBatch, OddsKind, Selection
 from app.pipeline.config import PipelineConfig
 from app.pipeline.daily import run_due_digests
 from app.pipeline.prematch import run_due_recalcs
@@ -256,14 +256,24 @@ async def test_quiet_hours_drop_the_prematch_message_but_the_recalculation_still
         async with bare.sessions.begin() as session:
             await upsert_live(
                 session,
-                odds=snapshot(
-                    FIXTURE,
-                    BOOKMAKER_1XBET,
-                    ONE_X_TWO,
-                    x12(2.30, 4.40, 4.00),
-                    kind=OddsKind.RECALC,
-                    taken_at=utc(2026, 10, 21, 7),
-                ),
+                odds=[
+                    *snapshot(
+                        FIXTURE,
+                        BOOKMAKER_1XBET,
+                        ONE_X_TWO,
+                        x12(2.30, 4.40, 4.00),
+                        kind=OddsKind.RECALC,
+                        taken_at=utc(2026, 10, 21, 13, 30),
+                    ),
+                    *snapshot(
+                        FIXTURE,
+                        BOOKMAKER_PINNACLE,
+                        ONE_X_TWO,
+                        x12(2.0, 4.0, 4.0),
+                        kind=OddsKind.RECALC,
+                        taken_at=utc(2026, 10, 21, 13, 30),
+                    ),
+                ],
             )
         bare.clock.now = KICKOFF - timedelta(minutes=60)  # 19:00 in Asia/Tashkent
         report = await run_due_recalcs(bare.ctx, bare.system.delivery)

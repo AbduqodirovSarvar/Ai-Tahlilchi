@@ -35,7 +35,9 @@ from app.db.repo.operations import (
     enqueue_recalc,
     get_bet_by_token,
     list_bets,
+    open_bets_of_settled_signals,
     release_recalc,
+    reschedule_recalc,
     settle_bet,
 )
 from app.db.repo.records import (
@@ -64,6 +66,7 @@ from app.db.repo.signals import (
     settle_signal,
     signal_versions,
     signals_for_fixtures,
+    touch_signal_quote_time,
     unsettled_signals,
     upsert_signal,
 )
@@ -133,9 +136,11 @@ __all__ = [
     "list_user_signals",
     "list_watchlist",
     "odds_history",
+    "open_bets_of_settled_signals",
     "release_recalc",
     "remove_watch",
     "report_signals",
+    "reschedule_recalc",
     "save_query",
     "set_result_note",
     "set_signal_status",
@@ -145,6 +150,7 @@ __all__ = [
     "signal_versions",
     "signals_for_fixtures",
     "team_refs",
+    "touch_signal_quote_time",
     "unsettled_signals",
     "update_user",
     "upsert_live",

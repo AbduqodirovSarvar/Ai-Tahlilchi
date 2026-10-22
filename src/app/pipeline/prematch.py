@@ -8,11 +8,19 @@ data, and tells the user.
 Idempotency: before a message is sent its key ``(kind, local day, user, signal)`` is claimed
 in the ledger; a task whose message was already delivered completes without sending again.
 Quiet hours drop the *message* (never the recalculation, so the stored numbers stay fresh).
-A 24-hour update is only worth a message when something changed; the pre-match update always
-says "still valid" or "below the threshold".
+A 24-hour update is only worth a message when something changed *since the user last heard*:
+the numbers the user last saw are remembered in the ledger, so a failed send cannot swallow the
+change (the retry still sees it). The pre-match update always says "still valid" or "below the
+threshold".
+
+Failures: a failed task is moved to a later ``run_at`` with an exponential backoff instead of
+being claimed again at once, and given up on (with a throttled administrator alert) after
+:data:`app.pipeline.ledger.MAX_ATTEMPTS` tries. A notifier answer of ``None`` (bot not
+attached, user unreachable) counts as "not delivered".
 """
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Final
 
@@ -24,14 +32,17 @@ from app.db.repo import (
     claim_due_recalcs,
     complete_recalc,
     get_signal,
-    release_recalc,
+    reschedule_recalc,
 )
 from app.domain import OddsKind
 from app.logging import get_logger
+from app.pipeline.alerts import alert_throttled
 from app.pipeline.context import PipelineContext
 from app.pipeline.daily import message_key
 from app.pipeline.delivery import CancelDelivery, Delivery, UpdateDelivery, WatchDelivery
-from app.pipeline.ledger import LedgerKey
+from app.pipeline.errors import DeliveryNotConfirmedError
+from app.pipeline.ledger import STAMP_DAY, LedgerKey
+from app.pipeline.outbox import deliver_watch_event
 from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.provider import AUTOMATIC
 from app.pipeline.queries import league_refs, team_refs
@@ -39,6 +50,8 @@ from app.pipeline.recalc import RecalcOptions, RecalcResult, RecalcVerdict, reca
 
 logger = get_logger(__name__)
 
+NOTIFIED_JOB: Final = "notified"
+RETRY_JOB: Final = "recalc.retry"
 WATCH_LINEUPS: Final = "lineups"
 WATCH_ODDS_MOVE: Final = "odds_move"
 _OPTIONS: Final = {
@@ -84,18 +97,83 @@ async def _handle(ctx: PipelineContext, delivery: Delivery, task: RecalcTask) ->
         await _finish(ctx, task)
         return "skipped"
     try:
+        seen = await _numbers_seen(ctx, signal)
         results, failed = await recalc_signals(ctx, [signal], _OPTIONS[task.kind])
         if failed or not results:
             raise RuntimeError("recalculation failed")
-        sent = await _notify(ctx, delivery, task, results[0])
-    except Exception as error:  # the task stays claimable; one signal never blocks the rest
+        sent = await _notify(ctx, delivery, task, _as_seen(results[0], seen))
+    except Exception as error:  # the task is retried later; one signal never blocks the rest
         logger.warning("prematch_failed", signal_id=task.signal_id, error=repr(error))
-        async with ctx.sessions.begin() as session:
-            await release_recalc(session, task.id, claimed_at=task.claimed_at or now)
         await ctx.ledger.record_error("prematch", f"signal {task.signal_id}: {error}", now=now)
+        await _retry_later(ctx, delivery, task, error)
         return "failed"
     await _finish(ctx, task)
+    await ctx.ledger.forget(_retry_key(task))
     return "notified" if sent else "silent"
+
+
+def _retry_key(task: RecalcTask) -> LedgerKey:
+    """Counts the failed attempts of one queued task (its run time moves with every retry)."""
+    return LedgerKey(RETRY_JOB, STAMP_DAY, 0, str(task.id))
+
+
+async def _retry_later(
+    ctx: PipelineContext, delivery: Delivery, task: RecalcTask, error: Exception
+) -> None:
+    """Move ``task`` to a later run (backoff), or close it after too many failures."""
+    now = ctx.clock()
+    key = _retry_key(task)
+    failure = await ctx.ledger.fail(key, now=now, detail=str(error)[:200])
+    claimed_at = task.claimed_at or now
+    if failure.retry_after is None:
+        await _finish(ctx, task)
+        await ctx.ledger.forget(key)  # a re-opened task starts counting afresh
+        await alert_throttled(
+            ctx,
+            delivery,
+            "prematch",
+            f"signal {task.signal_id} gave up after {failure.attempts}: {error}",
+            throttle_key="prematch.gave_up",
+        )
+        return
+    async with ctx.sessions.begin() as session:
+        await reschedule_recalc(session, task.id, run_at=failure.retry_after, claimed_at=claimed_at)
+
+
+@dataclass(frozen=True, slots=True)
+class SeenNumbers:
+    """The numbers of a signal the user was last told (what an update is compared with)."""
+
+    odds: float
+    probability: float
+    ev: float
+
+
+async def _numbers_seen(ctx: PipelineContext, signal: SignalRecord) -> SeenNumbers:
+    """What the user last saw: the last notified numbers, or the stored ones right now."""
+    key = LedgerKey(NOTIFIED_JOB, STAMP_DAY, signal.user_id, str(signal.id))
+    entry = await ctx.ledger.get(key)
+    if entry is not None and entry.detail:
+        data = json.loads(entry.detail)
+        return SeenNumbers(data["odds"], data["probability"], data["ev"])
+    seen = SeenNumbers(signal.odds, signal.p_model, signal.ev)
+    await _remember_seen(ctx, signal.user_id, signal.id, seen)
+    return seen
+
+
+async def _remember_seen(
+    ctx: PipelineContext, user_id: int, signal_id: int, seen: SeenNumbers
+) -> None:
+    detail = json.dumps({"odds": seen.odds, "probability": seen.probability, "ev": seen.ev})
+    key = LedgerKey(NOTIFIED_JOB, STAMP_DAY, user_id, str(signal_id))
+    await ctx.ledger.complete(key, now=ctx.clock(), detail=detail)
+
+
+def _as_seen(result: RecalcResult, seen: SeenNumbers) -> RecalcResult:
+    """``result`` with its ``before`` card showing the numbers the user last saw."""
+    before = result.before
+    record = replace(before.record, odds=seen.odds, p_model=seen.probability, ev=seen.ev)
+    return replace(result, before=replace(before, record=record))
 
 
 def _live(signal: SignalRecord, now: datetime) -> bool:
@@ -122,7 +200,10 @@ def _worth_a_message(kind: RecalcKind, result: RecalcResult, threshold: float) -
 
 
 async def _notify(
-    ctx: PipelineContext, delivery: Delivery, task: RecalcTask, result: RecalcResult
+    ctx: PipelineContext,
+    delivery: Delivery,
+    task: RecalcTask,
+    result: RecalcResult,
 ) -> bool:
     """Deliver the result once; returns whether a message went out."""
     now = ctx.clock()
@@ -142,10 +223,16 @@ async def _notify(
     reply_to = None if previous is None else previous.detail
     try:
         reference = await _send(delivery, task, result, key, reply_to)
-    except Exception:
-        await ctx.ledger.fail(key, now=ctx.clock())
+        if reference is None:
+            raise DeliveryNotConfirmedError(f"{task.kind.value} update of signal {record.id}")
+    except Exception as error:
+        await ctx.ledger.fail(key, now=ctx.clock(), detail=str(error)[:200])
         raise
     await ctx.ledger.complete(key, now=ctx.clock(), detail=reference)
+    after = result.after.record
+    await _remember_seen(
+        ctx, record.user_id, record.id, SeenNumbers(after.odds, after.p_model, after.ev)
+    )
     await _watch_events(ctx, delivery, profile, result)
     return True
 
@@ -183,10 +270,8 @@ async def _watch_events(
     day = profile.schedule.local_day(now)
     for event, detail in wanted:
         key = LedgerKey(f"watch.{event}", day, profile.user_id, str(fixture.id))
-        if await ctx.ledger.claim(key, now=now):
-            message = WatchDelivery(event=event, fixture=fixture, detail=detail, card=result.after)
-            await delivery.watch_event(profile.user_id, message, key)
-            await ctx.ledger.complete(key, now=ctx.clock())
+        message = WatchDelivery(event=event, fixture=fixture, detail=detail, card=result.after)
+        await deliver_watch_event(ctx, delivery, profile.user_id, message, key)
 
 
 async def watch_flags_for(
