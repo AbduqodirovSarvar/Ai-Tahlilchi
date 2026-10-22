@@ -71,3 +71,71 @@ Kalibratsiya o'zining chiqishida o'qitilsa, har hafta xarita ustiga xarita qo'yi
 - Faol kalibratsiya, yangi fit yaxshilanmasa ham, qo'lda qaytarilmaguncha qoladi (avtomatik o'chirish yo'q).
 - Hold-out bootstrap mustaqil namunalarni nazarda tutadi (vaqt korrelyatsiyasi hisobga olinmagan).
 - Segment `market` kesimi chiziqsiz; ko'p chiziqli bozorlar bitta segmentga birlashadi.
+
+
+---
+
+## Qo'shimcha (T5 fix round, 2026-10-23): takroriy tekshiruv, rejimlar va rollback qoidalari
+
+**Kontekst.** T5 QA ([docs/qa/T5-learning.md](../qa/T5-learning.md)) topdi: haftalik tekshiruv 52 marta takrorlanadi, shuning uchun 95% oraliq nol-ustunlikli segmentlarning 9–23% ini yiliga bir marta "tuzatadi", mukammal modelga ~25% ehtimol bilan soxta kalibratsiya beradi (T5-QA-1/3); push natijalar kalibratsiyani buzadi (T5-QA-4); sinov davri eski tarix bilan baholanadi (T5-QA-2); qo'lda rollback keyingi haftada bekor bo'ladi yoki yangi holatni o'chiradi (T5-QA-5/6); buzilgan `params` tahlilni yiqitadi (T5-QA-7). Quyidagi qarorlar ularni yopadi. Eslatma: yuqoridagi asosiy matndagi "95%" va "bir tomonlama 95%" endi **99.5%** (pastga qarang).
+
+### D1. O'rganish rejimi `LEARNING_MODE` = `off | shadow | apply` (standart `shadow`)
+- `off`: job hech narsa qilmaydi (ledger'da hafta band qilinmaydi).
+- `shadow` (standart): job hamma narsani hisoblaydi va yozadi (`segment_stats`, `calibration_versions`), har bir o'zgarishni `learning_changes` ga **`applied=False`** ("shunday qilgan bo'lardi") bilan yozadi, lekin tahlil yo'li `NoLearning` oladi: EV chegarasi ko'tarilmaydi, segment o'chirilmaydi, kalibratsiya qo'llanmaydi.
+- `apply`: avvalgi xatti-harakat (`applied=True`), pastdagi tuzatishlar bilan.
+- Ulash: `runtime.open_runtime` faqat `apply` da `DbLearningSource` beradi; `PipelineContext.learning_settings = LearningSettings(mode, manual_hold)`. Alembic `0009`: `learning_changes.applied` (eski qatorlar `true`), `segment_stats.flagged`. Repo: `list_learning_changes(..., applied=None|True|False)`, `LearningChange.applied`. `/ozgarishlar` (keyingi vazifa) shadow yozuvlarni alohida ko'rsatishi mumkin.
+- **`shadow` → `apply` o'tish — odam qarori**, paper trading (F10) davomida shadow jurnalini ko'rib chiqqandan keyin. Eslatma: shadow rejimda holat mashinasi "o'ylab" yuradi (segment qatorlari yangilanadi), shuning uchun `apply` ga o'tganda shu holat darhol kuchga kiradi; jurnaldagi eski yozuvlar `applied=False` bo'lib qoladi. Bu ataylab: odam aynan ko'rgan holatni yoqadi.
+
+### D2. Takroriy tekshiruvga qarshi himoya (segmentlar, T5-QA-1)
+Uch qatlam (hammasi `models/segments.py`; yagona kirish nuqtasi `review_segments`, job va simulyatsiyalar bir xil kodni ishlatadi):
+1. **99.5% ikki tomonlama oraliq** (`CI_LEVEL=0.995`, 2000 bootstrap) — ROI uchun va (yetarli bo'lsa) CLV uchun; `RAISE` ham, `DISABLE` ham ROI **va** CLV ning **VA** (AND) sharti bilan (avval RAISE da `OR` edi: CLV yolg'iz o'zi segmentni qattiqlashtirmaydi).
+2. **Benjamini–Hochberg (FDR)** shu hafta ko'rilgan barcha segmentlar (n ≥ 50, o'chirilmagan) bo'yicha, `FDR_LEVEL=0.05`. p-qiymat: `Φ(shrunk / se)`, `se` — bootstrap standart xatosi (shrinkage vazni bilan); qiymat `Estimate.p_value`. Bitta segment bo'lsa BH oddiy 5% testga tushadi (99.5% oraliq qattiqroq); yuzlab segmentda esa chegara `0.05·k/m` ga tushadi.
+3. **Ketma-ket ikki haftalik run.** Dalil birinchi marta `segment_stats.flagged=True` bilan belgilanadi (`reason=awaiting_confirmation`, holat o'zgarmaydi); keyingi hafta ham dalil bo'lsa — harakat. Dalil yo'qolsa bayroq tushadi.
+
+**Simulyatsiya** (koeffitsient 2.0, 52 hafta, ROI haqiqatda `2p−1`, har dunyoda 20 segment; nol-ustunlik = `p=0.5`):
+
+| Stsenariy | Signal/hafta | Segmentlar | Oldin: kamida bitta RAISE/DISABLE | Keyin | Oldin: 3+ holat o'zgargan | Keyin | Holat o'zgarishi/segment/yil (keyin) |
+|---|---|---|---|---|---|---|---|
+| ROI = 0 | 3 | 600 | 8.7% | **1.17%** | 6.7% | 0.17% | 0.025 |
+| ROI = 0 | 8 | 400 | 12.5% | **1.00%** | 9.6% | 0.25% | 0.023 |
+| ROI = −20% (p=0.40) | 3 | 200 | 92% (median 17-hafta) | 68% (median 23) | — | 14% | 1.43 |
+| ROI = −20% | 8 | 200 | o'lchanmagan | 95.5% (median 14) | — | 65.5% | 3.3 |
+| ROI = −10% (p=0.45) | 8 | 200 | 81% | 40.5% (median 26) | — | 10% | 0.91 |
+
+Talqin: soxta harakat ~9–12% dan ~1% ga tushdi (maqsad ≤ ~1%). Narxi — quvvat: −20% ROI da 3 signal/hafta bo'lgan segmentning ~2/3 qismi bir yilda topiladi (avval ~9/10), −10% da yarmidan kamrog'i (avval 4/5) — 50–150 signalli namunada 99.5% oraliq nolni ajratishi uchun haqiqatan ~200+ signal kerak. Bu ataylab tanlangan: tizim "yetarli dalil yo'q" deydi; yo'qolgan foyda (yomon segmentni bir necha oy kech o'chirish) soxta o'chirishdan (yaxshi segmentni yo'qotish) arzonroq. Haqiqatan yomon segmentlarda 3+ o'zgarish (o'chirish → 60 kun → sinov → yana o'chirish) kutilgan davriy hodisa, nol-ustunlikda esa yo'q.
+
+### D3. Sinov davri va gisterezis (T5-QA-2)
+- `RAISED` (sinov, shu jumladan o'chirishdan qaytganda) segment statistikasi **faqat `state_since` dan keyingi** o'yinlar (kickoff kuni ≥ `state_since` sanasi) bo'yicha hisoblanadi (`compute_segment_stats(..., since_block=)`, `review_segments` avtomatik beradi). Global o'rtacha (shrinkage nishoni) hamma ma'lumotdan. Sinov davrida 50 yangi signal bo'lmaguncha `too_few_signals` — holat saqlanadi (oldingi zaharli tarix qaror qilmaydi: o'chirish → 60 kun → 7 kun sinov → yana o'chirish sikli yo'q).
+- `_from_raised` da `_held` (14 kun) **birinchi** tekshiriladi: hold davrida `DISABLE` ham bo'lmaydi (avval "kuchli dalil hold ni buzadi" edi).
+- Simulyatsiya (nol-ustunlik, yuqoridagi jadval): holat o'zgarishi segment-yilga 0.023–0.025, 3+ o'zgarish ≤ 0.25% (avval 6.7–9.6%).
+
+### D4. Kalibratsiya darvozasi (T5-QA-3)
+`ONE_SIDED_CONFIDENCE=0.995`, 2000 bootstrap, va **ketma-ket ikki haftada** darvozadan o'tish (`calibration.confirmed(fit, previous_pass_at=)`: oldingi run versiyasi ham `passed_gate`, oraliq ≤ 10 kun — o'tkazib yuborilgan hafta zanjirni uzadi). Faol xarita bor bo'lsa, yangisi faqat `n_samples ≥ 1.25 ×` faolning n_samples bo'lganda almashtiradi (haftalik chayqalish va jurnal shovqini yo'q; `REFRESH_GROWTH`).
+
+Simulyatsiya (p ~ U(0.45; 0.75), hit-rate = p − og'ish, haftalik refit, 52 hafta, `confirmed` bilan):
+
+| Og'ish | Signal/hafta | Dunyolar | Oldin (95%, bir martalik) | Keyin (99.5% + ketma-ket 2) | Median hafta (keyin) |
+|---|---|---|---|---|---|
+| 0 (mukammal) | 20 | 40 | 22.5% | **0%** (0/40; 0.99 da 0/100) | — |
+| 0 (mukammal) | 50 | 100 | 27.5% | **0%** (0/100) | — |
+| 0.05 | 50 | 20 | 70% | 5% | 27 |
+| 0.08 | 20 | 20 | 85% | 10% | 39 |
+| 0.08 | 50 | 20 | 100% | 35% | 37 |
+| 0.12 | 50 | 20 | — | 95% | 31 |
+| 0.15 | 50 | 20 | — | 100% | 18 |
+| 0.15 | 20 | 20 | — | 80% | 28 |
+
+Soxta faollashuv ≤ 3% maqsadiga erishildi (kuzatilgan 0/140; 95% yuqori chegara ≈ 2–3%). Narxi: kichik og'ish (8 p.p.) 50 signal/hafta da bir yilda 35% ehtimol bilan topiladi (avval 100%), katta og'ish (12–15 p.p.) hali ishonchli topiladi. Taqqos uchun muqobil: 0.99 + ketma-ket 2 → 0.08/50 da 45%, mukammal modelda 0/100; ADR talabi (0.995) saqlandi, kerak bo'lsa `CalibrationPolicy(confidence=0.99)` bilan yumshatiladi.
+
+### D5. Push (VOID) va kalibratsiya (T5-QA-4)
+Butun chiziqli bozorlar (Total 2.0, handikap 0 / −1: `pipeline.learning.can_push`) push massasiga ega; push `void` bo'lib saqlanadi va o'rganishga kirmaydi, shuning uchun kuzatilgan "hit" chastotasi `P(win | no push)` bo'lib qoladi, model esa `P(win)` deydi. Tanlov: **bunday bozorlar kalibratsiya ma'lumotidan chiqariladi** (yarim va chorak chiziqlar — push yo'q — qoladi). Muqobil (`p/(1−p_push)` bilan solishtirish) modelning push ehtimolini har signal uchun saqlashni talab qiladi — hozir bunday maydon yo'q, shuning uchun rad etildi. Test: mukammal Total 2.0 modeli (P(over)=0.4, P(push)=0.2) — `TOO_FEW_SAMPLES`, hech qanday xarita. **Ma'lum cheklov:** segment ROI da push (0 daromad) hali ham tashlanadi, shuning uchun push ko'p bozorlarda |ROI| `1/(1−P(push))` marta oshib ko'rinadi; ahamiyati kichik (qarorlar 99.5% oraliq va −5% chegarasi bilan), lekin keyingi ishda `void`-push ni 0 daromad bilan qo'shish mumkin (`settlement_returns` `PUSH` ni biladi).
+
+### D6. Rollback qoidalari (T5-QA-5/6) va buzilgan ma'lumot (T5-QA-7)
+- Kalibratsiyani qo'lda qaytarish (`calibration_rolled_back`) `LEARNING_MANUAL_HOLD_DAYS` (standart 30) davomida yangi faollashtirishni muzlatadi (yangi versiya baribir saqlanadi). Segment rollback uchun ham xuddi shu sozlama.
+- Rollback faqat o'zgarish yaratgan holat hali joriy bo'lsa ishlaydi: kalibratsiya uchun `after.version == joriy faol`, segment uchun `(state, ev_threshold, enabled) == after`; aks holda `RollbackResult.STALE` (log, hech narsa yozilmaydi, yozuv `rolled_back` bo'lmaydi). Yangi API: `rollback_change(ctx, id) -> RollbackResult`; `rollback_learning_change` — uning `bool` ko'rinishi.
+- `overlay.version_of`: `params` dict emas → `ModelInputError` → `DbLearningSource` bo'sh overlay qaytaradi (log). Tahlil, qayta hisoblash va detal yo'li `overlay.load_overlay(source)` orqali o'qiydi: istalgan istisno → xom model (log). O'rganish tahlilni hech qachon yiqitmaydi.
+
+### D7. Boshqa
+- `active_calibration` `passed_gate=True` ni talab qiladi (darvozadan o'tmagan versiya faol belgilangan bo'lsa ham ishlatilmaydi).
+- Retro kartalar bugungi overlay'ni olmaydi (xom model): retro "o'sha paytda model nima derdi" ko'rsatkichi, bugungi kalibratsiya/qoidalar kelajak bilimi bo'lardi. Eng sodda va izchil variant (bayroq emas).
+- Haftalik job muvaffaqiyatsiz bo'lsa va qayta urinish haftadan o'tib ketsa, hafta yo'qoladi — qolgan eslatma (QA); `/holat` da ko'rsatish vazifasi bot tomonida.
