@@ -21,16 +21,24 @@ between-segment variance is itself unstable, and a fixed, visible prior is easie
 The interval is the bootstrap distribution of ``m`` pushed through the same shrinkage map
 (``g`` held fixed), so the interval and the point estimate always agree.
 
-The decision (:func:`segment_action`) is deliberately conservative. Nothing happens below
-``MIN_SEGMENT_SAMPLE`` signals, a streak of losses never matters on its own (only an interval
-that is entirely below zero does), restrictions are lifted only on positive point evidence
-(a dead band between "significantly bad" and "clearly fine" keeps the state), and a restricted
-state is held for a minimum time. Pure: no I/O, no database types.
+The decision (:func:`segment_action`) is deliberately conservative, because the review repeats
+every week and a rule that fires on a 95% interval will, over ~50 looks at hundreds of
+segments, "find" problems in segments whose true edge is zero. Hence (ADR 0013, addendum):
+
+- a 99.5% interval, entirely below zero, for ROI *and* (when usable) CLV;
+- a Benjamini-Hochberg false-discovery guard across all segments reviewed in the same week;
+- the evidence must repeat on **two consecutive weekly runs** before anything changes;
+- a segment on probation (RAISED) is judged only on data since the probation began;
+- restrictions are lifted only on positive point evidence (a dead band between "significantly
+  bad" and "clearly fine" keeps the state) and a restricted state is held for a minimum time.
+
+Nothing happens below ``MIN_SEGMENT_SAMPLE`` signals and a streak of losses never matters on its
+own. Pure: no I/O, no database types.
 """
 
 import math
 import zlib
-from collections.abc import Hashable, Iterable, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -43,8 +51,11 @@ MIN_SEGMENT_SAMPLE: Final = 50
 """No statistic is acted upon below this many settled signals (plan §6.13 C)."""
 PRIOR_STRENGTH: Final = 30.0
 """Pseudo-signals of prior weight: a 50-signal segment keeps 62.5% of its own mean."""
-BOOTSTRAP_RESAMPLES: Final = 1000
-CI_LEVEL: Final = 0.95
+BOOTSTRAP_RESAMPLES: Final = 2000
+CI_LEVEL: Final = 0.995
+"""Two-sided level of the interval; wide on purpose, see the module docstring."""
+FDR_LEVEL: Final = 0.05
+"""Benjamini-Hochberg level across the segments reviewed in one week."""
 DEFAULT_SEED: Final = 7
 ODDS_BUCKET_EDGES: Final = (1.5, 1.8, 2.2, 3.0)
 """Upper edges of the odds buckets; the last bucket is open-ended."""
@@ -92,6 +103,8 @@ class Estimate:
     shrunk: float | None = None
     low: float | None = None
     high: float | None = None
+    p_value: float | None = None
+    """One-sided p-value of "the true mean is not below zero" (normal, bootstrap standard error)."""
 
     @property
     def available(self) -> bool:
@@ -120,6 +133,7 @@ class SegmentPolicy:
     prior_strength: float = PRIOR_STRENGTH
     resamples: int = BOOTSTRAP_RESAMPLES
     ci_level: float = CI_LEVEL
+    fdr_level: float = FDR_LEVEL
     seed: int = DEFAULT_SEED
     raised_ev_floor: float = RAISED_EV_FLOOR
     disable_shrunk_roi: float = DISABLE_SHRUNK_ROI
@@ -160,6 +174,7 @@ class SegmentReason(StrEnum):
     COOLDOWN = "cooldown"
     COOLDOWN_ELAPSED = "cooldown_elapsed"
     MANUAL_HOLD = "manual_hold"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +185,8 @@ class SegmentStatus:
     since: datetime | None = None
     hold_until: datetime | None = None
     """No automatic change before this moment (set when a person rolled a change back)."""
+    flagged: bool = False
+    """Tightening evidence was seen on the previous weekly run (it must repeat to act)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +198,8 @@ class SegmentDecision:
     ev_floor: float
     reason: SegmentReason
     detail: str = ""
+    flagged: bool = False
+    """Carry to the next run: tightening evidence was seen but awaits confirmation."""
 
 
 def odds_bucket(odds: float) -> str:
@@ -224,6 +243,13 @@ def _bootstrap_means(
     return np.asarray(sums[draws].sum(axis=1) / counts[draws].sum(axis=1), dtype=np.float64)
 
 
+def _one_sided_p_value(shrunk: float, standard_error: float) -> float:
+    """P(true mean >= 0) under a normal with this centre and spread; 0 or 1 when degenerate."""
+    if standard_error <= 0.0:
+        return 0.0 if shrunk < 0.0 else 1.0
+    return 0.5 * math.erfc(-(shrunk / standard_error) / math.sqrt(2.0))
+
+
 def _estimate(
     values: NDArray[np.float64],
     blocks: NDArray[np.int64],
@@ -239,12 +265,16 @@ def _estimate(
     means = _bootstrap_means(values, blocks, rng, policy.resamples)
     tail = (1.0 - policy.ci_level) / 2.0
     low, high = (float(q) for q in np.quantile(means, [tail, 1.0 - tail]))
+    shrunk = shrink(raw, n, global_mean, policy.prior_strength)
+    weight = n / (n + policy.prior_strength)
+    spread = weight * float(np.std(means, ddof=1)) if len(means) > 1 else 0.0
     return Estimate(
         n=n,
         raw=raw,
-        shrunk=shrink(raw, n, global_mean, policy.prior_strength),
+        shrunk=shrunk,
         low=shrink(low, n, global_mean, policy.prior_strength),
         high=shrink(high, n, global_mean, policy.prior_strength),
+        p_value=_one_sided_p_value(shrunk, spread),
     )
 
 
@@ -254,9 +284,16 @@ def _mean_or_zero(values: Iterable[float]) -> float:
 
 
 def compute_segment_stats(
-    observations: Sequence[SegmentObservation], policy: SegmentPolicy = DEFAULT_SEGMENT_POLICY
+    observations: Sequence[SegmentObservation],
+    policy: SegmentPolicy = DEFAULT_SEGMENT_POLICY,
+    *,
+    since_block: Mapping[SegmentKey, int] | None = None,
 ) -> dict[SegmentKey, SegmentStats]:
     """Statistics of every segment present in ``observations``.
+
+    ``since_block`` limits the named segments to observations whose block is at or after the
+    given one (a segment on probation is judged on what happened since the probation began);
+    the global means still use every observation, and a fully filtered segment keeps an empty row.
 
     The global means (the shrinkage targets) are taken over all observations, so adding an
     unrelated segment moves the others only through that mean. Deterministic: every segment
@@ -267,9 +304,12 @@ def compute_segment_stats(
     global_roi = _mean_or_zero(o.unit_return for o in observations)
     global_clv = _mean_or_zero(o.clv for o in observations if o.clv is not None)
     global_bias = _mean_or_zero(o.p_model - float(o.hit) for o in observations)
+    first_block = since_block or {}
     grouped: dict[SegmentKey, list[SegmentObservation]] = {}
     for observation in observations:
-        grouped.setdefault(observation.key, []).append(observation)
+        rows = grouped.setdefault(observation.key, [])
+        if observation.block >= first_block.get(observation.key, observation.block):
+            rows.append(observation)
     targets = (global_roi, global_clv, global_bias)
     return {
         key: _segment_stats(key, rows, targets, policy)
@@ -335,17 +375,23 @@ def _below_zero(estimate: Estimate) -> bool:
     return estimate.high is not None and estimate.high < 0.0
 
 
-def _significantly_negative(stats: SegmentStats, policy: SegmentPolicy) -> bool:
-    """The whole interval of ROI (or of CLV, when it has enough signals) is below zero."""
-    return _below_zero(stats.roi) or (_clv_usable(stats, policy) and _below_zero(stats.clv))
+def _tightening_evidence(
+    stats: SegmentStats, policy: SegmentPolicy, *, fdr_ok: bool
+) -> SegmentAction | None:
+    """The restriction the evidence of this week alone would justify, or ``None``.
 
-
-def _severely_negative(stats: SegmentStats, policy: SegmentPolicy) -> bool:
-    """ROI is significantly and materially negative, and CLV (when usable) agrees."""
+    ROI must be significantly negative (whole interval below zero and surviving the
+    false-discovery guard) *and*, when CLV is usable, CLV must agree: CLV alone never tightens.
+    A materially negative shrunk ROI justifies a disable, a smaller one a raised EV bar.
+    """
     shrunk = stats.roi.shrunk
-    if shrunk is None or shrunk > policy.disable_shrunk_roi or not _below_zero(stats.roi):
-        return False
-    return not _clv_usable(stats, policy) or _below_zero(stats.clv)
+    if shrunk is None or not fdr_ok or not _below_zero(stats.roi):
+        return None
+    if _clv_usable(stats, policy) and not _below_zero(stats.clv):
+        return None
+    if shrunk <= policy.disable_shrunk_roi:
+        return SegmentAction.DISABLE
+    return SegmentAction.RAISE_THRESHOLD
 
 
 def _recovered(stats: SegmentStats, policy: SegmentPolicy) -> bool:
@@ -357,15 +403,17 @@ def _recovered(stats: SegmentStats, policy: SegmentPolicy) -> bool:
     return not _clv_usable(stats, policy) or (clv is not None and clv >= 0.0)
 
 
-def _decision(
+def _decision(  # noqa: PLR0913 - the facts of one decision
     action: SegmentAction,
     state: SegmentState,
     reason: SegmentReason,
     policy: SegmentPolicy,
     detail: str = "",
+    *,
+    flagged: bool = False,
 ) -> SegmentDecision:
     floor = 0.0 if state is SegmentState.ACTIVE else policy.raised_ev_floor
-    return SegmentDecision(action, state, floor, reason, detail)
+    return SegmentDecision(action, state, floor, reason, detail, flagged)
 
 
 def _held(status: SegmentStatus, now: datetime, policy: SegmentPolicy) -> bool:
@@ -386,33 +434,57 @@ def _from_disabled(status: SegmentStatus, now: datetime, policy: SegmentPolicy) 
     return _decision(SegmentAction.KEEP, SegmentState.DISABLED, SegmentReason.COOLDOWN, policy)
 
 
-def _from_active(stats: SegmentStats, policy: SegmentPolicy) -> SegmentDecision:
-    if _severely_negative(stats, policy):
+def _tighten(
+    evidence: SegmentAction, status: SegmentStatus, policy: SegmentPolicy
+) -> SegmentDecision:
+    """Act on this week's evidence only if last week's run saw some too (two looks in a row)."""
+    if not status.flagged:
+        return _decision(
+            SegmentAction.KEEP,
+            status.state,
+            SegmentReason.AWAITING_CONFIRMATION,
+            policy,
+            f"would {evidence.value}; waiting for a second run",
+            flagged=True,
+        )
+    if evidence is SegmentAction.DISABLE:
         return _decision(
             SegmentAction.DISABLE, SegmentState.DISABLED, SegmentReason.SEVERE_NEGATIVE, policy
         )
-    if _significantly_negative(stats, policy):
-        return _decision(
-            SegmentAction.RAISE_THRESHOLD,
-            SegmentState.RAISED,
-            SegmentReason.SIGNIFICANT_NEGATIVE,
-            policy,
-        )
     return _decision(
-        SegmentAction.KEEP, SegmentState.ACTIVE, SegmentReason.NO_SIGNIFICANT_EVIDENCE, policy
+        SegmentAction.RAISE_THRESHOLD,
+        SegmentState.RAISED,
+        SegmentReason.SIGNIFICANT_NEGATIVE,
+        policy,
     )
 
 
-def _from_raised(
-    stats: SegmentStats, status: SegmentStatus, now: datetime, policy: SegmentPolicy
+def _from_active(
+    stats: SegmentStats, status: SegmentStatus, policy: SegmentPolicy, *, fdr_ok: bool
 ) -> SegmentDecision:
-    if _severely_negative(stats, policy):
+    evidence = _tightening_evidence(stats, policy, fdr_ok=fdr_ok)
+    if evidence is None:
         return _decision(
-            SegmentAction.DISABLE, SegmentState.DISABLED, SegmentReason.SEVERE_NEGATIVE, policy
+            SegmentAction.KEEP, SegmentState.ACTIVE, SegmentReason.NO_SIGNIFICANT_EVIDENCE, policy
         )
+    return _tighten(evidence, status, policy)
+
+
+def _from_raised(
+    stats: SegmentStats,
+    status: SegmentStatus,
+    now: datetime,
+    policy: SegmentPolicy,
+    *,
+    fdr_ok: bool,
+) -> SegmentDecision:
+    """Probation: held for a minimum time, then disabled on repeated evidence or relaxed."""
     if _held(status, now, policy):
         return _decision(SegmentAction.KEEP, SegmentState.RAISED, SegmentReason.HELD, policy)
-    if _recovered(stats, policy) and not _significantly_negative(stats, policy):
+    evidence = _tightening_evidence(stats, policy, fdr_ok=fdr_ok)
+    if evidence is SegmentAction.DISABLE:
+        return _tighten(evidence, status, policy)
+    if evidence is None and _recovered(stats, policy):
         return _decision(
             SegmentAction.REENABLE, SegmentState.ACTIVE, SegmentReason.RECOVERED, policy
         )
@@ -427,14 +499,18 @@ def segment_action(
     *,
     status: SegmentStatus = SegmentStatus(),  # noqa: B008 - frozen, shared default is safe
     now: datetime,
+    fdr_ok: bool = True,
 ) -> SegmentDecision:
     """Decide what to do with a segment: keep, raise its EV bar, disable or lift a restriction.
 
     Rules, in order: a manual hold freezes everything; a disabled segment waits out its
     cooldown (no data can arrive for it) and then returns on probation; below
     ``policy.min_sample`` signals nothing changes; otherwise only an interval entirely below
-    zero tightens a segment and only positive point evidence (outside the dead band) loosens
-    it, after ``policy.min_hold_days`` in the restricted state.
+    zero that repeats on two consecutive runs tightens a segment, and only positive point
+    evidence (outside the dead band) loosens it, after ``policy.min_hold_days`` in the
+    restricted state. ``fdr_ok`` is the verdict of the weekly false-discovery guard
+    (:func:`fdr_significant`); the caller computes ``stats`` of a RAISED segment from the data
+    since its probation began.
     """
     if status.hold_until is not None and now < status.hold_until:
         return _decision(SegmentAction.KEEP, status.state, SegmentReason.MANUAL_HOLD, policy)
@@ -443,5 +519,70 @@ def segment_action(
     if stats.n < policy.min_sample:
         return _decision(SegmentAction.KEEP, status.state, SegmentReason.TOO_FEW_SIGNALS, policy)
     if status.state is SegmentState.RAISED:
-        return _from_raised(stats, status, now, policy)
-    return _from_active(stats, policy)
+        return _from_raised(stats, status, now, policy, fdr_ok=fdr_ok)
+    return _from_active(stats, status, policy, fdr_ok=fdr_ok)
+
+
+# --------------------------------------------------------------------------- weekly review
+
+
+def fdr_significant(
+    stats: Mapping[SegmentKey, SegmentStats], policy: SegmentPolicy = DEFAULT_SEGMENT_POLICY
+) -> frozenset[SegmentKey]:
+    """Segments whose negative ROI survives a Benjamini-Hochberg guard across the whole family.
+
+    With hundreds of segments some intervals miss zero by chance; BH keeps the expected share of
+    false findings among the flagged segments at ``policy.fdr_level``. With a single segment it
+    reduces to a plain one-sided test at that level (the 99.5% interval is the stricter gate).
+    """
+    tested = sorted(
+        (item.roi.p_value, _key_order((key, item)), key)
+        for key, item in stats.items()
+        if item.roi.p_value is not None
+    )
+    cutoff = 0
+    for rank, (p_value, _, _) in enumerate(tested, start=1):
+        if p_value <= policy.fdr_level * rank / len(tested):
+            cutoff = rank
+    return frozenset(key for _, _, key in tested[:cutoff])
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentReview:
+    """The week's statistics and the decision for every segment seen."""
+
+    stats: dict[SegmentKey, SegmentStats]
+    decisions: dict[SegmentKey, SegmentDecision]
+
+
+def review_segments(
+    observations: Sequence[SegmentObservation],
+    statuses: Mapping[SegmentKey, SegmentStatus],
+    *,
+    now: datetime,
+    policy: SegmentPolicy = DEFAULT_SEGMENT_POLICY,
+) -> SegmentReview:
+    """One weekly review: statistics (probation windows), the FDR guard and every decision.
+
+    The single place that combines the rules, so the job and the simulations cannot drift.
+    """
+    probation = {
+        key: status.since.date().toordinal()
+        for key, status in statuses.items()
+        if status.state is SegmentState.RAISED and status.since is not None
+    }
+    stats = compute_segment_stats(observations, policy, since_block=probation)
+    family = {
+        key: item
+        for key, item in stats.items()
+        if item.n >= policy.min_sample
+        and statuses.get(key, SegmentStatus()).state is not SegmentState.DISABLED
+    }
+    passed = fdr_significant(family, policy)
+    decisions = {
+        key: segment_action(
+            item, policy, status=statuses.get(key, SegmentStatus()), now=now, fdr_ok=key in passed
+        )
+        for key, item in stats.items()
+    }
+    return SegmentReview(stats, decisions)

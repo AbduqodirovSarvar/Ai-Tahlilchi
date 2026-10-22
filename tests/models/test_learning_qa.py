@@ -19,6 +19,7 @@ from app.models.calibration import (
     CalibrationReason,
     CalibrationSample,
     apply_params,
+    confirmed,
     fit_calibration,
     fit_isotonic,
     rescale_outcomes,
@@ -31,7 +32,7 @@ from app.models.segments import (
     SegmentState,
     SegmentStatus,
     compute_segment_stats,
-    segment_action,
+    review_segments,
     shrink,
 )
 
@@ -191,7 +192,11 @@ def test_asian_rescale_hits_the_target_and_keeps_a_distribution(
 def _simulate_segments(
     probability: float, *, segments: int, per_week: int, seed: int
 ) -> list[list[tuple[int, str]]]:
-    """52 weekly reviews of ``segments`` independent segments at odds 2.0 (EV = 2p - 1)."""
+    """52 weekly reviews of ``segments`` independent segments at odds 2.0 (EV = 2p - 1).
+
+    Uses :func:`review_segments`, the one entry point the weekly job uses, and carries the
+    status (state, since, flagged) from week to week exactly as the job stores it.
+    """
     rng = random.Random(seed)  # noqa: S311 - simulation
     keys = [SegmentKey("football", f"L{i}", "1x2", "1.80-2.20") for i in range(segments)]
     rows: list[SegmentObservation] = []
@@ -204,83 +209,91 @@ def _simulate_segments(
                 day = START.toordinal() + week * 7 + rng.randrange(7)
                 rows.append(SegmentObservation(key, 1.0 if hit else -1.0, hit, probability, day))
         now = START + timedelta(weeks=week + 1)
-        stats = compute_segment_stats(rows)
+        review = review_segments(rows, status, now=now)
         for key in keys:
-            decision = segment_action(stats[key], status=status[key], now=now)
-            if decision.state is not status[key].state:
+            decision = review.decisions[key]
+            changed = decision.state is not status[key].state
+            if changed:
                 events[key].append((week + 1, decision.action.value))
-                status[key] = SegmentStatus(decision.state, now, None)
+            since = now if changed else status[key].since
+            status[key] = SegmentStatus(
+                decision.state,
+                None if decision.state is SegmentState.ACTIVE else since,
+                None,
+                decision.flagged,
+            )
     return list(events.values())
 
 
 @cache
-def _zero_edge_world() -> tuple[int, int, int]:
-    """(segments, segments with any tightening, segments that changed state 3+ times)."""
+def _zero_edge_world() -> tuple[int, int, int, int]:
+    """(segments, any tightening, 3+ state changes, all state changes) over 52 weeks."""
     events = [
         e for seed in range(4) for e in _simulate_segments(0.5, segments=20, per_week=3, seed=seed)
     ]
     flagged = sum(1 for e in events if any(a in {"raise_threshold", "disable"} for _, a in e))
     unstable = sum(1 for e in events if len(e) > 2)
-    return len(events), flagged, unstable
+    return len(events), flagged, unstable, sum(len(e) for e in events)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="T5-QA-1: repeated weekly looks at a 95% interval flag ~9% of zero-edge segments a year",
-)
 def test_zero_edge_segments_are_rarely_tightened_within_a_year() -> None:
-    total, flagged, _ = _zero_edge_world()
-    assert flagged / total <= 0.05
+    """Before the repeated-testing guards ~9-12% of these segments were tightened a year."""
+    total, flagged, _, _ = _zero_edge_world()
+    assert flagged / total <= 0.025  # measured 1.0-1.2% on 400-600 segments (ADR 0013)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="T5-QA-2: disable, cooldown, probation, disable cycles flip zero-edge segments",
-)
 def test_zero_edge_segments_do_not_change_state_back_and_forth() -> None:
-    total, _, unstable = _zero_edge_world()
+    total, _, unstable, changes = _zero_edge_world()
     assert unstable / total <= 0.02
+    assert changes / total <= 1.0  # at most one state change per segment and year on average
 
 
 @pytest.mark.slow
 def test_a_clearly_losing_segment_is_caught_within_a_year() -> None:
-    """True ROI -20% (p = 0.40 at odds 2.0), 3 signals a week: almost every segment is caught."""
+    """True ROI -20% (p = 0.40 at odds 2.0), 3 signals a week: about two in three are caught."""
     events = _simulate_segments(0.40, segments=20, per_week=3, seed=1)
     caught = [e for e in events if e]
-    assert len(caught) / len(events) >= 0.8
+    # measured 55-68% (was 92% before the guards: the price of a ~1% false-action rate, ADR 0013)
+    assert len(caught) / len(events) >= 0.45
     first_weeks = sorted(e[0][0] for e in caught)
-    assert first_weeks[len(first_weeks) // 2] <= 30  # median first action within ~30 weeks
+    assert first_weeks[len(first_weeks) // 2] <= 35  # median first action within ~35 weeks
+
+
+@pytest.mark.slow
+def test_a_losing_segment_with_more_signals_is_caught_almost_surely() -> None:
+    events = _simulate_segments(0.40, segments=10, per_week=8, seed=2)
+    assert sum(1 for e in events if e) / len(events) >= 0.9
 
 
 def _losing_history(count: int) -> list[SegmentObservation]:
     return [SegmentObservation(KEY, -1.0, False, 0.5, 1 + i // 2) for i in range(count)]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T5-QA-2: the stats of a re-enabled segment still contain its pre-disable history",
-)
 def test_a_reenabled_segment_gets_a_real_probation_not_an_immediate_second_disable() -> None:
-    stats = compute_segment_stats(_losing_history(200))[KEY]
+    history = _losing_history(200)
     disabled_at = START
     now = disabled_at + timedelta(days=60)
-    back = segment_action(stats, status=SegmentStatus(SegmentState.DISABLED, disabled_at), now=now)
+    back = review_segments(
+        history, {KEY: SegmentStatus(SegmentState.DISABLED, disabled_at)}, now=now
+    ).decisions[KEY]
     assert back.action is SegmentAction.REENABLE
     assert back.state is SegmentState.RAISED
 
-    next_week = segment_action(
-        stats, status=SegmentStatus(SegmentState.RAISED, now), now=now + timedelta(days=7)
-    )
-    # no new probation signal can have settled in 7 days; the old record must not decide
-    assert next_week.reason is not SegmentReason.SEVERE_NEGATIVE
+    probation = SegmentStatus(SegmentState.RAISED, now, flagged=True)
+    next_week = review_segments(history, {KEY: probation}, now=now + timedelta(days=7))
+    # no probation signal can have settled in 7 days; the old record must not decide
+    assert next_week.stats[KEY].n == 0
+    assert next_week.decisions[KEY].reason is SegmentReason.TOO_FEW_SIGNALS
+    assert next_week.decisions[KEY].state is SegmentState.RAISED
 
 
 def _calibration_world(shift: float, per_week: int, seed: int) -> int | None:
-    """Week of the first activation of a calibration over 52 weekly refits, else ``None``."""
+    """Week of the first activation over 52 weekly refits (two passes in a row), else ``None``."""
     rng = random.Random(seed)  # noqa: S311 - simulation
     samples: list[CalibrationSample] = []
+    previous_pass_at: datetime | None = None
     for week in range(WEEKS):
         for slot in range(per_week):
             p = rng.uniform(0.45, 0.75)
@@ -289,23 +302,36 @@ def _calibration_world(shift: float, per_week: int, seed: int) -> int | None:
                     p, rng.random() < p - shift, START + timedelta(weeks=week, hours=slot + 1)
                 )
             )
-        if fit_calibration(samples, cutoff=START + timedelta(weeks=week + 1), version=1).activate:
+        fit = fit_calibration(samples, cutoff=START + timedelta(weeks=week + 1), version=1)
+        if confirmed(fit, previous_pass_at=previous_pass_at):
             return week + 1
+        previous_pass_at = fit.version.created_at if fit.activate and fit.version else None
     return None
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="T5-QA-3: a perfectly calibrated model gets a noise map ~1 year in 4 (52 looks at 95%)",
-)
 def test_a_calibrated_model_is_almost_never_given_a_calibration_map() -> None:
+    """Without the guards 22-27% of perfect models got a noise map in a year; now ~0% (n=140)."""
     activated = [_calibration_world(0.0, 20, seed) is not None for seed in range(20)]
     assert sum(activated) / len(activated) <= 0.05
 
 
 @pytest.mark.slow
 def test_a_clearly_overconfident_model_is_calibrated_within_a_year() -> None:
-    weeks = [_calibration_world(0.08, 50, seed) for seed in range(8)]
+    """15 points of overconfidence, 50 signals a week: found in every world (median ~week 18)."""
+    weeks = [_calibration_world(0.15, 50, seed) for seed in range(8)]
     assert all(w is not None for w in weeks)
     assert max(w for w in weeks if w is not None) <= 40
+
+
+def test_confirmation_needs_two_passes_in_a_row_without_a_gap() -> None:
+    samples = _samples(2000, shift=0.15, seed=3)
+    cutoff = samples[-1].settled_at + timedelta(hours=1)
+    fit = fit_calibration(samples, cutoff=cutoff, version=1)
+    assert fit.activate
+
+    assert not confirmed(fit, previous_pass_at=None)  # the previous run did not pass
+    assert confirmed(fit, previous_pass_at=cutoff - timedelta(days=7))
+    assert not confirmed(fit, previous_pass_at=cutoff - timedelta(days=30))  # a skipped week
+    failing = fit_calibration(_samples(10, shift=0.0, seed=1), cutoff=cutoff, version=1)
+    assert not confirmed(failing, previous_pass_at=cutoff - timedelta(days=7))
