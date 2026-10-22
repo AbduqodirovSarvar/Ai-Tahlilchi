@@ -157,6 +157,17 @@ class SettingsCb(CallbackData, prefix="st"):
     key: str = ""
 
 
+class CustomCb(CallbackData, prefix="cu"):
+    """🔍 Maxsus tahlil buttons.
+
+    ``today``/``tomorrow`` open a day list; ``team``/``toggle`` carry an index into the options
+    kept in FSM data; ``run``, ``again`` and ``cancel`` carry nothing.
+    """
+
+    action: str
+    index: int = 0
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 

@@ -335,11 +335,11 @@ def format_results_summary(result: AnalysisResult) -> str:
         )
     if result.failed_fixtures:
         lines.append(texts.RESULTS_FAILED.format(count=result.failed_fixtures))
-    lines.extend(_price_lines(result))
+    lines.extend(price_lines(result))
     return "\n".join(lines)
 
 
-def _price_lines(result: AnalysisResult) -> list[str]:
+def price_lines(result: AnalysisResult) -> list[str]:
     """Why fixtures were left out for price reasons, and the stale-data warning (v1.5)."""
     notes = (
         (result.skipped_no_price, texts.RESULTS_NO_PRICE),

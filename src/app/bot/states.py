@@ -53,6 +53,14 @@ class BetFlow(StatesGroup):
     value_input = State()
 
 
+class CustomFlow(StatesGroup):
+    """🔍 Maxsus tahlil: typing a team or fixture, choosing from the list, running."""
+
+    query = State()
+    pick = State()
+    running = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 

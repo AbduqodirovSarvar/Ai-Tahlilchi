@@ -752,3 +752,56 @@ SHORT_BTTS_YES: Final = "Ikkalasi gol: ha"
 SHORT_BTTS_NO: Final = "Ikkalasi gol: yo'q"
 SHORT_HANDICAP: Final = "Fora {side} ({line})"
 BTN_BACK_TO_CARD: Final = "⬅️ Kartaga qaytish"
+
+
+# --------------------------------------------------------------------------- custom analysis (F7.1)
+CUSTOM_PROMPT: Final = (
+    "🔍 <b>Maxsus tahlil</b>\n"
+    "Jamoa nomini yozing, masalan <code>Real</code>, yoki o'yinni: "
+    "<code>Arsenal - Chelsea</code>. Lotin yoki kirill, xato yozilgan nom ham topiladi.\n"
+    "Yoki bugungi/ertangi o'yinlardan tanlang.\n\n"
+    "ℹ️ Bu tahlil EV filtrisiz ishlaydi: o'yin qiymatsiz bo'lsa ham barcha bozorlar "
+    "ehtimolliklari ko'rsatiladi."
+)
+BTN_CUSTOM_TODAY: Final = "📅 Bugungi o'yinlar"
+BTN_CUSTOM_TOMORROW: Final = "📆 Ertangi o'yinlar"
+BTN_CUSTOM_RUN: Final = "▶️ Tahlil qilish ({count})"
+BTN_CUSTOM_AGAIN: Final = "🔎 Qayta qidirish"
+CUSTOM_TEAMS_FOUND: Final = "👕 <b>{query}</b> bo'yicha topildi. Jamoani tanlang:"
+CUSTOM_NOT_FOUND: Final = (
+    "🔎 «{query}» topilmadi. Boshqacha yozib ko'ring: to'liq nom yoki "
+    "<code>Arsenal - Chelsea</code>."
+)
+CUSTOM_TEAM_FIXTURES: Final = (
+    "👕 <b>{team}</b> — yaqin o'yinlar. Tahlil qilinadiganlarini belgilang:"
+)
+CUSTOM_NO_UPCOMING: Final = (
+    "ℹ️ {team} uchun yaqin {days} kunda o'yin topilmadi. Boshqa jamoani yozing."
+)
+CUSTOM_FIXTURES_FOUND: Final = "⚽ <b>{query}</b> — topilgan o'yinlar. Belgilang:"
+CUSTOM_DAY_FIXTURES: Final = "⚽ <b>{day}</b> o'yinlari. Tahlil qilinadiganlarini belgilang:"
+CUSTOM_DAY_EMPTY: Final = "ℹ️ {day} uchun o'yin topilmadi. Boshqa kunni yoki jamoa nomini yozing."
+CUSTOM_TRUNCATED: Final = "ℹ️ Faqat birinchi {count} ta o'yin ko'rsatildi."
+CUSTOM_SELECTED: Final = "Tanlangan: {count} (ko'pi bilan {max})"
+CUSTOM_LIMIT: Final = "Bir martada ko'pi bilan {max} ta o'yin tahlil qilinadi"
+CUSTOM_SELECT_ONE: Final = "Avval kamida bitta o'yinni belgilang"
+CUSTOM_RUNNING: Final = "⏳ Maxsus tahlil boshlandi…"
+CUSTOM_ALREADY_RUNNING: Final = "⏳ Maxsus tahlil allaqachon bajarilmoqda, kuting."
+CUSTOM_RESULT_HEADER: Final = (
+    "🔍 <b>Maxsus tahlil</b>: {fixtures} ta o'yin · {picks} ta tanlov (EV filtrisiz)"
+)
+CUSTOM_FIXTURE_HEADER: Final = "{icon} <b>{fixture}</b>   🕒 {time}  🏆 {league}"
+CUSTOM_PICK_LINE: Final = "{mark} {selection}: {probability} · @{odds} · EV {ev}"
+CUSTOM_MARK_VALUE: Final = "✅"
+CUSTOM_MARK_NO_VALUE: Final = "▫️"
+CUSTOM_MARK_NEGATIVE: Final = "❗"
+CUSTOM_LEGEND: Final = "✅ — chegaralaringizdan o'tgan tanlov (karta pastda), ❗ — EV manfiy."
+CUSTOM_NO_VALUE_NOTE: Final = (
+    "ℹ️ <b>Value topilmadi</b>: bu o'yinda hech bir tanlov chegaralaringizdan o'tmadi. "
+    "Yuqorida barcha bozorlar bo'yicha ehtimolliklar."
+)
+CUSTOM_MORE_PICKS: Final = "…va yana {count} ta tanlov"
+CUSTOM_EMPTY_RESULT: Final = (
+    "🤷 <b>Natija yo'q.</b> Tanlangan o'yinlar uchun bukmeker narxi topilmadi "
+    "yoki o'yin boshlangan. Boshqa o'yinni tanlab ko'ring."
+)

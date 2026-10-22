@@ -458,3 +458,31 @@ def parse_quick_query(
         max_signals=builder.max_signals,
         team_names=_team_names(rest),
     )
+
+
+# --------------------------------------------------------------------------- custom analysis
+_FIXTURE_SEPARATOR_RE: Final = re.compile(r"\s+(?:[-\u2013\u2014]|vs\.?|v)\s+", re.IGNORECASE)
+"""``Arsenal - Chelsea`` / ``Arsenal vs Chelsea``: the separator has spaces around it, so a
+hyphen inside a name (``Saint-Etienne``) is not a separator."""
+_NAME_FORBIDDEN_RE: Final = re.compile(r"[\d%,]")
+MIN_NAME_LETTERS: Final = 2
+
+
+def parse_fixture_text(text: str) -> tuple[str, str] | None:
+    """Split ``Arsenal - Chelsea`` into its two team names, or ``None`` if it is not one.
+
+    Dates (``25.10 - 31.10``), percentages and comma lists are other ``/tahlil`` syntax, so
+    any digit, ``%`` or comma makes this return ``None``.
+    """
+    cleaned = " ".join(text.split())
+    if not cleaned or len(cleaned) > MAX_QUICK_LENGTH or _NAME_FORBIDDEN_RE.search(cleaned):
+        return None
+    parts = _FIXTURE_SEPARATOR_RE.split(cleaned)
+    if len(parts) != 2:  # noqa: PLR2004 - exactly two sides
+        return None
+    home, away = (part.strip() for part in parts)
+    if sum(char.isalpha() for char in home) < MIN_NAME_LETTERS:
+        return None
+    if sum(char.isalpha() for char in away) < MIN_NAME_LETTERS:
+        return None
+    return home, away

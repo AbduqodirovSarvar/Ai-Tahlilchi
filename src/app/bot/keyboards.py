@@ -102,6 +102,21 @@ def _markup(rows: Rows) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[row for row in rows if row])
 
 
+def single_button(text: str, callback: object) -> InlineKeyboardButton:
+    """An inline button whose ``callback_data`` is the packed ``callback``."""
+    return _button(text, callback)
+
+
+def markup_of(rows: Rows) -> InlineKeyboardMarkup:
+    """An inline keyboard of ``rows`` (empty rows are dropped)."""
+    return _markup(rows)
+
+
+def checked_label(label: str, *, on: bool) -> str:
+    """``✅ label`` or ``▫️ label``."""
+    return _checked(label, on=on)
+
+
 def _chunks[T](items: Sequence[T], size: int) -> list[list[T]]:
     return [list(items[i : i + size]) for i in range(0, len(items), size)]
 
