@@ -155,6 +155,7 @@ async def _recalc_fixture(
     )
     league = ctx.leagues.canonical(fixture.fixture.league.ref)
     fitted = await ctx.models.get(league, now.astimezone(UTC).date() + timedelta(days=1))
+    overlay = await ctx.learning.load()  # calibration only: an existing signal is never filtered
     valuation = value_fixture(
         ValuationInput(
             fixture=fixture.fixture,
@@ -164,6 +165,7 @@ async def _recalc_fixture(
             markets=frozenset(record.market.type for record in group),
             lineups_known=lineups,
             allow_model_only=True,
+            calibration=overlay.calibration,
         ),
         ctx.config,
     )
@@ -213,12 +215,14 @@ def _draft(
             record.confidence,
         )
         stake, fair_odds, quoted_at = record.stake_units, record.fair_odds, record.quoted_at
+        raw_probability = record.p_raw
     else:
         odds, probability, ev = candidate.odds, candidate.probability, candidate.ev
         confidence = Confidence(candidate.confidence.value)
         advised = stake_units(candidate, ctx.config, bank=profile.bank, unit=profile.unit)
         stake = advised if advised > 0 and record.recommended_at is not None else record.stake_units
         fair_odds, quoted_at = candidate.fair_odds, candidate.quoted_at
+        raw_probability = candidate.raw_probability
     return SignalDraft(
         user_id=record.user_id,
         fixture_id=record.fixture.id,
@@ -226,6 +230,7 @@ def _draft(
         selection=record.selection,
         odds=odds,
         p_model=probability,
+        p_raw=raw_probability,
         ev=ev,
         confidence=confidence,
         stake_units=stake,

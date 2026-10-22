@@ -4,6 +4,7 @@ Jobs
 ----
 - ``settle``: 08:00 every day (display time zone), results -> outcomes, profit, CLV;
 - ``refresh``: 08:30 every day, fixtures/results/odds into the local cache;
+- ``learning``: 09:00 every Monday, segment review and calibration (F8.5, F8.6);
 - ``daily-tick`` and ``recalc-tick``: every minute. The tick *decides* what is due: each user's
   digest at their own ``send_time`` in their own time zone (changes of settings apply at once,
   no per-user job to re-register) and the claimed 24-hour/pre-match recalculation tasks.
@@ -47,6 +48,7 @@ from app.pipeline.alerts import alert_throttled
 from app.pipeline.context import PipelineContext
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import Delivery
+from app.pipeline.learning import run_learning
 from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.refresh import refresh
 from app.pipeline.settle import run_settlement
@@ -54,6 +56,9 @@ from app.pipeline.settle import run_settlement
 logger = get_logger(__name__)
 
 SETTLE_AT: Final = time(8, 0)
+LEARNING_AT: Final = time(9, 0)
+LEARNING_WEEKDAY: Final = "mon"
+"""The weekly learning review runs after the morning settlement, on Mondays."""
 REFRESH_AT: Final = time(8, 30)
 DAILY_GRACE_SECONDS: Final = 6 * 3600
 TICK_GRACE_SECONDS: Final = 60
@@ -64,7 +69,8 @@ JOB_SETTLE: Final = "settle"
 JOB_REFRESH: Final = "refresh"
 JOB_DAILY_TICK: Final = "daily-tick"
 JOB_RECALC_TICK: Final = "recalc-tick"
-JOB_NAMES: Final = (JOB_SETTLE, JOB_REFRESH, JOB_DAILY_TICK, JOB_RECALC_TICK)
+JOB_LEARNING: Final = "learning"
+JOB_NAMES: Final = (JOB_SETTLE, JOB_REFRESH, JOB_DAILY_TICK, JOB_RECALC_TICK, JOB_LEARNING)
 
 
 class PipelineJobs:
@@ -79,6 +85,7 @@ class PipelineJobs:
             JOB_REFRESH: lambda: refresh(ctx),
             JOB_DAILY_TICK: lambda: run_due_digests(ctx, delivery),
             JOB_RECALC_TICK: self._recalc_tick,
+            JOB_LEARNING: lambda: run_learning(ctx),
         }
 
     async def _recalc_tick(self) -> None:
@@ -225,6 +232,16 @@ class PipelineScheduler:
                 JOB_REFRESH,
                 CronTrigger(
                     hour=REFRESH_AT.hour, minute=REFRESH_AT.minute, timezone=self._timezone
+                ),
+                DAILY_GRACE_SECONDS,
+            ),
+            (
+                JOB_LEARNING,
+                CronTrigger(
+                    day_of_week=LEARNING_WEEKDAY,
+                    hour=LEARNING_AT.hour,
+                    minute=LEARNING_AT.minute,
+                    timezone=self._timezone,
                 ),
                 DAILY_GRACE_SECONDS,
             ),

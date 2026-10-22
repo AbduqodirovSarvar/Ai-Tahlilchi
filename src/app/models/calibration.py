@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from itertools import pairwise
 from typing import Final
 
 import numpy as np
@@ -148,6 +149,25 @@ def fit_isotonic(probabilities: Sequence[float], hits: Sequence[bool]) -> dict[s
     mean_hit = np.bincount(inverse, weights=h) / counts
     xs, ys = _pool_adjacent_violators(unique, mean_hit, counts)
     return {"x": xs, "y": ys}
+
+
+def validate_params(params: dict[str, list[float]]) -> None:
+    """Raise unless ``params`` are usable knots: equal-length, non-empty, ``x`` increasing.
+
+    A stored version is read back from JSON, so it is checked before it is trusted.
+
+    Raises:
+        ModelInputError: the knots are missing, mismatched, unsorted or not finite in [0, 1].
+    """
+    x, y = params.get("x"), params.get("y")
+    if not x or not y or len(x) != len(y):
+        msg = "calibration knots need equally many (>= 1) x and y values"
+        raise ModelInputError(msg)
+    for value in (*x, *y):
+        check_probability(value)
+    if any(a >= b for a, b in pairwise(x)) or any(a > b for a, b in pairwise(y)):
+        msg = "calibration knots must have increasing x and non-decreasing y"
+        raise ModelInputError(msg)
 
 
 def apply_params(params: dict[str, list[float]], probability: float) -> float:

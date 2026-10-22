@@ -157,6 +157,7 @@ def _draft(  # noqa: PLR0913, PLR0917 - everything one draft is made of
         selection=candidate.selection,
         odds=candidate.odds,
         p_model=candidate.probability,
+        p_raw=candidate.raw_probability,
         ev=candidate.ev,
         confidence=Confidence(candidate.confidence.value),
         stake_units=stake if keeps_stake else _ZERO,

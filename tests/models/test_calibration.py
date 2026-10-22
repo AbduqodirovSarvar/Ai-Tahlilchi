@@ -21,6 +21,7 @@ from app.models.calibration import (
     fit_isotonic,
     rescale_outcomes,
     select_rollback,
+    validate_params,
 )
 from app.models.exceptions import ModelInputError
 
@@ -236,3 +237,24 @@ def test_complementary_always_renormalises(raw: list[float]) -> None:
     out = calibrate_complementary(version, probabilities)
     assert math.fsum(out) == pytest.approx(1.0)
     assert np.all(np.array(out) > 0)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"x": [], "y": []},
+        {"x": [0.1, 0.2], "y": [0.5]},
+        {"x": [0.2, 0.1], "y": [0.1, 0.2]},
+        {"x": [0.1, 0.1], "y": [0.1, 0.2]},
+        {"x": [0.1, 0.2], "y": [0.6, 0.4]},
+        {"x": [0.1, 1.5], "y": [0.1, 0.2]},
+    ],
+)
+def test_validate_params_rejects_unusable_knots(params: dict[str, list[float]]) -> None:
+    with pytest.raises(ModelInputError):
+        validate_params(params)
+
+
+def test_validate_params_accepts_fitted_knots() -> None:
+    validate_params(fit_isotonic([0.2, 0.4, 0.6], [False, True, False]))

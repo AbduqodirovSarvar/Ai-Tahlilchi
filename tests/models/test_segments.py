@@ -1,8 +1,8 @@
 """Segment statistics, shrinkage and the guarded decision rules (F8.5)."""
 
 import random
-from itertools import pairwise
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 import pytest
 from hypothesis import given, settings

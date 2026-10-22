@@ -21,8 +21,9 @@ market then has no anchor), so a fresh 1xBet price is never judged against an ol
 one or the other way round.
 """
 
+import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Final
@@ -49,11 +50,19 @@ from app.models import (
     stake_amount,
     team_key,
 )
+from app.models.calibration import (
+    CalibrationVersion,
+    apply_calibration,
+    calibrate_complementary,
+    rescale_outcomes,
+)
 from app.pipeline.config import PipelineConfig, StakingMode
 from app.pipeline.modeling import FittedLeague
 from app.pipeline.odds import CURRENT_KIND
 
 SECONDS_PER_DAY: Final = 86_400.0
+PARTITION_TOLERANCE: Final = 1e-6
+"""A market whose selections sum to one within this is calibrated as a whole."""
 KELLY_UNIT_STEP: Final = Decimal("0.1")
 """Kelly stakes are rounded down to tenths of a unit."""
 
@@ -88,6 +97,8 @@ class Candidate:
     anchored: bool
     quoted_at: datetime
     """When the user's bookmaker price was taken (the card's ``data_as_of``)."""
+    raw_probability: float | None = None
+    """The probability before the active calibration (``None`` = ``probability`` is raw)."""
 
     @property
     def fair_odds(self) -> float | None:
@@ -136,6 +147,8 @@ class ValuationInput:
     allow_model_only: bool = False
     require_fresh: bool = True
     """Refuse prices older than ``max_quote_age``; off for a look-back at a finished match."""
+    calibration: CalibrationVersion | None = None
+    """The active probability calibration of the learning loop (``None`` = none)."""
 
 
 def _bet_quotes(item: ValuationInput, config: PipelineConfig) -> dict[Market, MarketQuote] | str:
@@ -191,7 +204,50 @@ def value_fixture(item: ValuationInput, config: PipelineConfig) -> Valuation:
                 (item, played),
             )
         )
-    return Valuation(candidates=tuple(candidates), min_team_matches=played)
+    return Valuation(
+        candidates=tuple(calibrate_candidates(candidates, item.calibration)),
+        min_team_matches=played,
+    )
+
+
+def calibrate_candidates(
+    candidates: Sequence[Candidate], calibration: CalibrationVersion | None
+) -> list[Candidate]:
+    """``candidates`` with their probabilities (and EV) replaced by the calibrated ones.
+
+    The selections of a market that partition the result (their probabilities sum to one, e.g.
+    1X2) are calibrated together and renormalised; any other selection (Asian lines with a
+    push, partial markets) one by one. The raw probability is kept for the next training run.
+    """
+    if calibration is None:
+        return list(candidates)
+    by_market: dict[Market, list[Candidate]] = {}
+    for candidate in candidates:
+        by_market.setdefault(candidate.market, []).append(candidate)
+    result: list[Candidate] = []
+    for group in by_market.values():
+        probabilities = [c.probability for c in group]
+        whole = len(group) == len(group[0].market.selections) and (
+            abs(math.fsum(probabilities) - 1.0) <= PARTITION_TOLERANCE
+        )
+        calibrated = (
+            calibrate_complementary(calibration, probabilities)
+            if whole
+            else [apply_calibration(calibration, p) for p in probabilities]
+        )
+        result.extend(_recalibrated(c, p) for c, p in zip(group, calibrated, strict=True))
+    return result
+
+
+def _recalibrated(candidate: Candidate, probability: float) -> Candidate:
+    outcomes = rescale_outcomes(candidate.outcomes, probability)
+    return replace(
+        candidate,
+        probability=probability,
+        raw_probability=candidate.probability,
+        outcomes=outcomes,
+        ev=asian_expected_value(outcomes, candidate.odds),
+    )
 
 
 def _aligned(
