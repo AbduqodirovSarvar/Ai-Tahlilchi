@@ -7,7 +7,10 @@ The wrapper owns everything transport-related so callers see one method,
   answer is never regex-parsed; the caller validates it against the same schema);
 * low ``temperature`` and a hard per-request timeout (SDK level and ``asyncio`` level);
 * retry with jittered exponential backoff on *transient* failures only (HTTP 429, 5xx,
-  timeouts, transport errors); anything else fails fast;
+  timeouts, transport errors of any HTTP stack the SDK may use); anything else fails fast;
+* no raw exception ever leaves :meth:`GeminiClient.generate_json`: everything that is not a
+  cancellation becomes a :class:`GeminiError` (with the attempts made and, when known, the
+  tokens that were spent);
 * token usage of every successful call is returned and logged as metrics. The API key and
   the prompt text are never logged (only sizes).
 """
@@ -19,7 +22,6 @@ from http import HTTPStatus
 from time import monotonic
 from typing import Final, Protocol
 
-import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -44,8 +46,33 @@ _ASYNCIO_TIMEOUT_MARGIN_SECONDS: Final = 1.0
 type Sleep = Callable[[float], Awaitable[None]]
 
 
+@dataclass(frozen=True, slots=True)
+class GeminiUsage:
+    """Token counts the API reported for one call (0/0 when it reported none)."""
+
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def total_tokens(self) -> int:
+        """Input plus output tokens."""
+        return self.input_tokens + self.output_tokens
+
+
 class GeminiError(ExternalServiceError):
-    """A Gemini call failed for good (non-transient error, or transient and out of attempts)."""
+    """A Gemini call failed for good (non-transient error, or transient and out of attempts).
+
+    ``attempts`` is the number of HTTP requests made (the free-tier quota counts each one);
+    ``usage`` is set when the API reported tokens for a call that still produced no answer.
+    """
+
+    def __init__(
+        self, message: str, *, attempts: int = 0, usage: GeminiUsage | None = None
+    ) -> None:
+        """Keep the cost of the failed call next to the message."""
+        super().__init__(message)
+        self.attempts = attempts
+        self.usage = usage
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,19 +84,6 @@ class GeminiConfig:
     max_attempts: int = 3
     backoff_initial_seconds: float = 1.0
     backoff_max_seconds: float = 20.0
-
-
-@dataclass(frozen=True, slots=True)
-class GeminiUsage:
-    """Token counts the API reported for one successful call."""
-
-    input_tokens: int
-    output_tokens: int
-
-    @property
-    def total_tokens(self) -> int:
-        """Input plus output tokens."""
-        return self.input_tokens + self.output_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,18 +111,42 @@ class JsonGenerator(Protocol):
         ...
 
 
+# The SDK talks HTTP through aiohttp or httpx depending on what is installed. Neither is a
+# direct dependency, so their errors are recognised by the module of the exception class.
+_TRANSPORT_PACKAGES: Final = frozenset({"aiohttp", "httpx", "httpcore"})
+_RETRYABLE_STATUSES: Final = frozenset({HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.REQUEST_TIMEOUT})
+
+
+def _status_is_transient(status: int) -> bool:
+    return status in _RETRYABLE_STATUSES or status >= HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def _http_status(error: BaseException) -> int | None:
+    """HTTP status carried by a transport exception, if it has one."""
+    for attribute in ("status", "status_code"):
+        value = getattr(error, attribute, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
 def is_transient(error: BaseException) -> bool:
-    """Whether retrying the same request can plausibly succeed."""
+    """Whether retrying the same request can plausibly succeed.
+
+    Structural on purpose: API errors by status (a missing code is not transient), the OS and
+    timeout families, and any exception raised by an HTTP stack module unless it carries a
+    non-retryable status or is a plain ``ValueError`` (a malformed URL never heals).
+    """
     if isinstance(error, genai_errors.APIError):
-        return (
-            error.code
-            in {
-                HTTPStatus.TOO_MANY_REQUESTS,
-                HTTPStatus.REQUEST_TIMEOUT,
-            }
-            or error.code >= HTTPStatus.INTERNAL_SERVER_ERROR
-        )
-    return isinstance(error, TimeoutError | httpx.TransportError)
+        return _status_is_transient(error.code or 0)
+    if isinstance(error, OSError | TimeoutError):  # ConnectionError is an OSError
+        return True
+    if type(error).__module__.partition(".")[0] in _TRANSPORT_PACKAGES:
+        status = _http_status(error)
+        if status is not None:
+            return _status_is_transient(status)
+        return not isinstance(error, ValueError)
+    return False
 
 
 class GeminiClient:
@@ -167,16 +205,18 @@ class GeminiClient:
                 with attempt:
                     attempts += 1
                     response = await self._call(contents, request_config, attempts)
-        except (genai_errors.APIError, TimeoutError, httpx.TransportError) as exc:
+        except (
+            Exception
+        ) as exc:  # cancellation is a BaseException and passes; anything else is wrapped
             logger.warning(
                 "gemini_call_failed",
                 model=self._model,
                 attempts=attempts,
                 error_type=type(exc).__name__,
-                status=getattr(exc, "code", None),
+                status=_http_status(exc) or getattr(exc, "code", None),
             )
             msg = f"Gemini request failed after {attempts} attempt(s): {type(exc).__name__}"
-            raise GeminiError(msg) from exc
+            raise GeminiError(msg, attempts=attempts) from exc
         return self._finish(response, attempts, monotonic() - started)
 
     async def _call(
@@ -194,10 +234,6 @@ class GeminiClient:
         self, response: genai_types.GenerateContentResponse, attempts: int, seconds: float
     ) -> GeminiResponse:
         """Extract text and usage; an empty answer is a failure, not a valid result."""
-        text = response.text
-        if text is None or not text.strip():
-            msg = "Gemini returned an empty answer"
-            raise GeminiError(msg)
         meta = response.usage_metadata
         usage = GeminiUsage(input_tokens=0, output_tokens=0)
         if meta is not None:
@@ -206,6 +242,11 @@ class GeminiClient:
                 # Thinking tokens are billed as output, so they count against the budget.
                 output_tokens=(meta.candidates_token_count or 0) + (meta.thoughts_token_count or 0),
             )
+        text = response.text
+        if text is None or not text.strip():
+            # A blocked or empty answer still cost the prompt tokens.
+            msg = "Gemini returned an empty answer"
+            raise GeminiError(msg, attempts=attempts, usage=usage)
         logger.info(
             "gemini_call",
             model=self._model,

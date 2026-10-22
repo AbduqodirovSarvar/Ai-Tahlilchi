@@ -12,7 +12,6 @@ from app.llm.builder import (
     DATA_OPEN,
     build_postmortem_prompt,
     build_review_prompt,
-    estimate_tokens,
     sanitize,
 )
 from app.llm.inputs import (
@@ -129,7 +128,7 @@ def test_token_budget_trims_lowest_priority_first() -> None:
 
 def test_budget_removes_experience_then_detail_then_candidates() -> None:
     candidates = [make_candidate(f"c{i}") for i in range(6)]
-    budget = estimate_tokens(build_review_prompt(candidates[:2]).user)
+    budget = build_review_prompt(candidates[:2]).estimated_tokens
 
     built = build_review_prompt(candidates, big_context(), token_budget=budget)
 
@@ -174,7 +173,7 @@ def test_lowest_detail_limits_absences() -> None:
     )
     candidate = make_candidate(absences=absences)
     full = build_review_prompt([candidate])
-    tight = build_review_prompt([candidate], token_budget=estimate_tokens(full.user) - 60)
+    tight = build_review_prompt([candidate], token_budget=full.estimated_tokens - 60)
 
     assert len(payload_of(tight.user)["candidates"][0]["absences"]) <= 3  # type: ignore[index]
 

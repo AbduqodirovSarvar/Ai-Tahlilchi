@@ -8,6 +8,7 @@ import pytest
 from app.clients.gemini import GeminiError
 from app.config import Settings
 from app.llm.budget import LlmBudget, LlmLimits
+from app.llm.builder import build_review_prompt
 from app.llm.inputs import ExperienceContext, PostmortemInput
 from app.llm.schemas import PostmortemCategory, ReviewStatus, RiskFlag, Verdict
 from app.llm.service import (
@@ -250,7 +251,8 @@ async def test_missing_unknown_and_duplicate_ids() -> None:
 async def test_candidates_cut_by_the_token_budget_fall_back() -> None:
     candidates = [make_candidate(f"c{i}") for i in range(6)]
     answer = review_json(("c0", "tasdiq", [], "Yaxshi."), ("c1", "tasdiq", [], "Yaxshi."))
-    service = LlmService(ScriptedBackend(answer), input_token_budget=400)
+    budget = build_review_prompt(candidates[:2]).estimated_tokens
+    service = LlmService(ScriptedBackend(answer), input_token_budget=budget)
 
     reviews = await service.review_candidates(candidates)
 

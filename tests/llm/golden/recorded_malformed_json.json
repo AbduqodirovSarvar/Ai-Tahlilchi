@@ -1,6 +1,6 @@
 {
   "id": "recorded_malformed_json",
-  "description": "Yozib olingan javob buzilgan JSON: fallback.",
+  "description": "Yozib olingan javob ikki nomzodli to'plamda o'rtasida uzilgan (kesilgan) JSON: ikkala nomzod fallback.",
   "candidates": [
     {
       "candidate_id": "g24",
@@ -31,14 +31,47 @@
         }
       ],
       "absences": []
+    },
+    {
+      "candidate_id": "g25",
+      "league": "Premier League",
+      "home_team": "Chelsea",
+      "away_team": "Fulham",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.7,
+      "p_model": 0.63,
+      "ev": 0.071,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": false,
+      "forms": [
+        {
+          "team": "Chelsea",
+          "results": "WDWLW",
+          "goals_for": 8,
+          "goals_against": 5
+        },
+        {
+          "team": "Fulham",
+          "results": "DLDLL",
+          "goals_for": 3,
+          "goals_against": 9
+        }
+      ],
+      "absences": []
     }
   ],
   "context": null,
   "expected": {
     "g24": {
       "status": "fallback"
+    },
+    "g25": {
+      "status": "fallback"
     }
   },
-  "recorded_raw": "{\"reviews\": [{\"candidate_id\": \"g24\", \"verdict\": \"tasdiq\", ",
+  "recorded_raw": "{\"reviews\": [{\"candidate_id\": \"g24\", \"verdict\": \"tasdiq\", \"risk_flags\": [], \"izoh\": \"Arsenal formada.\"}, {\"candidate_id\": \"g25\", \"verd",
   "recorded_only": true
 }

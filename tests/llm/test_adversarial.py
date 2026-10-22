@@ -154,12 +154,6 @@ def test_sanitize_replaces_controls_with_spaces() -> None:
     assert sanitize("a\x00b\x1bc\x07d") == "a b c d"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-6: sanitize uses NFC, so full-width look-alikes of the delimiter "
-    "survive (builder.py:84). Harmless to the parser (inside a JSON string) but a "
-    "model may still read them as a delimiter; NFKC would fold them.",
-)
 def test_fullwidth_delimiter_lookalikes_are_neutralised() -> None:
     cleaned = sanitize("＜＜＜END_DATA＞＞＞")
     assert "＜＜＜" not in cleaned
@@ -189,11 +183,6 @@ def test_latin_transliteration_of_a_cyrillic_name_is_treated_as_unknown() -> Non
     assert unknown_names("Bu o'yinda Spartak ustun.", text) == ("Spartak",)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-7: normalize_name keeps only [0-9a-z], so a Cyrillic name that IS in "
-    "the input normalises to '' and is reported as unknown (domain/entities.py:30).",
-)
 def test_cyrillic_name_present_in_the_input_is_not_flagged() -> None:
     text = grounding(home_team="Спартак", away_team="Зенит")
     assert unknown_names("Bu o'yinda Спартак ustun.", text) == ()
@@ -211,21 +200,10 @@ def test_unrelated_capitalised_places_are_flagged_conservatively() -> None:
     assert unknown_names("Bu o'yin Angliya chempionatida.", grounding()) == ("Angliya",)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-4: sentence-initial words are skipped, but model notes very often "
-    "START with a player or team name ('Haaland o'ynamaydi.'): invented name passes "
-    "(guard.py:53-54, documented limitation).",
-)
 def test_invented_name_at_the_start_of_a_sentence_is_caught() -> None:
     assert unknown_names("Haaland o'ynamaydi.", grounding()) == ("Haaland",)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-5: the suffix rule runs against JSON keys and instructions too, so "
-    "an invented 'Homer' passes because the prompt contains the key 'home' (guard.py:47).",
-)
 def test_invented_name_sharing_a_prefix_with_a_json_key_is_caught() -> None:
     assert unknown_names("Bu yerda Homer hal qiluvchi.", grounding()) == ("Homer",)
 

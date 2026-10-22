@@ -13,7 +13,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 MAX_NAME_CHARS: Final = 80
 MAX_REASON_CHARS: Final = 120
-MAX_NOTE_CHARS: Final = 240
+MAX_USER_NOTE_CHARS: Final = 240
 MAX_LESSON_CHARS: Final = 200
 MAX_STAT_CHARS: Final = 200
 MAX_CANDIDATES: Final = 10
@@ -34,7 +34,7 @@ type Reason = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_REASON_CHARS)
 ]
 type Note = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_NOTE_CHARS)
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_USER_NOTE_CHARS)
 ]
 type Lesson = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_LESSON_CHARS)

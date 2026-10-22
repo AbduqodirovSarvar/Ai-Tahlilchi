@@ -1,0 +1,57 @@
+{
+  "id": "recorded_hallucinated_sentence_start",
+  "description": "Yozib olingan javob izohi gap boshida kirishda yo'q o'yinchi nomi bilan boshlanadi: izoh tashlanadi.",
+  "candidates": [
+    {
+      "candidate_id": "g26",
+      "league": "Premier League",
+      "home_team": "Liverpool",
+      "away_team": "Everton",
+      "kickoff": "2026-10-24T14:00:00+00:00",
+      "market": "1X2",
+      "selection": "home",
+      "odds": 1.8,
+      "p_model": 0.62,
+      "ev": 0.116,
+      "confidence_level": "O'rta",
+      "confidence_reasons": [],
+      "lineup_known": true,
+      "forms": [
+        {
+          "team": "Liverpool",
+          "results": "WWWDW",
+          "goals_for": 12,
+          "goals_against": 4
+        },
+        {
+          "team": "Everton",
+          "results": "LLDLW",
+          "goals_for": 4,
+          "goals_against": 10
+        }
+      ],
+      "absences": []
+    }
+  ],
+  "context": null,
+  "expected": {
+    "g26": {
+      "verdict_in": [
+        "tasdiq"
+      ],
+      "flags_include": [],
+      "status": "note_dropped"
+    }
+  },
+  "recorded_output": {
+    "reviews": [
+      {
+        "candidate_id": "g26",
+        "verdict": "tasdiq",
+        "risk_flags": [],
+        "izoh": "Haaland o'ynamaydi, shuning uchun Liverpool hujumi zaif."
+      }
+    ]
+  },
+  "recorded_only": true
+}

@@ -188,11 +188,6 @@ def test_sdk_exposes_every_usage_field_the_client_reads() -> None:
     assert "timeout" in genai_types.HttpOptions.model_fields
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-1: production SDK transport is aiohttp; its ClientError family is "
-    "neither retried nor wrapped in GeminiError (gemini.py:100-111, 170)",
-)
 async def test_aiohttp_transport_error_is_wrapped_as_gemini_error() -> None:
     aiohttp = pytest.importorskip("aiohttp")
 
@@ -210,10 +205,5 @@ async def test_aiohttp_transport_error_is_wrapped_as_gemini_error() -> None:
         await ask(client)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-2: APIError.code may be None; is_transient raises TypeError "
-    "instead of classifying (gemini.py:109)",
-)
 def test_is_transient_survives_an_api_error_without_status_code() -> None:
     assert is_transient(genai_errors.APIError(0, {})) is False
