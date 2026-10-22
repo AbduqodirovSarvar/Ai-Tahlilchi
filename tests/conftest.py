@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import structlog
 from aiogram import Bot
+from hypothesis import HealthCheck, settings
 
 from app.config import Settings
 from tests.bot.fakes import RecordingSession
@@ -15,6 +16,15 @@ from tests.pipeline.world import World
 # Every setting is read from an upper-case variable of the same name. Deriving the list from
 # the model keeps it complete when new settings are added.
 SETTINGS_ENV_VARS = tuple(name.upper() for name in Settings.model_fields)
+
+# Property tests must not fail because the machine is busy (CI runners, parallel work): wall-clock
+# deadlines make them flaky without testing anything about correctness. Example counts stay.
+settings.register_profile(
+    "project",
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile("project")
 
 
 @pytest.fixture(autouse=True)
