@@ -198,7 +198,7 @@ async def test_a_pick_button_after_a_restart_is_stale(admin: Client) -> None:
     assert "Bu tugma eskirgan" in (answers(methods)[0].text or "")
 
 
-async def test_every_watch_button_fits_callback_data(admin: Client, services: Services) -> None:
+async def test_every_watch_button_fits_callback_data(admin: Client) -> None:
     await admin.send("/kuzat Barcelona")
     await admin.send(texts.MENU_WATCHLIST)
     for message_id in admin.markups:
