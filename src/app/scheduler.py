@@ -43,6 +43,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.logging import get_logger
+from app.ops.heartbeat import Heartbeat, PingKind
 from app.pipeline.alerts import alert_throttled
 from app.pipeline.context import PipelineContext
 from app.pipeline.daily import run_due_digests
@@ -65,15 +66,23 @@ JOB_REFRESH: Final = "refresh"
 JOB_DAILY_TICK: Final = "daily-tick"
 JOB_RECALC_TICK: Final = "recalc-tick"
 JOB_NAMES: Final = (JOB_SETTLE, JOB_REFRESH, JOB_DAILY_TICK, JOB_RECALC_TICK)
+HEARTBEAT_JOBS: Final = (JOB_SETTLE, JOB_REFRESH)
+"""The daily cycle: after each of these ends well, the dead-man's switch is pinged."""
 
 
 class PipelineJobs:
     """The work behind each job name, with uniform error handling."""
 
-    def __init__(self, ctx: PipelineContext, delivery: Delivery) -> None:
-        """Run the jobs on ``ctx``; messages go through ``delivery``."""
+    def __init__(
+        self, ctx: PipelineContext, delivery: Delivery, *, heartbeat: Heartbeat | None = None
+    ) -> None:
+        """Run the jobs on ``ctx``; messages go through ``delivery``.
+
+        ``heartbeat`` (the dead-man's switch) is pinged after each daily-cycle job.
+        """
         self._ctx = ctx
         self._delivery = delivery
+        self._heartbeat = heartbeat
         self._work: dict[str, Callable[[], Awaitable[object]]] = {
             JOB_SETTLE: lambda: run_settlement(ctx, delivery),
             JOB_REFRESH: lambda: refresh(ctx),
@@ -98,6 +107,29 @@ class PipelineJobs:
             await alert_throttled(
                 self._ctx, self._delivery, name, f"{type(error).__name__}: {error}"
             )
+            await self._ping(name, PingKind.FAIL, f"{name}: {type(error).__name__}")
+        else:
+            await self._ping_after_run(name)
+
+    async def _ping_after_run(self, name: str) -> None:
+        """Ping success when the run ended well, ``/fail`` when it recorded a failure."""
+        if self._heartbeat is None or name not in HEARTBEAT_JOBS:
+            return
+        try:
+            recorded = (await self._ctx.ledger.last_runs()).get(name)
+        except Exception:
+            # Monitoring must never break the job it watches; the missing ping is the signal.
+            logger.exception("heartbeat_status_unreadable", job=name)
+            return
+        if recorded is not None and not recorded.ok:
+            await self._ping(name, PingKind.FAIL, f"{name}: {recorded.detail or 'failed'}")
+        else:
+            await self._ping(name, PingKind.SUCCESS, f"{name} ok")
+
+    async def _ping(self, name: str, kind: PingKind, detail: str) -> None:
+        """Heartbeat for a daily-cycle job (``Heartbeat.ping`` never raises)."""
+        if self._heartbeat is not None and name in HEARTBEAT_JOBS:
+            await self._heartbeat.ping(kind, detail)
 
 
 class JobTracker:

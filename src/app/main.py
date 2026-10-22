@@ -18,9 +18,11 @@ from aiogram.utils.token import TokenValidationError
 from app.bot.dispatcher import build_dispatcher
 from app.bot.messaging import install_flood_control
 from app.bot.notifier import TelegramNotifier
+from app.bot.storage import SqliteStorage, fsm_db_path
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 from app.logging import configure_logging, get_logger
+from app.ops.heartbeat import Heartbeat
 from app.pipeline.runtime import open_runtime
 from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
@@ -77,7 +79,9 @@ async def run_bot(settings: Settings) -> None:
     if settings.app_services == "real":
         await run_real(settings, token, admin_ids)
         return
-    dispatcher = build_dispatcher(admin_ids, build_services(settings))
+    dispatcher = build_dispatcher(
+        admin_ids, build_services(settings), storage=SqliteStorage(fsm_db_path(settings.db_path))
+    )
     await poll(dispatcher, token, admin_ids, settings)
 
 
@@ -88,7 +92,10 @@ async def poll(
     bot = await connect_bot(token)
     install_flood_control(bot)
     logger.info("bot_starting", app_env=settings.app_env, admin_count=len(admin_ids))
-    await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+    try:
+        await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
+    finally:
+        await dispatcher.storage.close()
     logger.info("bot_stopped")
 
 
@@ -105,13 +112,17 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
         notifier.attach_settings(system.services.settings)
         logger.info("services_backend", backend="real", sample_data=False)
         scheduler = PipelineScheduler(
-            PipelineJobs(runtime.ctx, system.delivery),
+            PipelineJobs(runtime.ctx, system.delivery, heartbeat=Heartbeat.from_settings(settings)),
             db_path=settings.db_path,
             timezone=settings.display_timezone,
         )
         scheduler.start()
         try:
-            dispatcher = build_dispatcher(admin_ids, system.services)
+            dispatcher = build_dispatcher(
+                admin_ids,
+                system.services,
+                storage=SqliteStorage(fsm_db_path(settings.db_path)),
+            )
             dispatcher["backend"] = "real"
             dispatcher.startup.register(notifier.on_startup)
             await poll(dispatcher, token, admin_ids, settings)

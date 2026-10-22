@@ -173,7 +173,6 @@ known_first_party = ["app"]
 # works against one lock file. Remove a name from this list as soon as code imports it.
 # `tzdata` stays: it is loaded implicitly by `zoneinfo`, never imported.
 DEP002 = [
-    "aiosqlite",
     "pandas",
     "scikit-learn",
     "tzdata",
