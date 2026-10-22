@@ -28,12 +28,15 @@ from app.services.interfaces import (
     BetDraft,
     ConfidenceLevel,
     CostEstimate,
+    DailyDigest,
     DateMode,
     DateSpec,
     DateWindow,
     FixtureListRequest,
     FixtureOption,
     LeagueOption,
+    LimitPeriod,
+    LossLimitNotice,
     MarketQuote,
     OddsMove,
     QuietHours,
@@ -592,3 +595,49 @@ class TestRecommendationFields:
             sport=Sport.TENNIS, available=False, experimental=False, supported_markets=frozenset()
         )
         assert not option.available
+
+
+# --------------------------------------------------------------------------- v1.7
+class TestV17Additions:
+    def test_signal_ids_default_to_unknown(self) -> None:
+        signal = make_signal()
+        assert (signal.home_team_id, signal.away_team_id, signal.league_id) == (None, None, None)
+
+    def test_signal_ids_are_entity_ids(self) -> None:
+        signal = make_signal(home_team_id="12", away_team_id="af:t40", league_id="3")
+        assert (signal.home_team_id, signal.away_team_id, signal.league_id) == ("12", "af:t40", "3")
+
+    @pytest.mark.parametrize("field", ["home_team_id", "away_team_id", "league_id"])
+    @pytest.mark.parametrize("bad", ["", "   ", "x" * 41, "é" * 21])
+    def test_signal_ids_reject_what_cannot_fit_a_callback(self, field: str, bad: str) -> None:
+        with pytest.raises(ValidationFailedError) as excinfo:
+            make_signal(**{field: bad})
+        assert field_of(excinfo) == field
+
+    def test_a_reached_limit_is_positive_and_the_loss_has_caught_up(self) -> None:
+        notice = LossLimitNotice(period=LimitPeriod.DAY, limit=Decimal(100), loss=Decimal(100))
+        assert notice.loss >= notice.limit
+        with pytest.raises(ValidationFailedError) as below:
+            LossLimitNotice(period=LimitPeriod.WEEK, limit=Decimal(100), loss=Decimal("99.99"))
+        assert field_of(below) == "loss"
+        with pytest.raises(ValidationFailedError) as zero:
+            LossLimitNotice(period=LimitPeriod.DAY, limit=Decimal(0), loss=Decimal(0))
+        assert field_of(zero) == "limit"
+
+    def test_digest_and_result_defaults_leave_old_callers_untouched(self) -> None:
+        digest = DailyDigest(day=TODAY, result=_empty_result())
+        assert digest.template_name is None
+        assert digest.loss_limit is None
+        assert _empty_result().loss_limit is None
+
+
+def _empty_result() -> AnalysisResult:
+    return AnalysisResult(
+        query_id="q1",
+        window=DateWindow(TODAY, TODAY),
+        signals=(),
+        fixtures_analyzed=0,
+        matched=0,
+        requested=None,
+        api_requests_used=0,
+    )

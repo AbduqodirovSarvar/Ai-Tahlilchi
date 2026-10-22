@@ -47,6 +47,9 @@ def to_record(row: FixtureRow) -> FixtureRecord:
         result=result_from_row(row),
         home_xg=row.home_xg,
         away_xg=row.away_xg,
+        league_id=row.league_id,
+        home_team_id=row.home_team_id,
+        away_team_id=row.away_team_id,
     )
 
 

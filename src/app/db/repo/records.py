@@ -42,13 +42,20 @@ class Page[T]:
 
 @dataclass(frozen=True, slots=True)
 class FixtureRecord:
-    """A stored fixture: its id, the domain fixture and its result once known."""
+    """A stored fixture: its id, the domain fixture and its result once known.
+
+    ``league_id``/``home_team_id``/``away_team_id`` are the catalog ids (``leagues.id``,
+    ``teams.id``) the bot's entity ids are made of; ``None`` only for hand-built records.
+    """
 
     id: int
     fixture: Fixture
     result: FixtureResult | None
     home_xg: float | None = None
     away_xg: float | None = None
+    league_id: int | None = None
+    home_team_id: int | None = None
+    away_team_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

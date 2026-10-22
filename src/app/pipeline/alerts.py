@@ -12,6 +12,7 @@ from typing import Final
 from app.logging import get_logger
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery
+from app.pipeline.ledger import Failure, LedgerKey
 
 logger = get_logger(__name__)
 
@@ -47,3 +48,32 @@ async def alert_throttled(
         logger.warning("admin_alert_failed", component=component, error=repr(error))
         return False
     return True
+
+
+async def fail_key(
+    ctx: PipelineContext,
+    delivery: Delivery,
+    key: LedgerKey,
+    error: Exception,
+    *,
+    what: str,
+) -> Failure:
+    """Record a failed attempt of ``key`` and alert the administrators (throttled, per ``key.job``).
+
+    The ledger counts the attempt and sets the backoff; the error is kept for ``/holat``;
+    after the last attempt ``what`` is reported as given up under its own throttle key, so that
+    alert is never swallowed by the milder one of an earlier attempt.
+    """
+    job = key.job
+    now = ctx.clock()
+    failure = await ctx.ledger.fail(key, now=now, detail=str(error)[:200])
+    await ctx.ledger.record_error(job, f"user {key.user_id}: {error}", now=now)
+    state = "gave up" if failure.exhausted else "failed"
+    await alert_throttled(
+        ctx,
+        delivery,
+        job,
+        f"{what} {state} (attempt {failure.attempts}): {error}",
+        throttle_key=f"{job}.gave_up" if failure.exhausted else job,
+    )
+    return failure

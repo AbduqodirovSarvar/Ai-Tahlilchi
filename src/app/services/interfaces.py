@@ -695,6 +695,10 @@ class SignalView:
     stand in). ``zero_ev_odds`` is the price at which the pick has zero EV for the model
     (``None`` = unknown); it differs from ``1 / probability`` on quarter-line Asian picks.
     ``data_as_of`` is the time of the bookmaker price the numbers rest on.
+
+    v1.7: ``home_team_id``, ``away_team_id`` and ``league_id`` are the catalog entity ids (the
+    same ids ``CatalogService`` hands out), so a card's follow buttons need no name search;
+    ``None`` when the source does not know them.
     """
 
     signal_id: SignalId
@@ -727,11 +731,17 @@ class SignalView:
     recommended_at: datetime | None = None
     recommended_odds: float | None = None
     zero_ev_odds: float | None = None
+    home_team_id: EntityId | None = None
+    away_team_id: EntityId | None = None
+    league_id: EntityId | None = None
 
     def __post_init__(self) -> None:
         """Guard the invariants the card formatter relies on."""
         _check_utc(self.kickoff, "kickoff")
         _check(is_valid_entity_id(self.fixture_id), "fixture_id", "invalid entity id")
+        for name in ("home_team_id", "away_team_id", "league_id"):
+            value = getattr(self, name)
+            _check(value is None or is_valid_entity_id(value), name, "invalid entity id")
         if self.recommended_at is not None:
             _check_utc(self.recommended_at, "recommended_at")
             _check(not self.no_value, "no_value", "a recommended signal has value")
@@ -791,6 +801,33 @@ class SignalView:
         return self.recommended_at is not None
 
 
+class LimitPeriod(StrEnum):
+    """Which responsible-gaming limit was reached (v1.7)."""
+
+    DAY = "day"
+    WEEK = "week"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LossLimitNotice:
+    """A loss limit that has been reached (plan 6.9; v1.7).
+
+    ``limit`` and ``loss`` are money (the bank currency): ``loss`` is the user's net loss on
+    bets settled in the local day (``DAY``) or ISO week so far (``WEEK``), ``loss >= limit``.
+    A message carrying it says "Zarar limitiga yetildi"; an analysis result carrying it is a
+    banner on a manual analysis, which still works.
+    """
+
+    period: LimitPeriod
+    limit: Decimal
+    loss: Decimal
+
+    def __post_init__(self) -> None:
+        """A reached limit is positive and the loss has caught up with it."""
+        _check_positive(self.limit, "limit")
+        _check(self.loss >= self.limit, "loss", "must have reached the limit")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AnalysisResult:
     """Outcome of :meth:`AnalysisService.analyze`.
@@ -814,6 +851,7 @@ class AnalysisResult:
     skipped_no_price: int = 0
     skipped_stale_price: int = 0
     data_stale: bool = False
+    loss_limit: LossLimitNotice | None = None
 
     @property
     def shortfall(self) -> bool:
@@ -1479,11 +1517,19 @@ class DeliveryKey:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DailyDigest:
-    """The morning message (plan §4 step 5): today's candidates, preceded by yesterday's tally."""
+    """The morning message (plan §4 step 5): today's candidates, preceded by yesterday's tally.
+
+    v1.7: ``template_name`` is set when the digest is a scheduled saved query (the message is
+    labelled with its name; no "yesterday" block). ``loss_limit`` is set when the user's loss
+    limit stopped the new signals: ``result`` is then empty and the message is the single
+    "Zarar limitiga yetildi" notice of that local day.
+    """
 
     day: date
     result: AnalysisResult
     yesterday: DaySummary | None = None
+    template_name: str | None = None
+    loss_limit: LossLimitNotice | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

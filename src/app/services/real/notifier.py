@@ -5,7 +5,7 @@ This module converts one into the other and turns message references into the op
 ``"chat:message"`` strings the ledger keeps, so a later update can reply to the digest.
 """
 
-from datetime import date, datetime
+from datetime import datetime, timedelta
 
 from app.logging import get_logger
 from app.pipeline.delivery import (
@@ -23,6 +23,7 @@ from app.services.interfaces import (
     CancelReason,
     DailyDigest,
     DateWindow,
+    DaySummary,
     DeliveryKey,
     FixtureOption,
     MessageRef,
@@ -36,7 +37,7 @@ from app.services.interfaces import (
     WatchNotification,
 )
 from app.services.real.analysis import recalc_diff
-from app.services.real.core import Core, to_view
+from app.services.real.core import Core, loss_limit_notice, to_view
 from app.services.real.signals import RealResultService
 
 logger = get_logger(__name__)
@@ -154,12 +155,24 @@ class NotifierDelivery:
             skipped_stale_price=outcome.skipped_stale_price,
             data_stale=outcome.data_stale,
         )
-        summary = await RealResultService(core).day_summary(user_id, _previous(message.day))
         digest = DailyDigest(
-            day=message.day, result=result, yesterday=summary if summary.signals else None
+            day=message.day,
+            result=result,
+            yesterday=await self._yesterday(user_id, message),
+            template_name=message.label,
+            loss_limit=loss_limit_notice(message.loss_limit),
         )
         sent = await self._notifier.send_daily_digest(user_id, digest, key=_key(key))
         return _reference(self._notifier, user_id, sent)
+
+    async def _yesterday(self, user_id: int, message: DailyDelivery) -> DaySummary | None:
+        """Yesterday's tally for the morning digest only (a template digest has none)."""
+        if message.label is not None:
+            return None
+        summary = await RealResultService(self._core).day_summary(
+            user_id, message.day - timedelta(days=1)
+        )
+        return summary if summary.signals else None
 
     async def update(
         self, user_id: int, message: UpdateDelivery, key: LedgerKey, reply_to: str | None
@@ -221,9 +234,3 @@ class NotifierDelivery:
     async def alert_admin(self, component: str, message: str, at: datetime) -> None:
         """Report a system error to the administrators."""
         await self._notifier.alert_admin(AdminAlert(component=component, message=message, at=at))
-
-
-def _previous(day: date) -> date:
-    from datetime import timedelta  # noqa: PLC0415
-
-    return day - timedelta(days=1)

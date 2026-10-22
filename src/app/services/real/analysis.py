@@ -19,6 +19,7 @@ from app.pipeline.data import SignalSource as StoredSource
 from app.pipeline.detail import VenueStats, build_fixture_card
 from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.pipeline.ledger import STAMP_DAY, LedgerKey
+from app.pipeline.limits import load_loss_status
 from app.pipeline.profile import UserProfile
 from app.pipeline.provider import MANUAL
 from app.pipeline.recalc import RecalcOptions, RecalcResult, RecalcVerdict, recalc_signals
@@ -60,7 +61,7 @@ from app.services.interfaces import (
 from app.services.interfaces import (
     RecalcVerdict as ServiceVerdict,
 )
-from app.services.real.core import Core, parse_ids, require_signal, to_view
+from app.services.real.core import Core, loss_limit_notice, parse_ids, require_signal, to_view
 
 logger = get_logger(__name__)
 
@@ -196,6 +197,9 @@ class RealAnalysisService:
         except ProviderUnavailableError as error:
             raise ServiceUnavailableError(error.provider, error.detail) from error
         query_id = await self._remember(user_id, outcome)
+        retro = window.is_retro(core.local_today(profile.zone))
+        # A look-back recommends nothing, so the responsible-gaming banner has no meaning there.
+        status = None if retro else await load_loss_status(core.ctx, profile, core.now())
         return AnalysisResult(
             query_id=query_id,
             window=window,
@@ -205,10 +209,11 @@ class RealAnalysisService:
             requested=outcome.requested,
             api_requests_used=outcome.api_requests_used,
             failed_fixtures=outcome.failed_fixtures,
-            retro=window.is_retro(core.local_today(profile.zone)),
+            retro=retro,
             skipped_no_price=outcome.skipped_no_price,
             skipped_stale_price=outcome.skipped_stale_price,
             data_stale=outcome.data_stale,
+            loss_limit=loss_limit_notice(status),
         )
 
     async def _remember(self, user_id: int, outcome: AnalysisOutcome) -> EntityId:
