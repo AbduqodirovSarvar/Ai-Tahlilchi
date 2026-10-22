@@ -137,6 +137,7 @@ jobs:
           scp "${opts[@]}" docker-compose.yml "$dest:/opt/ai-tahlilchi/docker-compose.yml"
           scp "${opts[@]}" deploy/remote-deploy.sh scripts/ops/backup.sh scripts/ops/restore.sh \
             "$dest:/opt/ai-tahlilchi/bin/"
+          scp "${opts[@]}" deploy/dc.sh "$dest:/opt/ai-tahlilchi/bin/dc"
           ssh "${opts[@]}" "$dest" 'chmod 755 /opt/ai-tahlilchi/bin/*.sh'
       - name: Deploy (backup, switch, health wait, automatic rollback)
         env:

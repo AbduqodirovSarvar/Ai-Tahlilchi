@@ -6,5 +6,6 @@
 !src/
 !alembic/
 !alembic.ini
+!scripts/
 !deploy/entrypoint.sh
 **/__pycache__

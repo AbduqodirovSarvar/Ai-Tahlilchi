@@ -25,6 +25,7 @@ BASH_SCRIPTS = [
     ROOT / "scripts" / "ops" / "restore.sh",
     ROOT / "deploy" / "bootstrap.sh",
     ROOT / "deploy" / "remote-deploy.sh",
+    ROOT / "deploy" / "dc.sh",
 ]
 SH_SCRIPTS = [ROOT / "deploy" / "entrypoint.sh"]
 SHELL_SCRIPTS = BASH_SCRIPTS + SH_SCRIPTS
@@ -171,6 +172,7 @@ def test_dockerfile_ships_migrations_entrypoint_and_healthcheck() -> None:
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY alembic.ini /app/alembic.ini" in text
     assert "COPY alembic /app/alembic" in text
+    assert "COPY scripts /app/scripts" in text
     assert 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' in text
     assert "HEALTHCHECK" in text
     assert "USER app:app" in text

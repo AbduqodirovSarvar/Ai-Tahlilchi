@@ -64,6 +64,8 @@ COPY --from=builder /opt/venv /opt/venv
 # Migrations ship with the image: the entrypoint runs `alembic upgrade head` before the app.
 COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
+# One-off tools run on the server (F0 probe, history import, backtest): RUNBOOK.md.
+COPY scripts /app/scripts
 COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 WORKDIR /data

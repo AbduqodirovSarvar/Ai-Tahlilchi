@@ -98,13 +98,13 @@
 - [ ] F8.5 `segment_stats`
 - [ ] F8.6 Kalibratsiya
 - [ ] F8.7 Promptga "Tajriba konteksti"
-- [ ] F9.1 VPS xavfsizligi
-- [ ] F9.2 Docker va `/opt/ai-tahlilchi`
-- [ ] F9.3 Deploy workflow (GHCR + SSH + Alembic)
-- [ ] F9.4 Zaxira va tiklash sinovi
-- [ ] F9.5 Monitoring (healthcheck, healthchecks.io, admin ogohlantirish)
-- [ ] F9.6 Log rotatsiyasi, disk kuzatuvi
-- [ ] F9.7 `RUNBOOK.md`
+- [x] F9.1 VPS xavfsizligi: `deploy/bootstrap.sh` (kalit-faqat SSH, ufw, fail2ban, unattended-upgrades, `--dry-run`, shellcheck toza). Serverda bajarish foydalanuvchida ([RUNBOOK 3.2](../RUNBOOK.md))
+- [x] F9.2 Docker va `/opt/ai-tahlilchi`: bootstrap (Docker, papkalar, bo'sh `.env` chmod 600), `restart: unless-stopped` + entrypoint (migratsiya oldin, SIGTERM, exit 2 kechiktirish), `bin/dc`; image Docker'da qurildi va smoke-test qilindi ([ADR 0014](adr/0014-deploy-and-ops.md))
+- [x] F9.3 Deploy workflow (GHCR + SSH + Alembic): `deploy.yml` (teg/qo'lda; secret yo'q bo'lsa o'tkazib yuboriladi), `remote-deploy.sh` (zaxira, pull, up, healthy kutish, avtomatik rollback), `actionlint` toza. Jonli ishga tushirish GitHub secret'lari va serverdan keyin
+- [x] F9.4 Zaxira va tiklash sinovi: `backup.sh`/`restore.sh` + `app.ops.sqlite_tool`, taymer; tiklash mashqi avtomatik testlangan (mazmun + `alembic check`). Masofaviy `rclone` jonli sinalmagan
+- [x] F9.5 Monitoring: `python -m app.ops.healthcheck`, healthchecks.io `Heartbeat` (settle/refresh dan keyin; `/fail`), mavjud admin ogohlantirishi hujjatlashtirilgan. Jonli healthchecks.io hisobi foydalanuvchida
+- [x] F9.6 Log rotatsiyasi (5 x 10 MB), disk joyi va baza/WAL hajmi healthcheck chiqishida, disk < 200 MB bo'lsa unhealthy; bootstrap `daemon.json`
+- [x] F9.7 `RUNBOOK.md` (o'zbekcha) va README deploy bo'limi; bot FSM uchun `SqliteStorage` (`fsm.db`, restartdan keyin wizard saqlanadi)
 
 ## T6 — Yakuniy integratsiya
 - [ ] F8.1 Natijalarni qo'lda belgilash

@@ -2,7 +2,7 @@
 
 Sport o'yinlarini statistik model (Poisson / Dixon-Coles, bozor modeli) va Gemini yordamida tahlil qilib, "value" topilgan o'yinlar bo'yicha Telegram bot orqali tavsiya beruvchi tizim. Bot shaxsiy: faqat ruxsat berilgan foydalanuvchilarga (`ADMIN_IDS`) va faqat bot bilan **shaxsiy chatda** javob beradi (guruh va kanallar e'tiborsiz qoldiriladi).
 
-> **Holat:** T1 (loyiha skeleti). Hozircha bot faqat `/start` ga "Ishlayapti ✅" deb javob beradi. Batafsil holat: [docs/progress.md](docs/progress.md).
+> **Holat:** bot, pipeline va LLM qatlami tayyor; deploy skriptlari, zaxira va [RUNBOOK](RUNBOOK.md) T5 da qo'shildi (serverda hali ishga tushirilmagan). Batafsil holat: [docs/progress.md](docs/progress.md).
 
 ## Hujjatlar
 - [Loyiha holati — bajarilgan va qolgan ishlar](docs/HOLAT.md)
@@ -49,6 +49,8 @@ cp .env.example .env         # keyin .env ni to'ldiring
 | `GEMINI_API_KEY` | LLM izohlari uchun | Google AI Studio |
 | `APP_ENV` | yo'q | `dev` (rangli loglar) yoki `prod` (JSON loglar) |
 | `DISPLAY_TZ` | yo'q | foydalanuvchiga vaqtni ko'rsatish mintaqasi, standart `Asia/Tashkent` (bazada doim UTC). POSIX `TZ` ishlatilmaydi |
+| `APP_SERVICES` | yo'q | `fake` (standart) yoki `real` (kalitlar tayyor bo'lgach) |
+| `HEALTHCHECKS_URL` | yo'q | healthchecks.io ping URL (maxfiy); kunlik sikldan keyin ping |
 | `DB_PATH`, `LOG_LEVEL` | yo'q | standart: `data/app.db`, `INFO` (katta-kichik harf farqi yo'q) |
 
 `.env` bo'lmasa ham ilova, testlar va CI ishlaydi. Kalit kerak bo'lgan komponent faqat ishga tushirilganda aniq xabar bilan to'xtaydi (masalan, `TELEGRAM_BOT_TOKEN is not set; add it to .env`).
@@ -84,9 +86,27 @@ docker compose up -d --build     # ishga tushirish
 docker compose logs -f bot       # loglar (JSON)
 docker compose down              # to'xtatish
 ```
-- Konteyner non-root (`uid 10001`) foydalanuvchi bilan, faqat o'qiladigan fayl tizimida ishlaydi. Baza `bot-data` nomli Docker volume'ida (`/data`); volume image'dagi egalikni oladi, `chown` kerak emas. Volume'ni ko'rish: `docker volume inspect ai-tahlilchi_bot-data`.
-- Qayta ishga tushirish siyosati `on-failure:5`: xato bilan chiqsa ko'pi bilan 5 marta qayta uriniladi. `.env` bo'lmasa yoki noto'g'ri bo'lsa, konteyner sababni logga yozib (kod `2`) to'xtaydi; kalitlarni qo'shib `docker compose up -d` qiling.
+- Konteyner non-root (`uid 10001`) foydalanuvchi bilan, faqat o'qiladigan fayl tizimida ishlaydi. Baza `bot-data` nomli Docker volume'ida (`/data`: `app.db`, `fsm.db`); volume image'dagi egalikni oladi, `chown` kerak emas.
+- **Ishga tushish tartibi:** [deploy/entrypoint.sh](deploy/entrypoint.sh) avval `alembic upgrade head` ni bajaradi (muvaffaqiyatsiz bo'lsa ilova ishga tushmaydi, kod `1`), keyin ilovani ishga tushiradi va `SIGTERM` ni unga uzatadi (polling to'xtaydi, ishlayotgan joblar 60 s gacha tugatiladi; `stop_grace_period: 75s`).
+- **Qayta ishga tushirish:** `restart: unless-stopped`, ya'ni server qayta yuklangandan keyin ham bot o'zi ko'tariladi. Sozlama xatosi (kod `2`) da entrypoint chiqishdan oldin 60 s kutadi, shuning uchun tez halqa bo'lmaydi; konteyner `unhealthy` ko'rinadi. `.env` ni tuzatib `docker compose up -d` qiling. Sabab: [ADR 0014](docs/adr/0014-deploy-and-ops.md).
+- **Healthcheck:** `python -m app.ops.healthcheck` (baza, disk joyi, real rejimda rejalashtiruvchi tirikligi). `docker compose ps` da `healthy`/`unhealthy`.
+- **Servislar rejimi:** `APP_SERVICES=fake` (standart: namunaviy ma'lumot, kalitlarsiz sinash) yoki `real` (pipeline + rejalashtiruvchi; `TELEGRAM_BOT_TOKEN`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY` kerak). `.env` ga yozing va `docker compose up -d`.
+- Resurs chegaralari 1–2 GB VPS uchun: `mem_limit: 768m`, `cpus: 1.5`; Docker loglari 5 × 10 MB.
 - TLS'ni ushlab qoluvchi korporativ proksi ortida build: `docker build --secret id=ca_bundle,src=ca.pem .` (sertifikat image'ga yozilmaydi).
+- Qo'lda ishlatiladigan skriptlar image ichida (`/app/scripts`): `docker compose run --rm --no-deps --entrypoint python bot /app/scripts/probe_api.py --help`.
+
+## Serverga deploy (F9)
+To'liq qo'llanma: **[RUNBOOK.md](RUNBOOK.md)** (o'zbekcha): birinchi deploy, kalitlar, F0 probe va backtest serverda, yangilash/rollback, zaxira va tiklash, kalit almashtirish, loglar, muammolar, production ro'yxati.
+
+| Nima | Qayerda |
+|---|---|
+| Server tayyorlash (Ubuntu 24.04: SSH faqat kalit, ufw, fail2ban, avto-yangilanish, Docker; `--dry-run`) | [deploy/bootstrap.sh](deploy/bootstrap.sh) |
+| CI/CD: `v*` teg yoki qo'lda → GHCR → SSH → zaxira → `up -d` → healthcheck → avtomatik rollback | [.github/workflows/deploy.yml](.github/workflows/deploy.yml), [deploy/remote-deploy.sh](deploy/remote-deploy.sh) |
+| Zaxira (SQLite `.backup` → tekshiruv → gzip → ixtiyoriy `rclone`, 14 kun) va tiklash (tasdiq + xavfsizlik nusxasi) | [scripts/ops/backup.sh](scripts/ops/backup.sh), [scripts/ops/restore.sh](scripts/ops/restore.sh) |
+| systemd: kunlik zaxira taymeri, ixtiyoriy boot xizmati | [deploy/](deploy/) `*.service`, `*.timer` |
+| Dead-man's switch | `HEALTHCHECKS_URL` (healthchecks.io), [src/app/ops/heartbeat.py](src/app/ops/heartbeat.py) |
+
+GitHub secret'lari (`Settings → Secrets → Actions`): `SSH_HOST`, `SSH_USER`, `SSH_KEY` (+ tavsiya: `SSH_KNOWN_HOSTS`). Ular bo'lmasa deploy workflow **o'tkazib yuboriladi** (xato emas). Hozircha hech qanday secret yo'q.
 
 ## CI
-GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) har push va PR da: lint, format, mypy, import-linter, deptry, pytest + coverage, pip-audit, gitleaks va Docker build + smoke test. Hech qanday secret talab qilinmaydi.
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) har push va PR da: lint, format, mypy, import-linter, deptry, shellcheck, actionlint, pytest + coverage, pip-audit, gitleaks va Docker build + smoke test (migratsiya, healthcheck, exit 2). Hech qanday secret talab qilinmaydi. Deploy alohida workflow: yuqoriga qarang.
