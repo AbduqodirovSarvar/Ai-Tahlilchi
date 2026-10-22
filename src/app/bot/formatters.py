@@ -20,6 +20,7 @@ from app.services.errors import BudgetExceededError, CooldownActiveError, Valida
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
     MAX_ODDS_LIMIT,
+    MAX_RETRO_LOOKBACK_DAYS,
     MAX_SCOPE_IDS,
     MAX_TEMPLATE_NAME_LENGTH,
     MAX_WINDOW_DAYS,
@@ -31,6 +32,7 @@ from app.services.interfaces import (
     MIN_SEARCH_LENGTH,
     AnalysisResult,
     DateWindow,
+    ResultMark,
     SignalSource,
     SignalState,
     SignalView,
@@ -75,6 +77,12 @@ def odds(value: float) -> str:
 def units(value: Decimal) -> str:
     """``Decimal('1.50')`` → ``1.5``."""
     return f"{value.normalize():f}"
+
+
+def signed_units(value: Decimal) -> str:
+    """``+2.3`` / ``-1`` / ``0``: a profit in units with an explicit sign."""
+    text = units(value)
+    return f"+{text}" if value > 0 else text
 
 
 def money(value: Decimal | None) -> str:
@@ -211,6 +219,14 @@ def _state_flags(signal: SignalView, zone: ZoneInfo) -> list[str]:
     return lines
 
 
+def _moved_odds_lines(signal: SignalView) -> list[str]:
+    """The odds first recommended next to today's, once a recalculation moved them."""
+    recommended = signal.recommended_odds
+    if recommended is None or odds(recommended) == odds(signal.odds):
+        return []
+    return [texts.CARD_ODDS_MOVED.format(recommended=odds(recommended), current=odds(signal.odds))]
+
+
 def _note(text: str | None) -> str | None:
     if text is None or not text.strip():
         return None
@@ -231,6 +247,7 @@ def format_signal_card(signal: SignalView, zone: ZoneInfo) -> str:
             league=escape(signal.league),
         ),
         texts.CARD_PICK.format(selection=selection_label(signal), odds=odds(signal.odds)),
+        *_moved_odds_lines(signal),
         texts.CARD_PROBABILITY.format(
             probability=percent(signal.probability), fair_odds=odds(signal.fair_odds)
         ),
@@ -320,13 +337,45 @@ def format_results_summary(result: AnalysisResult) -> str:
         lines.append(texts.RESULTS_WATCHLIST.format(count=watched))
     if result.retro:
         lines.append(texts.RESULTS_RETRO)
+        lines.extend(_retro_tally(result))
     if regular and result.shortfall and result.requested is not None:
         lines.append(
             texts.RESULTS_SHORTFALL.format(matched=result.matched, requested=result.requested)
         )
     if result.failed_fixtures:
         lines.append(texts.RESULTS_FAILED.format(count=result.failed_fixtures))
+    lines.extend(price_lines(result))
     return "\n".join(lines)
+
+
+def _retro_tally(result: AnalysisResult) -> list[str]:
+    """How the model's look-back picks turned out: wins, losses and the hit share."""
+    marks = [signal.result for signal in result.signals if not is_watchlist_extra(signal)]
+    won = sum(mark in {ResultMark.WON, ResultMark.HALF_WON} for mark in marks)
+    lost = sum(mark in {ResultMark.LOST, ResultMark.HALF_LOST} for mark in marks)
+    if won + lost == 0:
+        return []
+    extra = ""
+    pending = sum(mark is None for mark in marks)
+    if pending:
+        extra = texts.RESULTS_RETRO_PENDING.format(count=pending)
+    return [
+        texts.RESULTS_RETRO_TALLY.format(
+            won=won, lost=lost, rate=percent(won / (won + lost)), extra=extra
+        )
+    ]
+
+
+def price_lines(result: AnalysisResult) -> list[str]:
+    """Why fixtures were left out for price reasons, and the stale-data warning (v1.5)."""
+    notes = (
+        (result.skipped_no_price, texts.RESULTS_NO_PRICE),
+        (result.skipped_stale_price, texts.RESULTS_STALE_PRICE),
+    )
+    lines = [template.format(count=count) for count, template in notes if count]
+    if result.data_stale:
+        lines.append(texts.RESULTS_DATA_STALE)
+    return lines
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,6 +469,8 @@ def budget_message(error: BudgetExceededError) -> str:
 
 def validation_message(error: ValidationFailedError) -> str:
     """User message for the offending field (generic for fields the bot cannot fix)."""
+    if error.field == "date_from" and "in the past" in error.message:
+        return texts.PARSE_TOO_OLD.format(max_lookback=MAX_RETRO_LOOKBACK_DAYS)
     template = texts.VALIDATION_BY_FIELD.get(error.field)
     if template is None:
         return texts.VALIDATION_GENERIC

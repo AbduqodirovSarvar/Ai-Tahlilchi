@@ -70,7 +70,9 @@ def _quota_line(quota: ApiQuota) -> str:
         used=quota.used,
         limit=quota.limit,
         remaining=quota.remaining,
-        manual=quota.reserved_manual,
+        manual_used=quota.manual_used,
+        manual_reserve=quota.manual_reserve,
+        manual_left=quota.manual_left,
     )
 
 
@@ -94,6 +96,20 @@ def _quota_block(status: SystemStatus) -> list[str]:
     if not status.quotas:
         return [texts.STATUS_QUOTA_NONE]
     return [texts.STATUS_QUOTA_HEADER, *(_quota_line(quota) for quota in status.quotas)]
+
+
+def _llm_block(status: SystemStatus) -> list[str]:
+    llm = status.llm
+    if llm is None:
+        return [texts.STATUS_LLM_NONE]
+    return [
+        texts.STATUS_LLM.format(
+            requests_used=llm.requests_used,
+            requests_limit=llm.requests_limit,
+            tokens_used=llm.tokens_used,
+            tokens_limit=llm.tokens_limit,
+        )
+    ]
 
 
 def _refresh_block(status: SystemStatus, zone: ZoneInfo, now: datetime) -> list[str]:
@@ -131,6 +147,7 @@ def format_status(status: SystemStatus, zone: ZoneInfo, now: datetime, backend: 
     blocks = [
         [texts.STATUS_TITLE, texts.STATUS_MODE.get(backend, escape(backend))],
         _quota_block(status),
+        _llm_block(status),
         _refresh_block(status, zone, now),
         _jobs_block(status, zone),
         _errors_block(status, zone),
@@ -198,13 +215,9 @@ def _bank_lines(bank: BankView) -> list[str]:
     return lines
 
 
-def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> str:
-    """The bets view: the bank snapshot and the open bets (newest first)."""
-    lines = [texts.BETS_TITLE, *_bank_lines(bank), ""]
-    if not bets:
-        lines.append(texts.BETS_EMPTY)
-        return "\n".join(lines)
-    lines.extend(
+def bet_lines(bets: tuple[BetView, ...] | list[BetView], zone: ZoneInfo) -> list[str]:
+    """One line per bet (newest first), capped at :data:`MAX_LISTED_BETS` with a tail."""
+    lines = [
         texts.BETS_LINE.format(
             fixture=escape(bet.fixture_label),
             selection=_bet_selection(bet),
@@ -213,7 +226,17 @@ def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> st
             date=short_date(bet.placed_at.astimezone(zone).date()),
         )
         for bet in bets[:MAX_LISTED_BETS]
-    )
+    ]
     if len(bets) > MAX_LISTED_BETS:
         lines.append(texts.BETS_MORE.format(count=len(bets) - MAX_LISTED_BETS))
+    return lines
+
+
+def format_bets(bank: BankView, bets: tuple[BetView, ...], zone: ZoneInfo) -> str:
+    """The bets view: the bank snapshot and the open bets (newest first)."""
+    lines = [texts.BETS_TITLE, *_bank_lines(bank), ""]
+    if not bets:
+        lines.append(texts.BETS_EMPTY)
+        return "\n".join(lines)
+    lines.extend(bet_lines(bets, zone))
     return "\n".join(lines)

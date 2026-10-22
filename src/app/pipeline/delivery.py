@@ -97,6 +97,11 @@ class Delivery(Protocol):
         ...
 
 
+UNDELIVERABLE_REFERENCE: Final = "undeliverable"
+"""What a delivery answers when the user can never be reached (blocked the bot): "handled, do
+not retry". Like any confirmed reference it completes the idempotency key; it carries no
+``chat:message`` pair, so a later update cannot reply to it."""
+
 NULL_REFERENCE: Final = "null"
 """What :class:`NullDelivery` answers: "handled" (a real ``None`` would mean "not delivered")."""
 

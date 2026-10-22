@@ -40,7 +40,7 @@ async def show_today(
     await send_html(
         message,
         texts.TODAY_HEADER.format(count=len(ordered)),
-        keyboards.recalc_day_keyboard(day),
+        keyboards.today_keyboard(day),
     )
     await send_result_page(message, ordered, settings.zone, 0, stored.token)
 

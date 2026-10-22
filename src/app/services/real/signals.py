@@ -14,6 +14,8 @@ from app.services.errors import (
     NotFoundError,
     ValidationFailedError,
 )
+from app.services.express_math import check_ids
+from app.services.express_math import evaluate as evaluate_express
 from app.services.interfaces import (
     MAX_NOTE_LENGTH,
     BankPoint,
@@ -24,6 +26,7 @@ from app.services.interfaces import (
     DateSpec,
     DaySummary,
     ExportFile,
+    ExpressView,
     ReportRequest,
     ReportView,
     ResultMark,
@@ -35,7 +38,13 @@ from app.services.interfaces import (
 )
 from app.services.real.analysis import window_of
 from app.services.real.core import Core, money, require_signal, to_view
-from app.services.report_math import SignalOutcome, build_report, day_summary, export_file
+from app.services.report_math import (
+    SignalOutcome,
+    bets_export_file,
+    build_report,
+    day_summary,
+    export_file,
+)
 
 MAX_BET_LIST: Final = 100
 ALL_BETS: Final = 100_000
@@ -264,6 +273,10 @@ class RealBetService:
                 views.append(self._view(bet, record))
         return tuple(views)
 
+    async def all_bets(self, user_id: int) -> tuple[BetView, ...]:
+        """Every bet of the user, newest first (the CSV export; not part of the protocol)."""
+        return await self._bets(user_id, ALL_BETS)
+
     async def list_bets(
         self, user_id: int, *, open_only: bool = False, limit: int = 20
     ) -> tuple[BetView, ...]:
@@ -355,6 +368,28 @@ class RealReportService:
         """See :meth:`ReportService.export`."""
         records = await _counted(self._core, user_id, None, None)
         return export_file([outcome_row(self._core, r) for r in records])
+
+    async def export_bets(self, user_id: int) -> ExportFile:
+        """See :meth:`ReportService.export_bets`."""
+        bets = await RealBetService(self._core).all_bets(user_id)
+        return bets_export_file(reversed(bets))
+
+
+class RealExpressService:
+    """:class:`~app.services.interfaces.ExpressService` (math in ``express_math``)."""
+
+    def __init__(self, core: Core) -> None:
+        """Share ``core`` with the other real services."""
+        self._core = core
+
+    async def evaluate(self, user_id: int, signal_ids: Sequence[SignalId]) -> ExpressView:
+        """See :meth:`ExpressService.evaluate`."""
+        ids = check_ids(signal_ids)
+        views = [
+            to_view(self._core, await require_signal(self._core, user_id, signal_id))
+            for signal_id in ids
+        ]
+        return evaluate_express(views, self._core.now())
 
 
 __all__ = ["BetId", "window_of"]

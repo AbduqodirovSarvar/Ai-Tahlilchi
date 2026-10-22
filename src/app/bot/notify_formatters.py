@@ -5,7 +5,6 @@ here; templates in :mod:`app.bot.texts` are trusted HTML.
 """
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -17,6 +16,7 @@ from app.bot.formatters import (
     percent,
     selection_label,
     short_date,
+    signed_units,
     units,
     weekday_name,
 )
@@ -39,12 +39,6 @@ MAX_ALERT_CHARS: Final = 1500
 MAX_BATCH_DIFFS: Final = 10
 """Changed signals listed after a bulk recalculation; the rest is summarised."""
 SECONDS_PER_MINUTE: Final = 60
-
-
-def _signed_units(value: Decimal) -> str:
-    """``+2.3`` / ``-1`` / ``0``: a profit in units with an explicit sign."""
-    text = units(value)
-    return f"+{text}" if value > 0 else text
 
 
 def _arrow(before: str, after: str) -> str:
@@ -145,7 +139,7 @@ def format_settled(notice: SettledNotice) -> str:
         texts.SETTLED_PICK.format(selection=selection_label(signal), odds=odds(signal.odds)),
     ]
     if notice.profit_units is not None:
-        lines.append(texts.SETTLED_PROFIT.format(profit=_signed_units(notice.profit_units)))
+        lines.append(texts.SETTLED_PROFIT.format(profit=signed_units(notice.profit_units)))
     return "\n".join(lines)
 
 
@@ -183,7 +177,7 @@ def format_yesterday(summary: DaySummary) -> str:
         won=summary.won,
         lost=summary.lost,
         extra=extra,
-        profit=_signed_units(summary.profit_units),
+        profit=signed_units(summary.profit_units),
         clv=clv,
     )
 

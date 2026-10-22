@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Final
 
 from app.services.interfaces import (
+    BetView,
     CalibrationBucket,
     DaySummary,
     ExportFile,
@@ -244,3 +245,42 @@ def export_file(rows: Iterable[SignalOutcome]) -> ExportFile:
     for row in rows:
         writer.writerow(export_row(row))
     return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
+
+
+BETS_EXPORT_HEADER: Final = (
+    "bet_id",
+    "signal_id",
+    "fixture",
+    "market",
+    "line",
+    "selection",
+    "odds_taken",
+    "stake",
+    "placed_at",
+    "outcome",
+    "profit",
+)
+
+
+def bets_export_file(bets: Iterable[BetView]) -> ExportFile:
+    """The bets CSV of ``/eksport`` (v1.6): one line per bet, open ones with empty result."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(BETS_EXPORT_HEADER)
+    for bet in bets:
+        writer.writerow(
+            (
+                bet.bet_id,
+                "" if bet.signal_id is None else bet.signal_id,
+                bet.fixture_label,
+                bet.market.type.value,
+                "" if bet.market.line is None else bet.market.line,
+                bet.selection.value,
+                bet.odds_taken,
+                bet.stake,
+                bet.placed_at.isoformat(),
+                "" if bet.outcome is None else bet.outcome.value,
+                "" if bet.profit is None else bet.profit,
+            )
+        )
+    return ExportFile(filename="bets.csv", content=buffer.getvalue().encode("utf-8"))

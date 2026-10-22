@@ -19,10 +19,10 @@ from app.bot.account_formatters import (
     default_stake,
     format_bet_placed,
     format_bet_prompt,
-    format_bets,
 )
+from app.bot.bank_ui import limit_ask_keyboard
 from app.bot.callbacks import BetCb, CardCb
-from app.bot.formatters import odds
+from app.bot.formatters import money, odds
 from app.bot.handlers.filters import TYPED_INPUT
 from app.bot.messaging import (
     answer_callback,
@@ -40,7 +40,7 @@ from app.bot.states import (
     start_bet_input,
 )
 from app.services.errors import ValidationFailedError
-from app.services.interfaces import BetDraft, BetView, Services
+from app.services.interfaces import BetDraft, Services, SignalView
 
 DEDUP_PREFIX = "bet"
 LIST_LIMIT = 20
@@ -54,13 +54,27 @@ def prompt_token(signal_id: int, message_id: int) -> str:
 async def on_bet_card(
     callback: CallbackQuery, callback_data: CardCb, services: Services, user_id: int
 ) -> None:
-    """✅ on a card: show the signal's odds and stake and ask to confirm or change them."""
+    """✅ on a card: past a loss limit ask first, else show the numbers to confirm."""
     message = callback_message(callback)
     signal = await services.signals.get_signal(user_id, callback_data.signal_id)
     if signal.retro or message is None:
         raise ValidationFailedError("signal_id", "a retro signal cannot be bet on")
-    settings = await services.settings.get_settings(user_id)
+    bank = await services.bets.bank_summary(user_id)
     await answer_callback(callback)
+    if bank.loss_limit_reached:
+        text = texts.BANK_LIMIT_ASK.format(
+            today=money(bank.loss_today), week=money(bank.loss_this_week)
+        )
+        await send_html(message, text, limit_ask_keyboard(signal.signal_id))
+        return
+    await _send_prompt(message, services, user_id, signal)
+
+
+async def _send_prompt(
+    message: Message, services: Services, user_id: int, signal: SignalView
+) -> None:
+    """The confirmation prompt of a bet on ``signal``."""
+    settings = await services.settings.get_settings(user_id)
     await send_html(
         message,
         format_bet_prompt(signal, settings),
@@ -85,6 +99,11 @@ async def on_bet_prompt(
         await answer_callback(callback, texts.STALE_BUTTON, alert=True)
         return
     match callback_data.action:
+        case "force":
+            await answer_callback(callback)
+            signal = await services.signals.get_signal(user_id, callback_data.signal_id)
+            await edit_html(message, texts.BET_LIMIT_FORCED)
+            await _send_prompt(message, services, user_id, signal)
         case "ok":
             await answer_callback(callback)
             draft = BetDraft(
@@ -142,20 +161,9 @@ async def _record(services: Services, user_id: int, draft: BetDraft) -> str:
     return f"{text}\n\n{texts.BET_LOSS_LIMIT}" if bank.loss_limit_reached else text
 
 
-async def show_bets(message: Message, services: Services, user_id: int) -> None:
-    """🎟 Mening stavkalarim: bank snapshot and the open bets."""
-    settings = await services.settings.get_settings(user_id)
-    bank = await services.bets.bank_summary(user_id)
-    bets: tuple[BetView, ...] = await services.bets.list_bets(
-        user_id, open_only=True, limit=LIST_LIMIT
-    )
-    await send_html(message, format_bets(bank, bets, settings.zone))
-
-
 def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="bets")
-    router.message.register(show_bets, F.text == texts.MENU_BETS)
     router.message.register(on_bet_text, TYPED_INPUT, StateFilter(BetFlow.value_input))
     router.callback_query.register(on_bet_card, CardCb.filter(F.action == "bet"))
     router.callback_query.register(on_bet_prompt, BetCb.filter())

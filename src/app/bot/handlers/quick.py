@@ -13,10 +13,12 @@ from aiogram.types import Message
 
 from app.bot import texts
 from app.bot.draft import WizardDraft
+from app.bot.flow import FlowContext, FlowContextMiddleware
 from app.bot.formatters import escape
 from app.bot.handlers.analysis import start_wizard
+from app.bot.handlers.custom import search_text
 from app.bot.notices import HIGH_PROBABILITY
-from app.bot.parsing import InputError, QuickQuery, parse_quick_query
+from app.bot.parsing import InputError, QuickQuery, parse_fixture_text, parse_quick_query
 from app.bot.session import WizardSession, WizardSessionMiddleware
 from app.bot.states import drop_draft
 from app.bot.wizard import TeamLookup, high_probability, lookup_teams
@@ -93,11 +95,17 @@ async def build_quick_draft(
     return draft
 
 
-async def on_quick(message: Message, command: CommandObject, session: WizardSession) -> None:
-    """``/tahlil [parametrlar]``."""
+async def on_quick(
+    message: Message, command: CommandObject, session: WizardSession, flow: FlowContext
+) -> None:
+    """``/tahlil [parametrlar]``; ``/tahlil Arsenal - Chelsea`` is a custom analysis (F7.1)."""
     argument = (command.args or "").strip()
     if not argument:
         await start_wizard(message, session)
+        return
+    if parse_fixture_text(argument) is not None:
+        await drop_draft(session.state)
+        await search_text(message, flow, argument)
         return
     settings = await session.ctx.services.settings.get_settings(session.ctx.user_id)
     draft = await build_quick_draft(session, settings, argument)
@@ -114,5 +122,6 @@ def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="quick")
     router.message.middleware(WizardSessionMiddleware())
+    router.message.middleware(FlowContextMiddleware())
     router.message.register(on_quick, Command(COMMAND))
     return router

@@ -15,15 +15,22 @@ from aiogram.types import ErrorEvent
 
 from app.bot.handlers import (
     analysis,
+    bank,
     bets,
+    custom,
+    detail,
+    express,
     fallback,
     quick,
     recalc,
+    report,
     settings,
     signals,
     start,
     status,
+    templates,
     today,
+    watch,
 )
 from app.bot.jobs import BackgroundJobs
 from app.bot.middleware import (
@@ -98,7 +105,14 @@ def build_dispatcher(
         recalc,
         today,
         status,
+        bank,
         bets,
+        detail,
+        custom,
+        watch,
+        templates,
+        report,
+        express,
         signals,
         fallback,
     ):

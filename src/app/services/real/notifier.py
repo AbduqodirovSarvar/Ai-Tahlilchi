@@ -9,6 +9,7 @@ from datetime import date, datetime
 
 from app.logging import get_logger
 from app.pipeline.delivery import (
+    UNDELIVERABLE_REFERENCE,
     CancelDelivery,
     DailyDelivery,
     SettledDelivery,
@@ -29,6 +30,7 @@ from app.services.interfaces import (
     SettledNotice,
     SignalCancelled,
     SignalUpdate,
+    UndeliverableAware,
     UpdateKind,
     WatchlistEvent,
     WatchNotification,
@@ -105,6 +107,21 @@ def _encode(ref: MessageRef | None) -> str | None:
     return None if ref is None else f"{ref.chat_id}:{ref.message_id}"
 
 
+def _reference(notifier: Notifier, user_id: int, ref: MessageRef | None) -> str | None:
+    """The ledger reference of a notifier answer.
+
+    ``None`` stays "not delivered, retry" unless the notifier says the user is permanently
+    unreachable (contract v1.6): then the key completes instead of retrying for days.
+    """
+    if (
+        ref is None
+        and isinstance(notifier, UndeliverableAware)
+        and notifier.is_undeliverable(user_id)
+    ):
+        return UNDELIVERABLE_REFERENCE
+    return _encode(ref)
+
+
 def _decode(text: str | None) -> MessageRef | None:
     if not text or ":" not in text:
         return None
@@ -141,7 +158,8 @@ class NotifierDelivery:
         digest = DailyDigest(
             day=message.day, result=result, yesterday=summary if summary.signals else None
         )
-        return _encode(await self._notifier.send_daily_digest(user_id, digest, key=_key(key)))
+        sent = await self._notifier.send_daily_digest(user_id, digest, key=_key(key))
+        return _reference(self._notifier, user_id, sent)
 
     async def update(
         self, user_id: int, message: UpdateDelivery, key: LedgerKey, reply_to: str | None
@@ -155,7 +173,7 @@ class NotifierDelivery:
         sent = await self._notifier.send_signal_update(
             user_id, update, key=_key(key), reply_to=_decode(reply_to)
         )
-        return _encode(sent)
+        return _reference(self._notifier, user_id, sent)
 
     async def cancelled(
         self, user_id: int, message: CancelDelivery, key: LedgerKey, reply_to: str | None
@@ -168,7 +186,7 @@ class NotifierDelivery:
         sent = await self._notifier.send_signal_cancelled(
             user_id, cancelled, key=_key(key), reply_to=_decode(reply_to)
         )
-        return _encode(sent)
+        return _reference(self._notifier, user_id, sent)
 
     async def watch_event(self, user_id: int, message: WatchDelivery, key: LedgerKey) -> str | None:
         """Send a watchlist event."""
@@ -188,7 +206,8 @@ class NotifierDelivery:
             if message.card is None
             else to_view(self._core, message.card.record, card=message.card),
         )
-        return _encode(await self._notifier.send_watchlist_event(user_id, event, key=_key(key)))
+        sent = await self._notifier.send_watchlist_event(user_id, event, key=_key(key))
+        return _reference(self._notifier, user_id, sent)
 
     async def settled(self, user_id: int, message: SettledDelivery, key: LedgerKey) -> str | None:
         """Send a settlement."""
@@ -196,7 +215,8 @@ class NotifierDelivery:
             signal=to_view(self._core, message.card.record, card=message.card),
             profit_units=message.profit_units,
         )
-        return _encode(await self._notifier.send_result_settled(user_id, notice, key=_key(key)))
+        sent = await self._notifier.send_result_settled(user_id, notice, key=_key(key))
+        return _reference(self._notifier, user_id, sent)
 
     async def alert_admin(self, component: str, message: str, at: datetime) -> None:
         """Report a system error to the administrators."""

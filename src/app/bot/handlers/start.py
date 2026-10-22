@@ -4,25 +4,15 @@ Menu items whose features arrive in later waves (F7) answer with a polite
 "tez orada" message but stay wired, so the menu layout is final from day one.
 """
 
-from typing import Final
-
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.bot import keyboards, texts
 from app.bot.draft import StaleDraftError
-from app.bot.formatters import escape
 from app.bot.messaging import drop_keyboard, send_html
 from app.bot.states import drop_draft, load_draft
-
-PLACEHOLDER_ITEMS: Final = (
-    texts.MENU_CUSTOM,
-    texts.MENU_TEMPLATES,
-    texts.MENU_WATCHLIST,
-    texts.MENU_REPORT,
-)
 
 
 async def _leave_flows(message: Message, state: FSMContext) -> bool:
@@ -55,17 +45,10 @@ async def handle_cancel(message: Message, state: FSMContext) -> None:
     await send_html(message, texts.CANCELLED if was_active else texts.NOTHING_TO_CANCEL)
 
 
-async def handle_placeholder(message: Message) -> None:
-    """A menu item of a later wave."""
-    feature = escape(message.text or "")
-    await send_html(message, texts.PLACEHOLDER.format(feature=feature))
-
-
 def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="start")
     router.message.register(handle_start, CommandStart())
     router.message.register(handle_help, Command("yordam", "help"))
     router.message.register(handle_cancel, Command("bekor", "cancel"))
-    router.message.register(handle_placeholder, F.text.in_(PLACEHOLDER_ITEMS))
     return router

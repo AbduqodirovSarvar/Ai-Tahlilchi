@@ -7,7 +7,15 @@ or ``&``; values substituted into ``{placeholders}`` are escaped by the formatte
 from typing import Final
 
 from app.domain import MarketType, Selection, Sport
-from app.services.interfaces import ConfidenceLevel, ResultMark, RiskProfile, SortKey
+from app.services.interfaces import (
+    ConfidenceLevel,
+    FormResult,
+    ResultMark,
+    RiskProfile,
+    SortKey,
+    WatchKind,
+    WatchNotification,
+)
 
 # --------------------------------------------------------------------------- main menu
 MENU_ANALYSIS: Final = "📊 Tahlil"
@@ -37,6 +45,12 @@ HELP: Final = (
     "/start — bosh menyu\n"
     "/tahlil — tezkor tahlil, masalan:\n"
     "<code>/tahlil 25.10-31.10 futbol 60% Arsenal,Inter</code>\n"
+    "<code>/tahlil Arsenal - Chelsea</code> — maxsus tahlil (EV filtrisiz); retro: "
+    "<code>/tahlil kecha</code>\n"
+    "/kuzat — sevimlilar: <code>/kuzat Barcelona</code>\n"
+    "/bank — bank, stavkalar va grafik\n"
+    "/hisobot — natijalar hisoboti; /eksport — CSV (signallar va stavkalar)\n"
+    "/ekspress — 2–4 signaldan ekspress hisoblash\n"
     "/qayta — bugungi signallarni qayta hisoblash (yoki <code>/qayta ertaga</code>, "
     "<code>/qayta 3kun</code>)\n"
     "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
@@ -58,11 +72,6 @@ HELP: Final = (
     "• ❗ <b>Qiymatsiz</b> — EV manfiy: tavsiya etilmaydi."
 )
 
-PLACEHOLDER: Final = (
-    "🔜 <b>{feature}</b> bo'limi tez orada qo'shiladi.\n"
-    "Hozircha 📊 <b>Tahlil</b> va ⚙️ <b>Sozlamalar</b> dan foydalaning."
-)
-PLACEHOLDER_ALERT: Final = "🔜 Bu imkoniyat tez orada qo'shiladi."
 UNKNOWN_TEXT: Final = "🤔 Buni tushunmadim. Menyudan bo'lim tanlang yoki /yordam ni bosing."
 USE_BUTTONS: Final = (
     "👆 Iltimos, yuqoridagi tugmalardan birini tanlang (yoki /bekor — bekor qilish)."
@@ -233,6 +242,7 @@ CARD_CAUTION: Final = "⚠️ AI ogohlantirishi: ehtiyot bo'ling"
 CARD_RISK_FLAGS: Final = "⚠️ Xavflar: {flags}"
 CARD_DATA_AS_OF: Final = "📦 Ma'lumot {time} holatiga"
 CARD_RESULT: Final = "Natija: {result}"
+CARD_ODDS_MOVED: Final = "📌 Tavsiya koeff.: {recommended} → hozir {current}"
 CARD_HIDDEN: Final = "🙈 Yashirildi: {fixture}"
 CARD_CANCELLED: Final = "🚫 Signal bekor qilingan"
 BTN_RECALC: Final = "🔄 Qayta hisoblash"
@@ -254,11 +264,26 @@ RESULTS_HEADER: Final = "📊 <b>Natijalar</b>: {window} · {count} ta signal ·
 RESULTS_RETRO: Final = (
     "🕰 Retro-tahlil: o'tgan o'yinlar, model o'sha paytda nima bergan bo'lardi va natija ✅/❌."
 )
+RESULTS_RETRO_TALLY: Final = (
+    "🧮 O'sha paytdagi tanlovlar: ✅ {won} · ❌ {lost} — o'tish ulushi {rate}{extra}."
+)
+RESULTS_RETRO_PENDING: Final = " · ⏳ {count} ta natijasiz"
 RESULTS_SHORTFALL: Final = (
     "ℹ️ Shartlarga {matched} ta o'yin mos keldi (siz {requested} ta so'ragansiz). "
     "Ro'yxat shartga mos kelmagan o'yinlar bilan to'ldirilmaydi."
 )
 RESULTS_FAILED: Final = "⚠️ {count} ta o'yinni tahlil qilib bo'lmadi, ular o'tkazib yuborildi."
+RESULTS_NO_PRICE: Final = (
+    "💱 {count} ta o'yin: 1xBet narxi yo'q, shuning uchun baholanmadi "
+    "(bukmeker koeffitsient chiqarmagan bo'lishi mumkin)."
+)
+RESULTS_STALE_PRICE: Final = (
+    "⏱ {count} ta o'yin: 1xBet narxi eskirgan, shuning uchun baholanmadi. "
+    "🔄 Qayta hisoblash bilan yangilab ko'ring."
+)
+RESULTS_DATA_STALE: Final = (
+    "📦 Ma'lumot yangilanmadi — eski ma'lumot ishlatildi. Raqamlar eskirgan bo'lishi mumkin."
+)
 RESULTS_EMPTY: Final = (
     "🤷 <b>Value topilmadi.</b>\n"
     "{window} oralig'ida shartlaringizga mos qiymatli tanlov yo'q ({fixtures} ta o'yin "
@@ -289,6 +314,8 @@ BTN_TODAY: Final = "Bugun"
 BTN_TOMORROW: Final = "Ertaga"
 BTN_WEEKEND: Final = "Dam olish kunlari"
 BTN_NEXT_DAYS: Final = "{days} kun"
+BTN_YESTERDAY: Final = "🕰 Kecha (retro)"
+BTN_LAST_WEEK: Final = "🕰 O'tgan hafta (retro)"
 BTN_CALENDAR: Final = "📅 Oraliq tanlash"
 CALENDAR_PICK_START: Final = "📅 <b>Boshlanish sanasini</b> tanlang:"
 CALENDAR_PICK_END: Final = (
@@ -429,7 +456,7 @@ QUICK_ERROR: Final = (
     "❗ {problem}\n\n"
     "Namuna: <code>/tahlil 25.10-31.10 futbol 60% Arsenal,Inter</code>\n"
     "Qo'shimcha: <code>ev5%</code>, <code>10ta</code>, <code>bugun</code>, <code>ertaga</code>, "
-    "<code>dam</code>, <code>3kun</code>."
+    "<code>dam</code>, <code>3kun</code>; retro: <code>kecha</code>, <code>o'tgan hafta</code>."
 )
 QUICK_TEAM_NOT_FOUND: Final = "«{name}» jamoasi topilmadi. Nomini tekshiring."
 QUICK_TEAM_AMBIGUOUS: Final = "«{name}» noaniq: {options}. Aniqroq yozing."
@@ -621,8 +648,14 @@ STATUS_MODE: Final[dict[str, str]] = {
 }
 STATUS_QUOTA_HEADER: Final = "📡 <b>API limitlari</b> (bugun):"
 STATUS_QUOTA_LINE: Final = (
-    "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining} · qo'lda: {manual}"
+    "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining}\n"
+    "  qo'lda so'rovlar: {manual_used}/{manual_reserve} · qo'lda qoldi {manual_left}"
 )
+STATUS_LLM: Final = (
+    "🤖 <b>AI (Gemini)</b> (bugun): so'rovlar {requests_used}/{requests_limit} · "
+    "tokenlar {tokens_used}/{tokens_limit}"
+)
+STATUS_LLM_NONE: Final = "🤖 AI (Gemini): limit ma'lumoti yo'q."
 STATUS_QUOTA_NONE: Final = "📡 API limitlari: ma'lumot yo'q."
 STATUS_REFRESH: Final = "🔄 Ma'lumot oxirgi yangilangan: <b>{time}</b> ({age})"
 STATUS_REFRESH_NEVER: Final = "🔄 Ma'lumot hali yangilanmagan."
@@ -684,3 +717,370 @@ BETS_LINE: Final = "• {fixture} — {selection} @ {odds} · {stake} · {date}"
 BETS_MORE: Final = "…va yana {count} ta"
 BET_SIDE_HOME: Final = "uy jamoasi"
 BET_SIDE_AWAY: Final = "mehmon jamoasi"
+
+
+# --------------------------------------------------------------------------- detail card (F7.2)
+DETAIL_TITLE: Final = "📋 <b>{fixture}</b>\n🏆 {league} · 🕒 {time}"
+DETAIL_SCORE: Final = "🏁 Hisob: <b>{home}:{away}</b>"
+DETAIL_LINEUPS_CONFIRMED: Final = "✅ Tarkiblar e'lon qilingan"
+DETAIL_LINEUPS_UNKNOWN: Final = "⏳ Tarkiblar hali e'lon qilinmagan"
+DETAIL_FORM_HEADER: Final = "📈 <b>Forma</b> (so'nggi o'yinlar, eskidan yangiga)"
+DETAIL_FORM_LINE: Final = "{team}: {form}"
+DETAIL_NO_DATA: Final = "ma'lumot yo'q"
+FORM_MARKS: Final[dict[FormResult, str]] = {
+    FormResult.WIN: "✅",
+    FormResult.DRAW: "➖",
+    FormResult.LOSS: "❌",
+}
+DETAIL_STATS_HEADER: Final = "📊 <b>Statistika</b> (o'rtacha, o'z roli bo'yicha)"
+DETAIL_STATS_LINE: Final = "{team} ({role}, {matches} o'yin): urgan {gf} · o'tkazgan {ga}{xg}"
+DETAIL_STATS_XG: Final = " · xG {xg_for} / {xg_against}"
+ROLE_HOME: Final = "uyda"
+ROLE_AWAY: Final = "safarda"
+DETAIL_H2H_HEADER: Final = "🤝 <b>Oldingi uchrashuvlar</b>"
+DETAIL_H2H_EMPTY: Final = "🤝 Oldingi uchrashuvlar: ma'lumot yo'q"
+DETAIL_H2H_LINE: Final = "{date} · {home} {home_score}:{away_score} {away}"
+DETAIL_ABSENCES_HEADER: Final = "🩹 <b>Jarohat va diskvalifikatsiyalar</b>"
+DETAIL_ABSENCES_NONE: Final = "🩹 Jarohat va diskvalifikatsiyalar: ma'lum emas"
+DETAIL_ABSENCE_LINE: Final = "• {team}: {player} — {reason}"
+DETAIL_SCORES_HEADER: Final = "🎯 <b>Eng ehtimolli hisoblar</b>"
+DETAIL_SCORE_ITEM: Final = "{home}:{away} — {probability}"
+DETAIL_MARKETS_HEADER: Final = "💹 <b>Barcha bozorlar</b> (model | adolatli koeff. | bukmeker | EV)"
+DETAIL_MARKETS_COLUMNS: Final = "Tanlov               Model Adolatli  Bukm.      EV"
+DETAIL_MARKETS_EMPTY: Final = "💹 Bozorlar jadvali: narxlar hali yo'q"
+DETAIL_NO_PRICE: Final = "—"
+DETAIL_MOVES_HEADER: Final = "📉 <b>Koeffitsient harakati</b> (ertalab → hozir)"
+DETAIL_MOVE_LINE: Final = "• {selection}: {opening} → {current} ({change})"
+DETAIL_AS_OF: Final = "📦 Ma'lumot {time} holatiga"
+DETAIL_MORE: Final = "…va yana {count} ta"
+SHORT_HOME: Final = "1"
+SHORT_AWAY: Final = "2"
+SHORT_DRAW: Final = "X"
+SHORT_DOUBLE: Final[dict[Selection, str]] = {
+    Selection.HOME_OR_DRAW: "1X",
+    Selection.HOME_OR_AWAY: "12",
+    Selection.DRAW_OR_AWAY: "X2",
+}
+SHORT_OVER: Final = "Ko'p {line}"
+SHORT_UNDER: Final = "Kam {line}"
+SHORT_BTTS_YES: Final = "Ikkalasi gol: ha"
+SHORT_BTTS_NO: Final = "Ikkalasi gol: yo'q"
+SHORT_HANDICAP: Final = "Fora {side} ({line})"
+BTN_BACK_TO_CARD: Final = "⬅️ Kartaga qaytish"
+
+
+# --------------------------------------------------------------------------- custom analysis (F7.1)
+CUSTOM_PROMPT: Final = (
+    "🔍 <b>Maxsus tahlil</b>\n"
+    "Jamoa nomini yozing, masalan <code>Real</code>, yoki o'yinni: "
+    "<code>Arsenal - Chelsea</code>. Lotin yoki kirill, xato yozilgan nom ham topiladi.\n"
+    "Yoki bugungi/ertangi o'yinlardan tanlang.\n\n"
+    "ℹ️ Bu tahlil EV filtrisiz ishlaydi: o'yin qiymatsiz bo'lsa ham barcha bozorlar "
+    "ehtimolliklari ko'rsatiladi."
+)
+BTN_CUSTOM_TODAY: Final = "📅 Bugungi o'yinlar"
+BTN_CUSTOM_TOMORROW: Final = "📆 Ertangi o'yinlar"
+BTN_CUSTOM_RUN: Final = "▶️ Tahlil qilish ({count})"
+BTN_CUSTOM_AGAIN: Final = "🔎 Qayta qidirish"
+CUSTOM_TEAMS_FOUND: Final = "👕 <b>{query}</b> bo'yicha topildi. Jamoani tanlang:"
+CUSTOM_NOT_FOUND: Final = (
+    "🔎 «{query}» topilmadi. Boshqacha yozib ko'ring: to'liq nom yoki "
+    "<code>Arsenal - Chelsea</code>."
+)
+CUSTOM_TEAM_FIXTURES: Final = (
+    "👕 <b>{team}</b> — yaqin o'yinlar. Tahlil qilinadiganlarini belgilang:"
+)
+CUSTOM_NO_UPCOMING: Final = (
+    "ℹ️ {team} uchun yaqin {days} kunda o'yin topilmadi. Boshqa jamoani yozing."
+)
+CUSTOM_FIXTURES_FOUND: Final = "⚽ <b>{query}</b> — topilgan o'yinlar. Belgilang:"
+CUSTOM_DAY_FIXTURES: Final = "⚽ <b>{day}</b> o'yinlari. Tahlil qilinadiganlarini belgilang:"
+CUSTOM_DAY_EMPTY: Final = "ℹ️ {day} uchun o'yin topilmadi. Boshqa kunni yoki jamoa nomini yozing."
+CUSTOM_TRUNCATED: Final = "ℹ️ Faqat birinchi {count} ta o'yin ko'rsatildi."
+CUSTOM_SELECTED: Final = "Tanlangan: {count} (ko'pi bilan {max})"
+CUSTOM_LIMIT: Final = "Bir martada ko'pi bilan {max} ta o'yin tahlil qilinadi"
+CUSTOM_SELECT_ONE: Final = "Avval kamida bitta o'yinni belgilang"
+CUSTOM_RUNNING: Final = "⏳ Maxsus tahlil boshlandi…"
+CUSTOM_ALREADY_RUNNING: Final = "⏳ Maxsus tahlil allaqachon bajarilmoqda, kuting."
+CUSTOM_RESULT_HEADER: Final = (
+    "🔍 <b>Maxsus tahlil</b>: {fixtures} ta o'yin · {picks} ta tanlov (EV filtrisiz)"
+)
+CUSTOM_FIXTURE_HEADER: Final = "{icon} <b>{fixture}</b>   🕒 {time}  🏆 {league}"
+CUSTOM_PICK_LINE: Final = "{mark} {selection}: {probability} · @{odds} · EV {ev}"
+CUSTOM_MARK_VALUE: Final = "✅"
+CUSTOM_MARK_NO_VALUE: Final = "▫️"
+CUSTOM_MARK_NEGATIVE: Final = "❗"
+CUSTOM_LEGEND: Final = "✅ — chegaralaringizdan o'tgan tanlov (karta pastda), ❗ — EV manfiy."
+CUSTOM_NO_VALUE_NOTE: Final = (
+    "ℹ️ <b>Value topilmadi</b>: bu o'yinda hech bir tanlov chegaralaringizdan o'tmadi. "
+    "Yuqorida barcha bozorlar bo'yicha ehtimolliklar."
+)
+CUSTOM_MORE_PICKS: Final = "…va yana {count} ta tanlov"
+CUSTOM_EMPTY_RESULT: Final = (
+    "🤷 <b>Natija yo'q.</b> Tanlangan o'yinlar uchun bukmeker narxi topilmadi "
+    "yoki o'yin boshlangan. Boshqa o'yinni tanlab ko'ring."
+)
+
+
+# --------------------------------------------------------------------------- watchlist (F7.3)
+WATCH_TITLE: Final = "⭐ <b>Sevimlilar</b> — {count} ta"
+WATCH_EMPTY: Final = (
+    "⭐ <b>Sevimlilar</b>\n"
+    "Hali hech narsa kuzatilmayapti.\n"
+    "👕 Jamoa yoki 🏆 ligani qo'shing, yoki <code>/kuzat Barcelona</code> deb yozing."
+)
+WATCH_FOOTER: Final = (
+    "Sevimli jamoa yoki liga o'yini kunlik xabarga <b>har doim</b> kiritiladi "
+    "(EV past bo'lsa ham, ⭐ belgisi bilan)."
+)
+WATCH_ITEM_LINE: Final = "{icon} <b>{name}</b> — {flags}"
+WATCH_FLAGS_NONE: Final = "bildirishnomasiz"
+WATCH_MORE: Final = "…va yana {count} ta"
+WATCH_KIND_ICONS: Final[dict[WatchKind, str]] = {WatchKind.TEAM: "👕", WatchKind.LEAGUE: "🏆"}
+WATCH_NOTIFY_LABELS: Final[dict[WatchNotification, str]] = {
+    WatchNotification.LINEUPS: "📋 Tarkib",
+    WatchNotification.ODDS_MOVE: "📉 Koeffitsient",
+    WatchNotification.RESULT: "🏁 Natija",
+}
+WATCH_ITEM_TITLE: Final = (
+    "{icon} <b>{name}</b> ({sport})\n"
+    "Qaysi bildirishnomalar kelsin? Tugmani bossangiz yoqiladi/o'chadi."
+)
+BTN_WATCH_ADD_TEAM: Final = "➕ Jamoa"
+BTN_WATCH_ADD_LEAGUE: Final = "➕ Liga"
+BTN_WATCH_REMOVE: Final = "🗑 Olib tashlash"
+BTN_WATCH_BACK: Final = "⬅️ Sevimlilarga"
+BTN_WATCH_CARD: Final = "⭐ Kuzatish"
+WATCH_ASK_TEAM: Final = (
+    "👕 Kuzatmoqchi bo'lgan jamoa nomini yozing, masalan <code>Barcelona</code>."
+)
+WATCH_PICK_TEAM: Final = "👕 «{query}» bo'yicha topildi. Jamoani tanlang:"
+WATCH_PICK_LEAGUE: Final = "🏆 Kuzatmoqchi bo'lgan ligani tanlang:"
+WATCH_NO_LEAGUES: Final = "🏆 Liga topilmadi. Sozlamalarda sport turini tekshiring."
+WATCH_NOT_FOUND: Final = "🔎 «{query}» jamoasi topilmadi. Boshqacha yozib ko'ring."
+WATCH_ADDED: Final = "⭐ <b>{name}</b> sevimlilarga qo'shildi."
+WATCH_REMOVED: Final = "🗑 <b>{name}</b> sevimlilardan olib tashlandi."
+WATCH_GONE: Final = "ℹ️ Bu element endi sevimlilarda yo'q."
+WATCH_CARD_ASK: Final = "⭐ <b>{fixture}</b> — nimani kuzatamiz?"
+WATCH_CARD_ON: Final = "✅ {name} (olib tashlash)"
+WATCH_CARD_OFF: Final = "⭐ {name}"
+WATCH_CARD_UNKNOWN: Final = "ℹ️ Katalogda topilmadi: {names}."
+WATCH_STORED: Final = "Saqlandi"
+WATCH_ADDED_ALERT: Final = "⭐ Sevimlilarga qo'shildi"
+WATCH_REMOVED_ALERT: Final = "🗑 Sevimlilardan olib tashlandi"
+
+
+# --------------------------------------------------------------------------- templates (F7.4)
+TPL_TITLE: Final = "💾 <b>Shablonlarim</b> — {count} ta"
+TPL_EMPTY: Final = (
+    "💾 <b>Shablonlarim</b>\n"
+    "Hali shablon yo'q.\n"
+    "📊 Tahlil → tasdiqlash ekranida «💾 Shablon sifatida saqlash» tugmasini bosing."
+)
+TPL_LINE: Final = "• <b>{name}</b> — {summary}{schedule}"
+TPL_SUMMARY: Final = "{dates} · {sports} · ≥ {probability} · EV ≥ {ev}"
+TPL_SCHEDULE_SHORT: Final = " · 🗓 {days} {time}"
+TPL_MORE: Final = "…va yana {count} ta"
+TPL_DATES: Final[dict[str, str]] = {
+    "today": "bugun",
+    "tomorrow": "ertaga",
+    "weekend": "dam olish kunlari",
+    "next_days": "{days} kun",
+    "range": "{start}–{end}",
+}
+TPL_DETAIL: Final = (
+    "💾 <b>{name}</b>\n"
+    "📅 {dates} · {sports}\n"
+    "🎯 ≥ {probability} · EV ≥ {ev}\n"
+    "🔎 {scope} · 📊 {markets}\n"
+    "🔢 {count} · ↕️ {sort}\n"
+    "🗓 Jadval: {schedule}"
+)
+TPL_NO_SCHEDULE: Final = "yo'q"
+TPL_SCHEDULE_TEXT: Final = "{days}, {time}"
+TPL_UNKNOWN_ITEM: Final = "tanlangan element"
+BTN_TPL_RUN: Final = "▶️ Ishga tushirish"
+BTN_TPL_SCHEDULE: Final = "🗓 Jadval"
+BTN_TPL_DELETE: Final = "🗑 O'chirish"
+BTN_TPL_BACK: Final = "⬅️ Shablonlarga"
+BTN_TPL_DELETE_YES: Final = "🗑 Ha, o'chirish"
+BTN_TPL_DELETE_NO: Final = "↩️ Yo'q"
+TPL_DELETE_ASK: Final = "🗑 <b>{name}</b> shabloni o'chirilsinmi? Qaytarib bo'lmaydi."
+TPL_DELETED: Final = "🗑 Shablon o'chirildi: <b>{name}</b>"
+TPL_SCHEDULE_TITLE: Final = (
+    "🗓 <b>{name}</b> — jadval\n"
+    "Kunlarni belgilang va vaqtni tanlang (mahalliy vaqt, {zone}).\n"
+    "Tanlangan: <b>{days}</b> · <b>{time}</b>"
+)
+TPL_SCHEDULE_NOTE: Final = (
+    "ℹ️ Jadval saqlanadi, lekin avtomatik ishga tushirish hozircha ulanmagan: "
+    "tahlilni shablondan qo'lda ishga tushiring."
+)
+TPL_NO_DAYS: Final = "kun tanlanmagan"
+BTN_TPL_SAVE_SCHEDULE: Final = "💾 Saqlash"
+BTN_TPL_CLEAR_SCHEDULE: Final = "🚫 Jadvalni o'chirish"
+BTN_TPL_TYPE_TIME: Final = "✏️ Vaqt kiritish"
+TPL_TIME_PROMPT: Final = "✏️ Jadval vaqtini yozing, masalan: <code>08:30</code>"
+TPL_SCHEDULE_SAVED: Final = "🗓 Jadval saqlandi: <b>{schedule}</b>."
+TPL_SCHEDULE_CLEARED: Final = "🗓 <b>{name}</b>: jadval o'chirildi."
+TPL_PICK_A_DAY: Final = "Kamida bitta kunni belgilang"
+TPL_GONE: Final = "ℹ️ Bu shablon endi yo'q."
+TPL_RUNNING: Final = "💾 Shablon: <b>{name}</b>"
+
+
+# --------------------------------------------------------------------------- bank and bets (F7.5)
+BANK_TITLE: Final = "🎟 <b>Mening stavkalarim</b>"
+BANK_UNIT: Final = "🎲 Unit: <b>{unit}</b>"
+BANK_UNIT_UNSET: Final = "🎲 Unit kiritilmagan: ⚙️ Bank va limitlar."
+BANK_SETTLED: Final = "📊 Yopilgan: {count} ta · ✅ {won} · ❌ {lost} · ↩️ {void} · 💸 {cashout}"
+BANK_PL: Final = "💰 Foyda/zarar (yopilganlar): <b>{profit}</b>{yield_part}"
+BANK_YIELD: Final = " · stavkaga nisbatan {value}"
+BANK_RECENT: Final = "(oxirgi {count} ta stavka bo'yicha)"
+BANK_LIMITS: Final = "🛑 Zarar limiti: bugun {today}/{daily}, hafta {week}/{weekly}"
+BANK_LIMIT_NOT_SET: Final = "belgilanmagan"
+BTN_BANK_OPEN: Final = "🟡 Ochiq ({count})"
+BTN_BANK_SETTLED: Final = "✅ Yopilgan"
+BTN_BANK_CHART: Final = "📈 Bank grafigi"
+BTN_BANK_SETUP: Final = "⚙️ Bank va limitlar"
+BTN_BANK_HOME: Final = "⬅️ Stavkalarim"
+BANK_OPEN_TITLE: Final = (
+    "🟡 <b>Ochiq stavkalar</b> — {count} ta\nNatijani belgilash uchun stavkani tanlang."
+)
+BANK_SETTLED_TITLE: Final = "✅ <b>Yopilgan stavkalar</b> (oxirgi {count} ta)"
+BANK_SETTLED_EMPTY: Final = "Yopilgan stavkalar hali yo'q."
+BANK_SETTLED_LINE: Final = "• {fixture} — {selection} @ {odds} · {stake} → {result} {profit}"
+BANK_BET_TITLE: Final = (
+    "🎟 <b>{fixture}</b>\n"
+    "🎯 {selection} @ <b>{odds}</b> · {stake}\n\n"
+    "O'yin tugagach natijani qo'lda belgilashingiz mumkin. Belgi shu signaldagi barcha "
+    "stavkalarga tegadi."
+)
+BTN_MARK_CASHOUT: Final = "💸 Cashout"
+BANK_MARKED: Final = "✅ Natija belgilandi: {result}"
+BANK_MARK_REFUSED: Final = "O'yin hali boshlanmagan: natijani belgilab bo'lmaydi."
+BANK_CASHOUT_PROMPT: Final = (
+    "💸 Cashout natijasini <b>unit</b> da yozing (foyda musbat, zarar manfiy), "
+    "masalan <code>0.8</code> yoki <code>-0.4</code>."
+)
+BANK_CASHOUT_RANGE: Final = "Cashout natijasi -100 dan 100 gacha unit bo'lishi kerak."
+BANK_NO_SIGNAL: Final = "Bu stavka signalga bog'lanmagan: natijani belgilab bo'lmaydi."
+BANK_NO_CHART: Final = (
+    "📈 Grafik uchun bank (⚙️ Bank va limitlar) va kamida bitta yopilgan stavka kerak."
+)
+BANK_CHART_CAPTION: Final = "📈 Bank: {first} → {last}"
+BANK_SETUP_TITLE: Final = "⚙️ <b>Bank va limitlar</b>\nQaysi qiymatni o'zgartirasiz?"
+BANK_LIMIT_ASK: Final = (
+    "🛑 <b>Zarar limitiga yetdingiz</b> (bugun {today}, hafta {week}).\n"
+    "Qaror sizniki, lekin bugun to'xtab turish tavsiya etiladi. Baribir stavka yozasizmi?"
+)
+BTN_BANK_FORCE: Final = "🛑 Baribir davom etaman"
+BET_LIMIT_FORCED: Final = "🛑 Davom etasiz: qaror sizniki."
+BANK_NOT_FOUND: Final = "ℹ️ Bu stavka topilmadi (o'chirilgan yoki yopilgan)."
+CHART_BANK_TITLE: Final = "Bank o'zgarishi (kun oxiridagi balans)"
+CHART_BANK_START: Final = "boshlang'ich bank"
+CHART_CALIBRATION_TITLE: Final = "Kalibratsiya: model va'dasi va haqiqat"
+CHART_CALIBRATION_X: Final = "Model ehtimolligi, %"
+CHART_CALIBRATION_Y: Final = "Haqiqatda o'tgan, %"
+CHART_YIELD_X: Final = "Yield, %"
+CHART_SEGMENTS_TITLE: Final = "Yield: {group} bo'yicha"
+
+
+# --------------------------------------------------------------------------- report (F7.6)
+REPORT_TITLE: Final = "📈 <b>Hisobot</b> — {period}"
+REPORT_PERIOD_ALL: Final = "hammasi ({end} gacha)"
+REPORT_PERIOD_RANGE: Final = "{start}–{end}"
+REPORT_GROUP_LINE: Final = "🧩 Kesim: <b>{group}</b>"
+REPORT_COUNTS: Final = (
+    "📊 Signallar: <b>{signals}</b> · yopilgan {settled}: ✅ {won} · ❌ {lost} · ↩️ {void}"
+)
+REPORT_PROFIT: Final = "💰 Foyda: <b>{profit}</b> unit · Yield: {yield_rate}"
+REPORT_ROI: Final = "🎟 ROI (sizning stavkalaringiz): {roi}"
+REPORT_ROI_NONE: Final = "🎟 ROI: shu davrda stavkangiz yo'q"
+REPORT_CLV: Final = "📐 CLV: {clv} · koeffitsienti yopilishdan yaxshi: {beat} signalda"
+REPORT_WINRATE: Final = "🎯 Win rate: {rate} · eng uzun mag'lubiyat seriyasi: {streak}"
+REPORT_NONE: Final = "—"
+REPORT_EMPTY: Final = (
+    "🤷 Bu davrda tavsiya qilingan signal yo'q.\n"
+    "Davrni kengaytiring (30 kun, hammasi) yoki avval 📊 Tahlil / ⚡ Bugungi signallar "
+    "orqali signal oling."
+)
+REPORT_NO_SETTLED: Final = "⏳ Signallar bor, lekin hali birortasi yopilmagan: natijalarni kuting."
+REPORT_CALIBRATION_HEADER: Final = (
+    "📉 <b>Kalibratsiya</b> — bot bergan foizlarga qanchalik ishonish mumkin"
+)
+REPORT_CALIBRATION_COLUMNS: Final = "Model ehtimolligi   n   Va'da   Haqiqat"
+REPORT_CALIBRATION_SENTENCE: Final = (
+    "💡 {lower}–{upper}% deb berilgan signallar haqiqatda {actual} holatda o'tdi ({count} ta)."
+)
+REPORT_CALIBRATION_THIN: Final = (
+    "ℹ️ Ma'lumot kam: {count} ta yopilgan signal ishonchli xulosa uchun yetarli emas."
+)
+REPORT_SEGMENTS_HEADER: Final = "🧩 <b>Kesim bo'yicha</b> ({group})"
+REPORT_SEGMENTS_COLUMNS: Final = "Kesim                     n   Foyda  Yield    CLV   Win"
+REPORT_MORE: Final = "…va yana {count} ta"
+REPORT_GROUP_LABELS: Final[dict[str, str]] = {
+    "": "kesimsiz",
+    "sport": "sport",
+    "league": "liga",
+    "market": "bozor",
+    "risk_profile": "risk profili",
+    "confidence": "ishonch",
+}
+BTN_REPORT_PERIODS: Final[dict[str, str]] = {
+    "7": "7 kun",
+    "30": "30 kun",
+    "all": "Hammasi",
+    "c": "📅 O'zim",
+}
+BTN_REPORT_CHART: Final = "📊 Grafik"
+BTN_REPORT_EXPORT: Final = "📤 CSV"
+REPORT_RANGE_PROMPT: Final = (
+    "📅 Davrni yozing: <code>01.10 - 21.10</code> (o'tgan sanalar, bugungacha)."
+)
+REPORT_RANGE_FUTURE: Final = (
+    "Hisobot faqat bugungacha bo'lgan sanalar uchun: tugash sanasi bugundan keyin bo'lmasin."
+)
+REPORT_NO_CHART: Final = "📊 Grafik uchun kamida bitta yopilgan signal (yoki kesim) kerak."
+REPORT_CHART_CALIBRATION: Final = "📉 Kalibratsiya: model va'dasi va haqiqat"
+REPORT_CHART_SEGMENTS: Final = "🧩 Yield: {group} bo'yicha"
+EXPORT_CAPTION_SIGNALS: Final = "📤 Signallar (CSV)"
+EXPORT_CAPTION_BETS: Final = "📤 Stavkalar (CSV)"
+EXPORT_INTRO: Final = "📤 Eksport tayyorlanmoqda…"
+
+
+# --------------------------------------------------------------------------- express (F7.8)
+EXPRESS_PICK: Final = (
+    "🧩 <b>Ekspress tuzuvchi</b>\n"
+    "2–4 ta signalni belgilang (har biri boshqa o'yindan). Tanlangan: {count}"
+)
+EXPRESS_EMPTY: Final = (
+    "🧩 Ekspress uchun kamida 2 ta faol signal kerak (turli o'yinlardan).\n"
+    "Avval 📊 Tahlil yoki ⚡ Bugungi signallar orqali signal oling."
+)
+BTN_EXPRESS: Final = "🧩 Ekspress"
+BTN_EXPRESS_CALC: Final = "🧮 Hisoblash ({count})"
+BTN_EXPRESS_BACK: Final = "⬅️ Tanlashga qaytish"
+BTN_EXPRESS_CLOSE: Final = "❌ Yopish"
+EXPRESS_SAME_MATCH: Final = "Bir o'yindagi bozorlar birlashtirilmaydi: ular o'zaro bog'liq"
+EXPRESS_LIMIT: Final = "Ekspressda ko'pi bilan {max} ta tanlov bo'ladi"
+EXPRESS_NEED_TWO: Final = "Kamida {min} ta tanlov belgilang"
+EXPRESS_RESULT_HEADER: Final = "🧩 <b>Ekspress</b> — {count} ta tanlov"
+EXPRESS_LEG: Final = "{number}. {fixture}: {selection} @ {odds} ({probability})"
+EXPRESS_TOTALS: Final = (
+    "📈 Umumiy koeffitsient: <b>{odds}</b>\n"
+    "🎯 Umumiy ehtimollik: <b>{probability}</b> (adolatli koeff. {fair_odds})\n"
+    "💹 EV: <b>{ev}</b>"
+)
+EXPRESS_NEGATIVE: Final = "❗ Qiymatsiz: bu ekspressning EV si manfiy."
+EXPRESS_YOURS: Final = (
+    "⚠️ Sizning ekspressingiz: {count} ta tanlov, har birining ehtimolligi {low}–{high} "
+    "→ hammasi birdaniga o'tish ehtimolligi atigi {probability}."
+)
+EXPRESS_WARNING: Final = (
+    "⚠️ Eslatma: 3 ta 70% lik tanlovdan tuzilgan ekspressning o'tish ehtimolligi atigi 34%. "
+    "Tanlov qancha ko'p bo'lsa, o'tish ehtimolligi shuncha tez kamayadi."
+)
+EXPRESS_REFUSED: Final = (
+    "🧩 Bu ekspressni hisoblab bo'lmaydi: signal endi tavsiya qilinmaydi, o'yin boshlangan "
+    "yoki bir o'yindan ikkita tanlov bor. Ro'yxatni yangilab, qaytadan tanlang."
+)

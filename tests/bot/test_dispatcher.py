@@ -66,23 +66,6 @@ async def test_help_lists_commands_and_glossary(harness: BotHarness, command: st
         assert term in text
 
 
-@pytest.mark.parametrize(
-    "item",
-    [
-        texts.MENU_CUSTOM,
-        texts.MENU_TEMPLATES,
-        texts.MENU_WATCHLIST,
-        texts.MENU_REPORT,
-    ],
-)
-async def test_later_wave_menu_items_answer_politely(harness: BotHarness, item: str) -> None:
-    methods = await harness.send(item)
-
-    text = sent_texts(methods)[0]
-    assert "tez orada" in text
-    assert item in text
-
-
 async def test_unknown_text_gets_a_hint(harness: BotHarness) -> None:
     methods = await harness.send("salom")
 

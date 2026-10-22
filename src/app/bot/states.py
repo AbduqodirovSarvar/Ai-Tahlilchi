@@ -51,6 +51,39 @@ class BetFlow(StatesGroup):
     """🎟 Waiting for the odds (and stake) the user really got, typed as ``1.90 50000``."""
 
     value_input = State()
+    cashout_input = State()
+
+
+class CustomFlow(StatesGroup):
+    """🔍 Maxsus tahlil: typing a team or fixture, choosing from the list, running."""
+
+    query = State()
+    pick = State()
+    running = State()
+
+
+class WatchFlow(StatesGroup):
+    """⭐ Sevimlilar: waiting for a team name to add."""
+
+    team_query = State()
+
+
+class TemplateFlow(StatesGroup):
+    """💾 Shablonlar: waiting for a typed schedule time."""
+
+    time_input = State()
+
+
+class ReportFlow(StatesGroup):
+    """📈 Hisobot: waiting for a typed date range."""
+
+    range_input = State()
+
+
+class ExpressFlow(StatesGroup):
+    """🧩 Ekspress: choosing the signals to combine."""
+
+    pick = State()
 
 
 class SettingsFlow(StatesGroup):

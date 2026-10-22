@@ -42,6 +42,8 @@ from app.services.errors import (
     NotFoundError,
     ValidationFailedError,
 )
+from app.services.express_math import check_ids
+from app.services.express_math import evaluate as evaluate_express
 from app.services.interfaces import (
     DEFAULT_TIMEZONE,
     MANUAL_RESERVE_SHARE,
@@ -70,6 +72,7 @@ from app.services.interfaces import (
     DeliveryKey,
     EntityId,
     ExportFile,
+    ExpressView,
     FixtureDetail,
     FixtureListRequest,
     FixtureOption,
@@ -115,6 +118,7 @@ from app.services.interfaces import (
 )
 from app.services.report_math import (
     SignalOutcome,
+    bets_export_file,
     build_report,
     day_summary,
     export_file,
@@ -1293,6 +1297,24 @@ class FakeReportService:
         """See :meth:`ReportService.export`."""
         return export_file(self._state.outcomes(user_id))
 
+    async def export_bets(self, user_id: int) -> ExportFile:
+        """See :meth:`ReportService.export_bets`."""
+        return bets_export_file(reversed(self._bets.user_bets(user_id)))
+
+
+class FakeExpressService:
+    """Fake :class:`~app.services.interfaces.ExpressService`."""
+
+    def __init__(self, state: FakeState) -> None:
+        """Share ``state`` with the other fake services."""
+        self._state = state
+
+    async def evaluate(self, user_id: int, signal_ids: Sequence[SignalId]) -> ExpressView:
+        """See :meth:`ExpressService.evaluate`."""
+        ids = check_ids(signal_ids)
+        views = [self._state.view(self._state.signal(user_id, signal_id)) for signal_id in ids]
+        return evaluate_express(views, self._state.now())
+
 
 class FakeSystemStatusService:
     """Fake :class:`~app.services.interfaces.SystemStatusService`."""
@@ -1420,4 +1442,5 @@ def create_fake_services(*, clock: Clock = system_clock) -> Services:
         results=FakeResultService(state),
         reports=FakeReportService(state, bets),
         status=FakeSystemStatusService(state),
+        express=FakeExpressService(state),
     )

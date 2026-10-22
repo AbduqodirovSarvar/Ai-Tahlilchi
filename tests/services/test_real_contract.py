@@ -12,6 +12,8 @@ from tests.services.contract_suite import (
     AnalysisContract,
     BetContract,
     CatalogContract,
+    ExportBetsContract,
+    ExpressContract,
     FixtureDetailContract,
     MutableClock,
     RecalcContract,
@@ -102,4 +104,12 @@ class TestRecommendations(RecommendationContract):
 
 
 class TestSports(SportsContract):
+    pass
+
+
+class TestExportBets(ExportBetsContract):
+    pass
+
+
+class TestExpress(ExpressContract):
     pass

@@ -340,7 +340,7 @@ async def test_over_budget_estimate_hides_start(harness: BotHarness) -> None:
 async def test_menu_text_is_not_taken_as_typed_input(harness: BotHarness) -> None:
     await harness.send(texts.MENU_ANALYSIS)
     methods = await harness.send(texts.MENU_REPORT)
-    assert "tez orada" in sent_texts(methods)[0]
+    assert "Hisobot" in sent_texts(methods)[0]
 
 
 async def test_text_on_a_button_only_step_asks_for_buttons(harness: BotHarness) -> None:

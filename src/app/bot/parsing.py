@@ -30,6 +30,7 @@ from app.services.interfaces import (
 )
 
 PERCENT: Final = 100
+RETRO_WEEK_DAYS: Final = 7
 MAX_QUICK_LENGTH: Final = 300
 """Longest ``/tahlil`` argument we try to understand (a real query is far shorter)."""
 _HALF_YEAR_DAYS: Final = 183
@@ -56,6 +57,9 @@ _QUICK_DAYS_RE: Final = re.compile(r"(?<![\w.,])(\d+)\s*kun(?!\w)", re.I)
 _QUICK_NUMBER_RE: Final = re.compile(r"(?<![\w.,%])(\d+(?:[.,]\d+)?)(?![\w.,%])")
 _QUICK_KEYWORDS: Final[dict[str, str]] = {
     "bugun": "today",
+    "kecha": "yesterday",
+    "o'tgan hafta": "last_week",
+    "otgan hafta": "last_week",
     "ertaga": "tomorrow",
     "dam olish kunlari": "weekend",
     "dam olish": "weekend",
@@ -359,6 +363,22 @@ def _take_ranges(builder: _QuickBuilder, text: str) -> str:
     return rest
 
 
+def keyword_spec(mode: str, today: date) -> DateSpec:
+    """The dates a ``/tahlil`` keyword stands for (``kecha``, ``o'tgan hafta`` are retro)."""
+    yesterday = today - timedelta(days=1)
+    match mode:
+        case "today":
+            return DateSpec.today()
+        case "tomorrow":
+            return DateSpec.tomorrow()
+        case "yesterday":
+            return DateSpec.between(yesterday, yesterday)
+        case "last_week":
+            return DateSpec.between(today - timedelta(days=RETRO_WEEK_DAYS), yesterday)
+        case _:
+            return DateSpec.weekend()
+
+
 def _take_keywords(builder: _QuickBuilder, text: str) -> str:
     matches, rest = _consume(_QUICK_DAYS_RE, text)
     for match in matches:
@@ -368,10 +388,7 @@ def _take_keywords(builder: _QuickBuilder, text: str) -> str:
         pattern = re.compile(rf"(?<!\w){re.escape(keyword)}(?!\w)", re.I)
         matches, rest = _consume(pattern, rest)
         for match in matches:
-            spec = {"today": DateSpec.today, "tomorrow": DateSpec.tomorrow}.get(
-                mode, DateSpec.weekend
-            )()
-            builder.set_dates(spec, match.group(0))
+            builder.set_dates(keyword_spec(mode, builder.today), match.group(0))
     for alias, sport in SPORT_ALIASES.items():
         pattern = re.compile(rf"(?<!\w){re.escape(alias)}(?!\w)", re.I)
         matches, rest = _consume(pattern, rest)
@@ -458,3 +475,31 @@ def parse_quick_query(
         max_signals=builder.max_signals,
         team_names=_team_names(rest),
     )
+
+
+# --------------------------------------------------------------------------- custom analysis
+_FIXTURE_SEPARATOR_RE: Final = re.compile(r"\s+(?:[-\u2013\u2014]|vs\.?|v)\s+", re.IGNORECASE)
+"""``Arsenal - Chelsea`` / ``Arsenal vs Chelsea``: the separator has spaces around it, so a
+hyphen inside a name (``Saint-Etienne``) is not a separator."""
+_NAME_FORBIDDEN_RE: Final = re.compile(r"[\d%,]")
+MIN_NAME_LETTERS: Final = 2
+
+
+def parse_fixture_text(text: str) -> tuple[str, str] | None:
+    """Split ``Arsenal - Chelsea`` into its two team names, or ``None`` if it is not one.
+
+    Dates (``25.10 - 31.10``), percentages and comma lists are other ``/tahlil`` syntax, so
+    any digit, ``%`` or comma makes this return ``None``.
+    """
+    cleaned = " ".join(text.split())
+    if not cleaned or len(cleaned) > MAX_QUICK_LENGTH or _NAME_FORBIDDEN_RE.search(cleaned):
+        return None
+    parts = _FIXTURE_SEPARATOR_RE.split(cleaned)
+    if len(parts) != 2:  # noqa: PLR2004 - exactly two sides
+        return None
+    home, away = (part.strip() for part in parts)
+    if sum(char.isalpha() for char in home) < MIN_NAME_LETTERS:
+        return None
+    if sum(char.isalpha() for char in away) < MIN_NAME_LETTERS:
+        return None
+    return home, away

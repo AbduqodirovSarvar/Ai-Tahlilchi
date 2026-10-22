@@ -127,7 +127,7 @@ def decode_ref(text: str) -> str | None:
 
 
 class BetCb(CallbackData, prefix="bt"):
-    """Stavka prompt: ``ok`` (record with the defaults), ``custom`` or ``cancel``."""
+    """Stavka prompt: ``ok`` (defaults), ``custom``, ``cancel`` or ``force`` (past a loss limit)."""
 
     action: str
     signal_id: int
@@ -155,6 +155,78 @@ class SettingsCb(CallbackData, prefix="st"):
     action: str = "open"
     index: int = 0
     key: str = ""
+
+
+class CustomCb(CallbackData, prefix="cu"):
+    """🔍 Maxsus tahlil buttons.
+
+    ``today``/``tomorrow`` open a day list; ``team``/``toggle`` carry an index into the options
+    kept in FSM data; ``run``, ``again`` and ``cancel`` carry nothing.
+    """
+
+    action: str
+    index: int = 0
+
+
+class WatchCb(CallbackData, prefix="wl"):
+    """⭐ Sevimlilar buttons.
+
+    ``kind`` is ``t`` (team) or ``l`` (league); ``key`` is ``crc32(entity_id)`` in hex for
+    entries, an option index for pick lists and the signal id on a card; ``flag`` names a
+    notification (``l``/``o``/``r``).
+    """
+
+    action: str
+    kind: str = ""
+    key: str = ""
+    flag: str = ""
+
+
+class TplCb(CallbackData, prefix="tp"):
+    """💾 Shablonlarim buttons.
+
+    ``id`` is the template id; ``value`` is a weekday (``day``) or a time preset index (``time``).
+    """
+
+    action: str
+    id: int = 0
+    value: int = 0
+
+
+class BankCb(CallbackData, prefix="bk"):
+    """🎟 Mening stavkalarim buttons.
+
+    ``open``/``settled``/``chart``/``setup``/``home`` switch screens; ``bet`` opens bet ``id``;
+    ``mark`` settles bet ``id`` by hand with ``value`` ``w``/``l``/``v``/``c`` (cash-out).
+    """
+
+    action: str
+    id: int = 0
+    value: str = ""
+
+
+class ReportCb(CallbackData, prefix="hr"):
+    """📈 Hisobot buttons.
+
+    ``show`` renders the report for ``period`` (``7``/``30``/``all``/``c``) sliced by ``group``
+    (a ``ReportGroup`` value, empty = none); ``custom`` asks for a typed range; ``chart``
+    sends the PNGs of the same report; ``export`` sends the CSV files.
+    """
+
+    action: str
+    period: str = "7"
+    group: str = ""
+
+
+class ExpressCb(CallbackData, prefix="ex"):
+    """🧩 Ekspress buttons.
+
+    ``open`` (under the today list), ``toggle`` (option index), ``calc``, ``back`` (result to
+    picker) and ``close``.
+    """
+
+    action: str
+    index: int = 0
 
 
 class NoopCb(CallbackData, prefix="nx"):

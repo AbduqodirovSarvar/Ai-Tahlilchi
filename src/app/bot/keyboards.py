@@ -24,6 +24,7 @@ from app.bot.callbacks import (
     DateCb,
     EditCb,
     EvCb,
+    ExpressCb,
     MarketCb,
     NavCb,
     NoopCb,
@@ -102,6 +103,21 @@ def _markup(rows: Rows) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[row for row in rows if row])
 
 
+def single_button(text: str, callback: object) -> InlineKeyboardButton:
+    """An inline button whose ``callback_data`` is the packed ``callback``."""
+    return _button(text, callback)
+
+
+def markup_of(rows: Rows) -> InlineKeyboardMarkup:
+    """An inline keyboard of ``rows`` (empty rows are dropped)."""
+    return _markup(rows)
+
+
+def checked_label(label: str, *, on: bool) -> str:
+    """``✅ label`` or ``▫️ label``."""
+    return _checked(label, on=on)
+
+
 def _chunks[T](items: Sequence[T], size: int) -> list[list[T]]:
     return [list(items[i : i + size]) for i in range(0, len(items), size)]
 
@@ -162,6 +178,10 @@ def dates_keyboard() -> InlineKeyboardMarkup:
                 _button(texts.BTN_TOMORROW, DateCb(choice="tomorrow")),
             ],
             [_button(texts.BTN_WEEKEND, DateCb(choice="weekend")), *days],
+            [
+                _button(texts.BTN_YESTERDAY, DateCb(choice="yesterday")),
+                _button(texts.BTN_LAST_WEEK, DateCb(choice="last_week")),
+            ],
             [_button(texts.BTN_CALENDAR, DateCb(choice="calendar"))],
             nav_row(),
         ]
@@ -410,7 +430,8 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
                 [
                     _button(texts.BTN_DETAIL, CardCb(action="detail", signal_id=signal_id)),
                     _button(texts.BTN_HIDE, CardCb(action="hide", signal_id=signal_id)),
-                ]
+                ],
+                [_button(texts.BTN_WATCH_CARD, CardCb(action="watch", signal_id=signal_id))],
             ]
         )
     return _markup(
@@ -423,6 +444,7 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
                 _button(texts.BTN_BET, CardCb(action="bet", signal_id=signal_id)),
                 _button(texts.BTN_HIDE, CardCb(action="hide", signal_id=signal_id)),
             ],
+            [_button(texts.BTN_WATCH_CARD, CardCb(action="watch", signal_id=signal_id))],
         ]
     )
 
@@ -432,6 +454,11 @@ def signal_keyboard(signal: SignalView) -> InlineKeyboardMarkup:
     return card_keyboard(
         signal.signal_id, retro=signal.retro or signal.state is SignalState.CANCELLED
     )
+
+
+def detail_keyboard(signal_id: int) -> InlineKeyboardMarkup:
+    """The detail card's only button: back to the signal card."""
+    return _markup([[_button(texts.BTN_BACK_TO_CARD, CardCb(action="card", signal_id=signal_id))]])
 
 
 def recalc_query_keyboard(query_id: str) -> InlineKeyboardMarkup:
@@ -444,6 +471,17 @@ def recalc_day_keyboard(day: date) -> InlineKeyboardMarkup:
     """The same button under a daily digest or today's list: recalculates that day."""
     callback = RecalcAllCb(kind=RECALC_KIND_DAY, ref=day.isoformat())
     return _markup([[_button(texts.BTN_RECALC_ALL, callback)]])
+
+
+def today_keyboard(day: date) -> InlineKeyboardMarkup:
+    """Under today's list: recalculate everything, or build an express (F7.8)."""
+    callback = RecalcAllCb(kind=RECALC_KIND_DAY, ref=day.isoformat())
+    return _markup(
+        [
+            [_button(texts.BTN_RECALC_ALL, callback)],
+            [_button(texts.BTN_EXPRESS, ExpressCb(action="open"))],
+        ]
+    )
 
 
 def bet_prompt_keyboard(
