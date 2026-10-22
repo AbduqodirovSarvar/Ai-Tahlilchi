@@ -35,6 +35,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.errors import PipelineError
 from app.pipeline.ingest import ingest_odds, ingest_results, provider_of
 from app.pipeline.odds import current_quotes, data_as_of, load_decision_snapshots
+from app.pipeline.overlay import load_overlay
 from app.pipeline.persist import refresh_quote_time, unchanged
 from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.provider import Purpose
@@ -155,7 +156,9 @@ async def _recalc_fixture(
     )
     league = ctx.leagues.canonical(fixture.fixture.league.ref)
     fitted = await ctx.models.get(league, now.astimezone(UTC).date() + timedelta(days=1))
-    overlay = await ctx.learning.load()  # calibration only: an existing signal is never filtered
+    overlay = await load_overlay(
+        ctx.learning
+    )  # calibration only: an existing signal is never filtered
     valuation = value_fixture(
         ValuationInput(
             fixture=fixture.fixture,

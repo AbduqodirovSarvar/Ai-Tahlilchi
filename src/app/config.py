@@ -20,6 +20,7 @@ type AppEnv = Literal["dev", "prod"]
 type ServicesBackend = Literal["fake", "real"]
 type HandicapConventionName = Literal["home_line", "own_line"]
 type StakingModeName = Literal["flat", "kelly"]
+type LearningModeName = Literal["off", "shadow", "apply"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 type SecretName = Literal[
     "telegram_bot_token", "api_football_key", "odds_api_key", "gemini_api_key"
@@ -62,6 +63,12 @@ class Settings(BaseSettings):
     # How many units a recommendation stakes: one flat unit, or a capped quarter Kelly of the
     # user's bank (falls back to flat for a user without a bank and unit).
     staking_mode: StakingModeName = "flat"
+    # The weekly learning loop: "off" does nothing, "shadow" (default) computes and journals what it
+    # would change without touching any analysis, "apply" also lets segment rules and the
+    # calibration steer analysis. Switching to "apply" is a human decision (ADR 0013).
+    learning_mode: LearningModeName = "shadow"
+    # Days the loop leaves a segment or the calibration alone after a person rolled a change back.
+    learning_manual_hold_days: int = Field(default=30, ge=0, le=365)
     healthchecks_url: HttpUrl | None = None
 
     @field_validator("log_level", mode="before")

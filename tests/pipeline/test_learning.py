@@ -34,12 +34,12 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.learning import (
     KIND_CALIBRATION_ACTIVATED,
     KIND_SEGMENT_DISABLED,
-    KIND_SEGMENT_RAISED,
-    MANUAL_HOLD,
+    LearningReport,
     rollback_learning_change,
     run_learning,
     week_start,
 )
+from app.pipeline.learning_settings import DEFAULT_MANUAL_HOLD, LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger, ledger_table
 from app.pipeline.overlay import DbLearningSource
 from tests.domain.factories import make_fixture, make_league
@@ -73,7 +73,11 @@ def context(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger, clock: Clock
 ) -> PipelineContext:
     return PipelineContext(
-        sessions=sessions, ledger=ledger, clock=clock, learning=DbLearningSource(sessions)
+        sessions=sessions,
+        ledger=ledger,
+        clock=clock,
+        learning=DbLearningSource(sessions),
+        learning_settings=LearningSettings(mode=LearningMode.APPLY),
     )
 
 
@@ -203,6 +207,45 @@ async def seed_probability_history(
     return START + timedelta(days=fixtures, hours=8)
 
 
+async def seed_batch(
+    sessions: async_sessionmaker[AsyncSession], *, league: str, fixtures: int, shift: float
+) -> None:
+    """A second batch of ~11 predictions per fixture in another league (fresh data between runs)."""
+    rng = random.Random(77)  # noqa: S311 - simulation
+    async with sessions.begin() as session:
+        ids = await seed_fixtures(session, fixtures, league)
+        pending = Pending([])
+        for index, fixture_id in enumerate(ids):
+            for pick in MARKETS:
+                p = rng.uniform(0.45, 0.75)
+                add_settled(
+                    pending,
+                    fixture_id,
+                    hit=rng.random() < p - shift,
+                    settled_at=START + timedelta(days=index, hours=9),
+                    probability=p,
+                    pick=pick,
+                    clv=None,
+                )
+        await pending.flush(session)
+
+
+async def next_week(ctx: PipelineContext, clock: Clock) -> LearningReport:
+    """The run one week later."""
+    clock.now += timedelta(weeks=1)
+    return await run_learning(ctx)
+
+
+async def activate_calibration(
+    sessions: async_sessionmaker[AsyncSession], ctx: PipelineContext, clock: Clock
+) -> LearningReport:
+    """Two consecutive runs with fresh data in between: the second one earns the activation."""
+    first = await run_learning(ctx)
+    assert not first.calibration_activated  # one passing week is not enough
+    await seed_batch(sessions, league="E9", fixtures=100, shift=0.15)
+    return await next_week(ctx, clock)
+
+
 async def rows(sessions: async_sessionmaker[AsyncSession]) -> list[object]:
     async with sessions() as session:
         return list(await list_segment_rows(session))
@@ -224,7 +267,12 @@ async def test_a_real_negative_segment_is_disabled_after_enough_significant_sign
     assert early.changes == ()
 
     clock.now = last + timedelta(days=7)
-    final = await run_learning(ctx)
+    flagged = await run_learning(ctx)  # the first run only notes the evidence
+    assert flagged.changes == ()
+    assert [row.flagged for row in await list_segment_rows_of(sessions)] == [True]
+    assert (await DbLearningSource(sessions).load()).rules == {}
+
+    final = await next_week(ctx, clock)  # the second run confirms it
 
     segments = await list_segment_rows_of(sessions)
     assert [row.enabled for row in segments] == [False]
@@ -257,26 +305,24 @@ async def test_a_bad_streak_in_a_good_segment_changes_nothing(
     assert (await DbLearningSource(sessions).load()).rules == {}
 
 
-async def test_mild_negative_evidence_raises_the_bar_and_the_state_is_stable(
+async def test_a_disabled_segment_stays_put_and_its_state_start_is_not_restarted(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_segment_history(sessions, n=150, hit_rate=0.52, clv_mean=-0.04, seed=8)
+    last = await seed_segment_history(sessions, n=150, hit_rate=0.30, clv_mean=-0.08, seed=8)
     clock = Clock(last + timedelta(days=1))
     ctx = context(sessions, ledger, clock)
 
-    first = await run_learning(ctx)
-    raised_at = clock.now
-    clock.now += timedelta(weeks=1)
-    second = await run_learning(ctx)
-    clock.now += timedelta(weeks=1)
-    third = await run_learning(ctx)
+    await run_learning(ctx)
+    second = await next_week(ctx, clock)
+    disabled_at = clock.now
+    third = await next_week(ctx, clock)
+    fourth = await next_week(ctx, clock)
 
-    assert [c.kind for c in first.changes] == [KIND_SEGMENT_RAISED]
-    assert second.changes == third.changes == ()
+    assert [c.kind for c in second.changes] == [KIND_SEGMENT_DISABLED]
+    assert third.changes == fourth.changes == ()
     segment = (await list_segment_rows_of(sessions))[0]
-    assert segment.enabled is True
-    assert segment.ev_threshold > 0.0
-    assert segment.state_since == raised_at  # the weekly rewrite does not restart the hold
+    assert segment.enabled is False
+    assert segment.state_since == disabled_at  # the weekly rewrite does not restart the clock
 
 
 async def test_segments_ignore_retro_but_include_hidden_and_duplicates_count_once(
@@ -317,10 +363,11 @@ async def test_segments_ignore_retro_but_include_hidden_and_duplicates_count_onc
 async def test_a_miscalibrated_model_gets_a_calibration_and_brier_improves(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=400, shift=0.08)
-    ctx = context(sessions, ledger, Clock(last + timedelta(days=1)))
+    last = await seed_probability_history(sessions, fixtures=400, shift=0.15)
+    clock = Clock(last + timedelta(days=1))
+    ctx = context(sessions, ledger, clock)
 
-    report = await run_learning(ctx)
+    report = await activate_calibration(sessions, ctx, clock)
 
     assert report.calibration_reason is CalibrationReason.IMPROVED
     assert report.calibration_activated
@@ -359,7 +406,7 @@ async def test_a_well_calibrated_model_is_not_calibrated(
 async def test_calibration_trains_on_raw_probabilities_not_on_its_own_output(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=60, shift=0.08)
+    last = await seed_probability_history(sessions, fixtures=60, shift=0.15)
     async with sessions.begin() as session:
         await session.execute(update(SignalRow).values(p_raw=SignalRow.p_model))
         await session.execute(update(SignalRow).values(p_model=0.5))  # "calibrated" output
@@ -403,7 +450,7 @@ async def reset_outputs(sessions: async_sessionmaker[AsyncSession]) -> None:
 async def test_future_results_do_not_change_an_earlier_review(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=300, shift=0.08, seed=3)
+    last = await seed_probability_history(sessions, fixtures=300, shift=0.15, seed=3)
     cutoff = last - timedelta(days=100)
     clock = Clock(cutoff)
     ctx = context(sessions, ledger, clock)
@@ -441,24 +488,25 @@ async def test_rerunning_the_job_is_idempotent(
 
     first = await run_learning(ctx)
     again_same_week = await run_learning(ctx)
-    after_first = await snapshot(sessions)
-    clock.now += timedelta(weeks=1)
-    next_week = await run_learning(ctx)
+    confirming = await next_week(ctx, clock)
+    after_confirming = await snapshot(sessions)
+    quiet = await next_week(ctx, clock)
 
     assert not first.skipped
     assert again_same_week.skipped
-    assert not next_week.skipped
-    assert next_week.changes == ()  # nothing new, nothing to journal
-    assert await snapshot(sessions) == after_first
+    assert first.changes == ()
+    assert not quiet.skipped
+    assert quiet.changes == ()  # nothing new, nothing to journal
+    assert await snapshot(sessions) == after_confirming
     async with sessions() as session:
         changes = (await session.scalar(select(func.count()).select_from(LearningChangeRow))) or 0
-    assert changes == len(first.changes) == 1
+    assert changes == len(confirming.changes) == 1
 
 
 async def test_a_new_week_with_the_same_data_adds_no_calibration_version(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=400, shift=0.08)
+    last = await seed_probability_history(sessions, fixtures=400, shift=0.15)
     clock = Clock(last + timedelta(days=1))
     ctx = context(sessions, ledger, clock)
     await run_learning(ctx)
@@ -468,7 +516,7 @@ async def test_a_new_week_with_the_same_data_adds_no_calibration_version(
     async with sessions() as session:
         versions = await list_calibration_versions(session)
     assert len(versions) == 1
-    assert report.changes == ()
+    assert not report.calibration_activated
 
 
 async def test_empty_history_is_harmless(
@@ -513,9 +561,10 @@ def test_week_start_is_monday() -> None:
 async def test_a_calibration_activation_can_be_rolled_back_once(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=400, shift=0.08)
-    ctx = context(sessions, ledger, Clock(last + timedelta(days=1)))
-    report = await run_learning(ctx)
+    last = await seed_probability_history(sessions, fixtures=400, shift=0.15)
+    clock = Clock(last + timedelta(days=1))
+    ctx = context(sessions, ledger, clock)
+    report = await activate_calibration(sessions, ctx, clock)
     (change,) = [c for c in report.changes if c.kind == KIND_CALIBRATION_ACTIVATED]
 
     assert await rollback_learning_change(ctx, change.id)
@@ -535,29 +584,31 @@ async def test_a_segment_rollback_restores_it_and_holds_it(
     last = await seed_segment_history(sessions, n=120, hit_rate=0.30, clv_mean=-0.08)
     clock = Clock(last + timedelta(days=1))
     ctx = context(sessions, ledger, clock)
-    (change,) = (await run_learning(ctx)).changes
+    await run_learning(ctx)
+    (change,) = (await next_week(ctx, clock)).changes
 
     assert await rollback_learning_change(ctx, change.id)
     restored = (await list_segment_rows_of(sessions))[0]
     assert restored.enabled
-    assert restored.hold_until == clock.now + MANUAL_HOLD
+    assert restored.hold_until == clock.now + DEFAULT_MANUAL_HOLD
 
-    clock.now += timedelta(weeks=1)  # the evidence is still terrible, but a person decided
-    later = await run_learning(ctx)
+    later = await next_week(ctx, clock)  # the evidence is still terrible, but a person decided
     assert later.changes == ()
     assert (await list_segment_rows_of(sessions))[0].enabled
 
-    clock.now += MANUAL_HOLD  # after the hold the review may act again
-    after_hold = await run_learning(ctx)
+    clock.now += DEFAULT_MANUAL_HOLD  # after the hold the review may act again, after 2 runs
+    assert (await run_learning(ctx)).changes == ()
+    after_hold = await next_week(ctx, clock)
     assert [c.kind for c in after_hold.changes] == [KIND_SEGMENT_DISABLED]
 
 
 async def test_rollback_of_unknown_or_non_undoable_entries(
     sessions: async_sessionmaker[AsyncSession], ledger: Ledger
 ) -> None:
-    last = await seed_probability_history(sessions, fixtures=400, shift=0.08)
-    ctx = context(sessions, ledger, Clock(last + timedelta(days=1)))
-    await run_learning(ctx)
+    last = await seed_probability_history(sessions, fixtures=400, shift=0.15)
+    clock = Clock(last + timedelta(days=1))
+    ctx = context(sessions, ledger, clock)
+    await activate_calibration(sessions, ctx, clock)
     assert not await rollback_learning_change(ctx, 9999)
     async with sessions() as session:
         journal = await list_learning_changes(session)
