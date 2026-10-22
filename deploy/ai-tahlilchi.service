@@ -1,0 +1,33 @@
+# Optional systemd supervision (alternative to Docker's `restart: unless-stopped`; ADR 0014).
+#
+# Runs the stack in the foreground so systemd sees the application's exit code:
+# `RestartPreventExitStatus=2` stops restarting after a configuration error (the entrypoint
+# exits 2 after its backoff), and `StartLimit*` bounds any other crash loop.
+# Use it with `RESTART_POLICY=no` in /opt/ai-tahlilchi/deploy.env so Docker does not also restart.
+#
+# Install: scripts do it via deploy/bootstrap.sh --install-service, or by hand:
+#   sudo cp deploy/ai-tahlilchi.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   echo RESTART_POLICY=no | sudo tee -a /opt/ai-tahlilchi/deploy.env
+#   sudo systemctl enable --now ai-tahlilchi.service
+[Unit]
+Description=AI Tahlilchi (Docker Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=deploy
+Group=docker
+WorkingDirectory=/opt/ai-tahlilchi
+ExecStart=/usr/bin/docker compose --project-directory /opt/ai-tahlilchi -f /opt/ai-tahlilchi/docker-compose.yml --env-file /opt/ai-tahlilchi/.env --env-file /opt/ai-tahlilchi/deploy.env up --no-build --abort-on-container-exit --exit-code-from bot bot
+ExecStop=/usr/bin/docker compose --project-directory /opt/ai-tahlilchi -f /opt/ai-tahlilchi/docker-compose.yml --env-file /opt/ai-tahlilchi/.env --env-file /opt/ai-tahlilchi/deploy.env stop -t 75 bot
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=multi-user.target

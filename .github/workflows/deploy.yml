@@ -1,0 +1,161 @@
+name: Deploy
+
+# Runs on a version tag (v*) or by hand. Without the server secrets (SSH_HOST, SSH_USER,
+# SSH_KEY) every job is skipped and the workflow still succeeds, so the repository can be
+# used before a server exists. Setup and secrets: RUNBOOK.md ("Deploy").
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git tag or SHA to deploy (empty = the ref the workflow runs on)"
+        required: false
+        default: ""
+      skip_backup:
+        description: "Skip the pre-deploy database backup (first deploy only)"
+        type: boolean
+        default: false
+
+# Least privilege: jobs ask for more where they need it.
+permissions:
+  contents: read
+
+# Never two deploys at once and never cancel one half way.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  gate:
+    name: Server configured?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        # Secrets are not available in `if:`; test them here. Values are never printed.
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SSH_HOST, SSH_USER and SSH_KEY are not all set: deploy skipped (see RUNBOOK.md)."
+          fi
+
+  image:
+    name: Build and push image
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      reference: ${{ steps.ref.outputs.reference }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Image reference
+        id: ref
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ inputs.ref || github.ref_name }}
+        run: |
+          # Registry names must be lower case; tags may not contain "/".
+          name="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          tag="$(printf '%s' "$REF_NAME" | tr '/' '-')"
+          echo "reference=${name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "sha_reference=${name}:sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.ref.outputs.reference }}
+            ${{ steps.ref.outputs.sha_reference }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to the server
+    needs: [gate, image]
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Add required reviewers to this environment for a manual approval step.
+    environment: production
+    permissions:
+      contents: read
+      packages: read # the short-lived token is handed to the server to pull the image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - name: Prepare SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::SSH_KNOWN_HOSTS is not set: trusting the host key on first use. Pin it (RUNBOOK.md)."
+            ssh-keyscan -T 10 -- "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+      - name: Upload deployment files
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          dest="$SSH_USER@$SSH_HOST"
+          ssh "${opts[@]}" "$dest" 'mkdir -p /opt/ai-tahlilchi/bin'
+          scp "${opts[@]}" docker-compose.yml "$dest:/opt/ai-tahlilchi/docker-compose.yml"
+          scp "${opts[@]}" deploy/remote-deploy.sh scripts/ops/backup.sh scripts/ops/restore.sh \
+            "$dest:/opt/ai-tahlilchi/bin/"
+          scp "${opts[@]}" deploy/dc.sh "$dest:/opt/ai-tahlilchi/bin/dc"
+          ssh "${opts[@]}" "$dest" 'chmod 755 /opt/ai-tahlilchi/bin/*.sh'
+      - name: Deploy (backup, switch, health wait, automatic rollback)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          IMAGE_REFERENCE: ${{ needs.image.outputs.reference }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_BACKUP: ${{ inputs.skip_backup }}
+        run: |
+          opts=(-i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          flags=""
+          if [ "$SKIP_BACKUP" = "true" ]; then flags="--skip-backup"; fi
+          # The registry token travels on stdin, not in the command line or the remote environment.
+          # The remote command is meant to expand on this (client) side.
+          # shellcheck disable=SC2029
+          printf '%s\n' "$GHCR_TOKEN" | ssh "${opts[@]}" "$SSH_USER@$SSH_HOST" \
+            "GHCR_USER='$GHCR_USER' /opt/ai-tahlilchi/bin/remote-deploy.sh $flags '$IMAGE_REFERENCE'"
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -4,4 +4,8 @@
 !uv.lock
 !README.md
 !src/
+!alembic/
+!alembic.ini
+!scripts/
+!deploy/entrypoint.sh
 **/__pycache__

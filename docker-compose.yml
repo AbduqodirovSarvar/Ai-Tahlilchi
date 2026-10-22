@@ -1,12 +1,17 @@
-# Local / single-host run: `docker compose up -d --build`.
+# One file for local runs (`docker compose up -d --build`) and for the server
+# (`deploy/remote-deploy.sh` runs it with AI_TAHLILCHI_IMAGE=ghcr.io/<owner>/ai-tahlilchi:<tag>).
+#
 # Secrets come from .env (optional at parse time; the bot refuses to start without
 # TELEGRAM_BOT_TOKEN and ADMIN_IDS, logs a clear reason and exits with code 2).
+#
+# Restart policy (ADR 0014): `unless-stopped` brings the bot back after a daemon restart or a
+# reboot (`on-failure:N` does not). The crash loop that policy would allow on a configuration
+# error (exit 2) is throttled by deploy/entrypoint.sh, which waits before exiting 2.
 services:
   bot:
     build: .
-    image: ai-tahlilchi:local
-    # Bounded retries: a configuration error (exit 2) must not restart forever.
-    restart: on-failure:5
+    image: ${AI_TAHLILCHI_IMAGE:-ai-tahlilchi:local}
+    restart: ${RESTART_POLICY:-unless-stopped}
     init: true
     env_file:
       - path: .env
@@ -14,9 +19,13 @@ services:
     environment:
       APP_ENV: prod
       DB_PATH: /data/app.db
+      # fake = in-memory sample data (default until API keys exist); real = pipeline + scheduler.
+      # Set APP_SERVICES=real in .env once TELEGRAM_BOT_TOKEN, API_FOOTBALL_KEY and
+      # GEMINI_API_KEY are configured (RUNBOOK.md).
+      APP_SERVICES: ${APP_SERVICES:-fake}
     volumes:
       # Named volume: created from the image's /data, so it is owned by the app user (uid 10001)
-      # without any host-side chown.
+      # without any host-side chown. Back it up with scripts/ops/backup.sh.
       - bot-data:/data
     read_only: true
     tmpfs:
@@ -25,12 +34,25 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.ops.healthcheck"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
+    # The scheduler waits up to 60 s for running jobs on SIGTERM; Docker sends SIGKILL after
+    # this period, so it must be longer than that wait.
+    stop_grace_period: 75s
+    # Sized for a 1-2 GB VPS: the bot idles around 150-250 MB.
+    mem_limit: 768m
+    memswap_limit: 768m
+    cpus: 1.5
+    pids_limit: 256
     logging:
       driver: json-file
       options:
         max-size: "10m"
-        max-file: "3"
+        max-file: "5"
 
 volumes:
   bot-data:

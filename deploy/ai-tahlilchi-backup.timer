@@ -1,0 +1,15 @@
+# Cron alternative (as the deploy user):
+#   30 2 * * * /opt/ai-tahlilchi/bin/backup.sh >> /opt/ai-tahlilchi/backups/backup.log 2>&1
+[Unit]
+Description=Daily AI Tahlilchi database backup
+
+[Timer]
+# 02:30 UTC = 07:30 in Tashkent: before the 08:00 settlement and 08:30 refresh. The SQLite
+# online backup is safe while the bot runs, so the time only decides which state is kept.
+OnCalendar=*-*-* 02:30:00 UTC
+RandomizedDelaySec=300
+# Run once after a boot if the machine was off at 02:30.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
