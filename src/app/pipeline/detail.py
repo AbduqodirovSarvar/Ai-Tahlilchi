@@ -17,6 +17,7 @@ from app.domain import Market, OddsKind, Selection, Team
 from app.models import DixonColesModel, UnknownTeamError, team_key, top_scores
 from app.pipeline.context import PipelineContext
 from app.pipeline.odds import current_quotes, load_decision_snapshots
+from app.pipeline.overlay import load_overlay
 from app.pipeline.valuation import ValuationInput, value_fixture
 
 FORM_LENGTH: Final = 5
@@ -163,7 +164,7 @@ async def build_fixture_card(ctx: PipelineContext, fixture_id: int) -> FixtureCa
         moves = await _moves(session, ctx, record)
     fitted = await ctx.models.get(league, fixture.kickoff.date())
     quotes = current_quotes(snapshots, fixture.ref, fixture.kickoff)
-    overlay = await ctx.learning.load()
+    overlay = await load_overlay(ctx.learning)
     valuation = value_fixture(
         ValuationInput(
             fixture=fixture,

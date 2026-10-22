@@ -64,6 +64,8 @@ class SegmentRecord:
     enabled: bool
     state_since: datetime | None
     hold_until: datetime | None
+    flagged: bool = False
+    """Tightening evidence was seen on the previous weekly run (it must repeat to act)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -93,6 +95,8 @@ class LearningChange:
     after: dict[str, Any]
     reason: str
     rolled_back: bool
+    applied: bool = True
+    """False for a shadow-mode entry: what the loop would have done, not what it did."""
 
 
 # --------------------------------------------------------------------------- settled signals
@@ -188,6 +192,7 @@ async def save_segment_row(session: AsyncSession, record: SegmentRecord, *, now:
     row.enabled = record.enabled
     row.state_since = record.state_since
     row.hold_until = record.hold_until
+    row.flagged = record.flagged
     row.updated_at = now
     await session.flush()
 
@@ -207,6 +212,7 @@ def _segment(row: SegmentStatRow, league: LeagueRow) -> SegmentRecord:
         enabled=row.enabled,
         state_since=row.state_since,
         hold_until=row.hold_until,
+        flagged=row.flagged,
     )
 
 
@@ -222,10 +228,13 @@ async def list_calibration_versions(session: AsyncSession) -> list[CalibrationRe
 
 
 async def active_calibration(session: AsyncSession) -> CalibrationRecord | None:
-    """The active version (the newest one if, against the invariant, several are flagged)."""
+    """The active version that passed its gate (the newest if, against the invariant, several).
+
+    A version that never passed the hold-out gate is never trusted, even if flagged active.
+    """
     row = await session.scalar(
         select(CalibrationVersionRow)
-        .where(CalibrationVersionRow.active.is_(True))
+        .where(CalibrationVersionRow.active.is_(True), CalibrationVersionRow.passed_gate.is_(True))
         .order_by(CalibrationVersionRow.version.desc())
     )
     return None if row is None else _calibration(row)
@@ -288,10 +297,17 @@ async def add_learning_change(  # noqa: PLR0913 - one column per argument
     after: dict[str, Any],
     reason: str,
     now: datetime,
+    applied: bool = True,
 ) -> LearningChange:
-    """Append an entry to the change journal."""
+    """Append an entry to the change journal (``applied=False`` marks a shadow entry)."""
     row = LearningChangeRow(
-        kind=kind, subject=subject, before=before, after=after, reason=reason, created_at=now
+        kind=kind,
+        subject=subject,
+        before=before,
+        after=after,
+        reason=reason,
+        created_at=now,
+        applied=applied,
     )
     session.add(row)
     await session.flush()
@@ -299,15 +315,32 @@ async def add_learning_change(  # noqa: PLR0913 - one column per argument
 
 
 async def list_learning_changes(
-    session: AsyncSession, *, limit: int = 20, since: datetime | None = None
+    session: AsyncSession,
+    *,
+    limit: int = 20,
+    since: datetime | None = None,
+    applied: bool | None = None,
 ) -> list[LearningChange]:
-    """Journal entries, newest first, optionally only those since ``since``."""
+    """Journal entries, newest first; ``since`` and ``applied`` (shadow vs real) narrow them."""
     statement = select(LearningChangeRow).order_by(
         LearningChangeRow.created_at.desc(), LearningChangeRow.id.desc()
     )
     if since is not None:
         statement = statement.where(LearningChangeRow.created_at >= since)
+    if applied is not None:
+        statement = statement.where(LearningChangeRow.applied.is_(applied))
     return [_change(row) for row in await session.scalars(statement.limit(limit))]
+
+
+async def latest_change_of_kind(session: AsyncSession, kind: str) -> LearningChange | None:
+    """The newest journal entry of ``kind`` (shadow or not), or ``None``."""
+    row = await session.scalar(
+        select(LearningChangeRow)
+        .where(LearningChangeRow.kind == kind)
+        .order_by(LearningChangeRow.created_at.desc(), LearningChangeRow.id.desc())
+        .limit(1)
+    )
+    return None if row is None else _change(row)
 
 
 async def get_learning_change(session: AsyncSession, change_id: int) -> LearningChange | None:
@@ -336,4 +369,5 @@ def _change(row: LearningChangeRow) -> LearningChange:
         after=row.after,
         reason=row.reason,
         rolled_back=row.rolled_back,
+        applied=row.applied,
     )

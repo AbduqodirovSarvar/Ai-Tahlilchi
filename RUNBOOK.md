@@ -103,6 +103,10 @@ Workflow: image → GHCR → serverga fayllar → `remote-deploy.sh`. Birinchi d
 5. Loglarda `services_backend ... backend=real`, `scheduler_started jobs=[settle, refresh, daily-tick, recalc-tick]`. Healthcheck endi rejalashtiruvchi tirikligini ham tekshiradi.
 6. Botda `/holat`: API limitlari va oxirgi ishlar ko'rinadi. Birinchi `refresh` 08:30 (Toshkent) da yoki qo'lda: `bin/dc exec bot python -m app.pipeline.refresh`.
 
+### 4.1 O'rganish halqasi rejimi (`LEARNING_MODE`)
+
+Haftalik o'rganish (dushanba 09:00) uch rejimda ishlaydi: `off` (hech narsa), **`shadow` (standart)** va `apply`. `shadow` da job hisoblaydi va "nima qilgan bo'lardi" ni `learning_changes` jadvaliga `applied=0` bilan yozadi, lekin tahlil xom model bilan ishlaydi: EV chegarasi ko'tarilmaydi, segment o'chirilmaydi, kalibratsiya qo'llanmaydi. Paper trading (F10) davomida jurnalni ko'rib turing: `sqlite3 data/app.db "SELECT created_at, kind, subject, reason FROM learning_changes WHERE applied=0 ORDER BY id DESC LIMIT 20"`. `apply` ga o'tish faqat odam qarori: `.env` da `LEARNING_MODE=apply`, keyin `bin/dc up -d --no-build bot`. Qo'lda rollbackdan keyin segment va kalibratsiya `LEARNING_MANUAL_HOLD_DAYS` (standart 30) kun muzlatiladi. Sabab va simulyatsiyalar: [ADR 0013](docs/adr/0013-learning-loop-math.md).
+
 ## 5. Monitoring
 
 - **Docker healthcheck** (har 60 s): sozlama xatosi belgisi yo'q, baza ochiladi, disk ≥ 200 MB bo'sh, (real rejimda) `daily-tick` 5 daqiqadan ortiq kechikmagan. Natija: `bin/dc exec bot python -m app.ops.healthcheck` (JSON: tekshiruvlar, baza/WAL hajmi, oxirgi ishlar).

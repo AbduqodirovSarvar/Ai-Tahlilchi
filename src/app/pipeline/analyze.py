@@ -41,7 +41,7 @@ from app.pipeline.ingest import (
 )
 from app.pipeline.modeling import FittedLeague
 from app.pipeline.odds import current_quotes, load_decision_snapshots
-from app.pipeline.overlay import LearningOverlay
+from app.pipeline.overlay import EMPTY_OVERLAY, LearningOverlay, load_overlay
 from app.pipeline.persist import store_picks
 from app.pipeline.provider import MANUAL, QuotaSnapshot
 from app.pipeline.queries import league_refs, team_refs
@@ -235,7 +235,8 @@ class AnalysisEngine:
         fitted: dict[tuple[ExternalRef, date], FittedLeague] = {}
         by_fixture: list[list[Pick]] = []
         tally = Tally()
-        overlay = await ctx.learning.load()  # one read per run: calibration and segment rules
+        # one read per run (calibration and segment rules); a failure means the raw model
+        overlay = await load_overlay(ctx.learning)
         for done, item in enumerate(items, start=1):
             try:
                 picks = await self._value_one(
@@ -260,10 +261,13 @@ class AnalysisEngine:
         run: tuple[datetime, Tally, LearningOverlay],
     ) -> list[Pick]:
         ctx = self._ctx
-        now, tally, overlay = run
+        now, tally, learned = run
         record = item.record
         fixture = record.fixture
         kind = classify(record, now) or "upcoming"
+        # A retro card shows what the model said then: today's calibration and segment rules
+        # are knowledge from the future, so it always gets the raw model.
+        overlay = EMPTY_OVERLAY if kind == "retro" else learned
         as_of = as_of_for(record, kind, now)
         league = ctx.leagues.canonical(fixture.league.ref)
         league_fit = fitted.get((league, as_of))

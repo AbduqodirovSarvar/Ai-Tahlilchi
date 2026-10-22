@@ -13,6 +13,7 @@ from app.domain import Sport
 from app.pipeline.clock import Clock, system_clock
 from app.pipeline.config import PipelineConfig
 from app.pipeline.leagues import LeagueDirectory
+from app.pipeline.learning_settings import LearningSettings
 from app.pipeline.ledger import Ledger
 from app.pipeline.modeling import ModelCache
 from app.pipeline.overlay import LearningSource, NoLearning
@@ -36,6 +37,7 @@ class PipelineContext:
     leagues: LeagueDirectory = field(default_factory=LeagueDirectory)
     reviewer: CandidateReviewer = field(default_factory=NoReview)
     learning: LearningSource = field(default_factory=NoLearning)
+    learning_settings: LearningSettings = field(default_factory=LearningSettings)
     models: ModelCache = field(init=False)
 
     def __post_init__(self) -> None:
