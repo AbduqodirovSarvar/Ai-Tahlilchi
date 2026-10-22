@@ -16,10 +16,11 @@ from app.db.repo import FixtureRecord, finished_fixtures, get_fixture_by_id, odd
 from app.domain import Market, OddsKind, Selection, Team
 from app.models import DixonColesModel, UnknownTeamError, team_key, top_scores
 from app.pipeline.context import PipelineContext
+from app.pipeline.form import result_letter, score_of, team_results
 from app.pipeline.odds import current_quotes, load_decision_snapshots
 from app.pipeline.valuation import ValuationInput, value_fixture
 
-FORM_LENGTH: Final = 5
+_WORDS: Final = {"W": "win", "D": "draw", "L": "loss"}
 TOP_SCORE_COUNT: Final = 3
 HEAD_TO_HEAD_LENGTH: Final = 5
 _OPENING_KINDS: Final = (OddsKind.OPENING, OddsKind.MORNING)
@@ -84,35 +85,21 @@ class FixtureCard:
     data_as_of: datetime | None
 
 
-def _score(record: FixtureRecord) -> tuple[int, int] | None:
-    result = record.result
-    if result is None or result.home_score is None or result.away_score is None:
-        return None
-    return result.home_score, result.away_score
-
-
 def _form(team: Team, history: list[FixtureRecord]) -> tuple[str, ...]:
     """The team's last results, oldest first, as ``win``/``draw``/``loss``."""
-    marks = []
-    for record in history:
-        score = _score(record)
-        if score is None or team.ref not in (record.fixture.home.ref, record.fixture.away.ref):
-            continue
-        own, other = score if record.fixture.home.ref == team.ref else score[::-1]
-        marks.append("win" if own > other else "draw" if own == other else "loss")
-    return tuple(marks[-FORM_LENGTH:])
+    return tuple(_WORDS[result_letter(*pair)] for pair in team_results(team, history))
 
 
 def _venue(team: Team, history: list[FixtureRecord], *, home: bool) -> VenueStats:
     rows = [
         record
         for record in history
-        if _score(record) is not None
+        if score_of(record) is not None
         and (record.fixture.home.ref if home else record.fixture.away.ref) == team.ref
     ]
     if not rows:
         return VenueStats(0, 0.0, 0.0, None, None)
-    scores = [s for record in rows if (s := _score(record)) is not None]
+    scores = [s for record in rows if (s := score_of(record)) is not None]
     own = [s[0] if home else s[1] for s in scores]
     conceded = [s[1] if home else s[0] for s in scores]
     xg = [(r.home_xg, r.away_xg) for r in rows if r.home_xg is not None and r.away_xg is not None]
@@ -137,7 +124,7 @@ def _meetings(card: FixtureRecord, history: list[FixtureRecord]) -> tuple[Meetin
         )
         for record in history
         if {record.fixture.home.ref, record.fixture.away.ref} == pair
-        and (score := _score(record)) is not None
+        and (score := score_of(record)) is not None
     ]
     return tuple(found[-HEAD_TO_HEAD_LENGTH:])
 

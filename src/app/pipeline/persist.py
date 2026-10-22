@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import Confidence, LlmVerdict, RecalcKind, SignalSource, SignalVersionReason
@@ -29,11 +30,16 @@ from app.db.repo import (
     upsert_signal,
 )
 from app.domain import Market, Selection
+from app.llm.inputs import TeamForm
+from app.logging import get_logger
 from app.pipeline.context import PipelineContext
-from app.pipeline.review import Review, ReviewCandidate, ReviewKey, review_safely
+from app.pipeline.form import forms_for
+from app.pipeline.review import NoReview, Review, ReviewCandidate, ReviewKey, review_safely
 from app.pipeline.selection import Pick
 from app.pipeline.types import AnalysisRequest, SignalCard
 from app.pipeline.valuation import stake_units
+
+logger = get_logger(__name__)
 
 EPSILON: Final = 1e-9
 _ZERO: Final = Decimal(0)
@@ -53,7 +59,9 @@ def _key(pick: Pick) -> ReviewKey:
     return (pick.fixture.id, pick.candidate.market, pick.candidate.selection)
 
 
-def _to_review_candidate(pick: Pick) -> ReviewCandidate:
+def _to_review_candidate(
+    pick: Pick, user_id: int, forms: tuple[TeamForm, ...] = ()
+) -> ReviewCandidate:
     fixture = pick.fixture.fixture
     candidate = pick.candidate
     return ReviewCandidate(
@@ -70,7 +78,23 @@ def _to_review_candidate(pick: Pick) -> ReviewCandidate:
         confidence=Confidence(candidate.confidence.value),
         market_probability=candidate.market_probability,
         confidence_reasons=tuple(reason.value for reason in candidate.assessment.reasons),
+        user_id=user_id,
+        league_id=pick.fixture.league_id,
+        home_team_id=pick.fixture.home_team_id,
+        away_team_id=pick.fixture.away_team_id,
+        forms=forms,
     )
+
+
+async def _forms(ctx: PipelineContext, picks: Sequence[Pick]) -> dict[int, tuple[TeamForm, ...]]:
+    """Recent form of the teams of ``picks`` for the reviewer; unreadable history = no forms."""
+    if not picks or isinstance(ctx.reviewer, NoReview):  # nobody to show the form to
+        return {}
+    try:
+        return await forms_for(ctx, [pick.fixture for pick in picks])
+    except SQLAlchemyError as error:
+        logger.warning("form_unavailable", error=repr(error))
+        return {}
 
 
 def apply_reviews(
@@ -193,7 +217,12 @@ async def store_picks(
 ) -> Stored:
     """Review and store ``picks``; returns their cards (see the module docstring)."""
     now = ctx.clock()
-    to_review = [_to_review_candidate(pick) for pick in picks if pick.passes and not pick.retro]
+    reviewable = [pick for pick in picks if pick.passes and not pick.retro]
+    forms = await _forms(ctx, reviewable)
+    to_review = [
+        _to_review_candidate(pick, request.user_id, forms.get(pick.fixture.id, ()))
+        for pick in reviewable
+    ]
     reviews = await review_safely(ctx.reviewer, to_review, limit_seconds=ctx.config.review_timeout)
     adjusted, rejected = apply_reviews(picks, reviews, request)
     cards: list[SignalCard] = []

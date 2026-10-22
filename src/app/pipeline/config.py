@@ -53,6 +53,10 @@ class PipelineConfig:
     """A digest missed by more than this (the process was down) is skipped, not sent late."""
     before_kickoff_lead: timedelta = timedelta(hours=24)
     """How long before kick-off the first scheduled recalculation runs."""
+    postmortems_per_run: int = 10
+    """Most LLM post-mortem calls per daily run (the free tier is shared with the reviews)."""
+    postmortem_lookback: timedelta = timedelta(days=30)
+    """A loss older than this since settlement is not explained any more (lessons age out)."""
     odds_move_threshold: float = 0.10
     review_timeout: float = DEFAULT_REVIEW_TIMEOUT
     history_sources: tuple[str, ...] = ("api-football", "football-data")
@@ -65,6 +69,9 @@ class PipelineConfig:
             raise ConfigurationError(msg)
         if self.max_quote_age <= timedelta(0) or self.max_quote_skew <= timedelta(0):
             msg = "max_quote_age and max_quote_skew must be positive"
+            raise ConfigurationError(msg)
+        if self.postmortems_per_run < 1 or self.postmortem_lookback <= timedelta(0):
+            msg = "postmortems_per_run must be at least 1 and postmortem_lookback positive"
             raise ConfigurationError(msg)
         if self.refresh_days_ahead < 1 or self.odds_days_ahead < 1:
             msg = "refresh_days_ahead and odds_days_ahead must be at least 1"

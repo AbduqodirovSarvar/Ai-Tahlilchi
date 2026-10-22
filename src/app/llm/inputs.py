@@ -117,3 +117,7 @@ class PostmortemInput(_Frozen):
     final_score: Annotated[str, StringConstraints(pattern=r"^\d{1,2}-\d{1,2}$")]
     xg_summary: Note | None = None
     match_events: tuple[Reason, ...] = ()
+    original_verdict: Name | None = None
+    """What the pre-match review said (``tasdiq``/``ehtiyot``/``rad``); ``None`` = no review."""
+    original_note: Note | None = None
+    """The pre-match review's note: model text, so it is data like every other field."""
