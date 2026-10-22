@@ -85,14 +85,15 @@
 - [x] T4 bot: `TelegramNotifier` (24h / pre-match / bekor / sevimlilar / natija / admin xabarlari, bloklangan foydalanuvchi → `None`), ✅ Stavka qildim (idempotent `place_bet`) va 🎟 ochiq stavkalar ro'yxati (to'liq F7.5 UI keyin)
 
 ## T5 — Kengaytmalar va deploy
-- [ ] F7.1 Maxsus tahlil
-- [ ] F7.2 Batafsil karta
-- [ ] F7.3 Sevimlilar va bildirishnomalar
-- [ ] F7.4 Shablonlar
-- [ ] F7.5 Mening stavkalarim va bank
-- [ ] F7.6 Hisobot va eksport
-- [ ] F7.7 Retro-tahlil
-- [ ] F7.8 Ekspress tuzuvchi (ixtiyoriy)
+- [x] T5 bot (bot-engineer, 2026-10-22): A-qism (digest narx eslatmalari, karta koeffitsient chizig'i, `/holat` qo'lda zaxira va LLM, bloklangan foydalanuvchi, shartnoma v1.6) va F7.1-F7.8; [ADR 0012](adr/0012-t5-bot-features.md), [test ssenariylari 11-19](test_scenarios.md)
+- [x] F7.1 Maxsus tahlil: jamoa/o'yin qidiruvi (lotin/kirill, noaniq), `/tahlil A - B`, oddiy matn, jamoaning yaqin 3 o'yini, checkbox tanlov, `include_no_value` natijasi (barcha bozorlar, "Value topilmadi") ([ADR 0012](adr/0012-t5-bot-features.md)) (bot-engineer)
+- [x] F7.2 Batafsil karta: forma, statistika/xG, H2H, jarohatlar, top-3 hisob, bozorlar jadvali, koeffitsient harakati, kartaga qaytish
+- [x] F7.3 Sevimlilar: ro'yxat, `/kuzat`, jamoa/liga qo'shish, kartadagi tugma, har element uchun bildirishnoma tugmalari (tarkib, koeffitsient, natija). Yuborish tomoni T4 da mavjud
+- [x] F7.4 Shablonlar: ro'yxat, wizardda ishga tushirish, jadval tahrirlash UI, o'chirish. **Jadval bo'yicha avtomatik ishga tushirish pipeline'da hali yo'q** (hisobotda so'ralgan)
+- [x] F7.5 Mening stavkalarim va bank: umumiy ko'rinish, ochiq/yopilgan ro'yxat, qo'lda natija va cashout, bank grafigi (PNG), zarar limiti tasdig'i, `/bank`. "Limitda yangi signal yubormaslik" pipeline'da hali yo'q
+- [x] F7.6 Hisobot va eksport: davrlar (7/30/hammasi/o'zim), kesimlar, kalibratsiya jadvali, grafik PNG, `/eksport` (signals.csv + bets.csv, shartnoma v1.6)
+- [x] F7.7 Retro-tahlil: Kecha / O'tgan hafta tugmalari va kalit so'zlari, o'tish ulushi, 90/31 kun qoidalari xabari
+- [x] F7.8 Ekspress tuzuvchi: `/ekspress` va bugungi signallar ostidagi tugma, `ExpressService` (shartnoma v1.6), 34% ogohlantirishi
 - [ ] F8.3 Post-mortem
 - [ ] F8.4 Saboqlar
 - [ ] F8.5 `segment_stats`

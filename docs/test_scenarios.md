@@ -126,7 +126,7 @@
 | 8.1 | `⚡ Bugungi signallar` (yoki `/bugun`), signal yo'q | "🤷 Bugun faol signal yo'q…" va nima qilish bo'yicha maslahat |
 | 8.2 | Tahlildan keyin shu tugma | "⚡ Bugungi signallar — N ta", kartalar (tugmalari bilan), [🔄 Hammasini yangilash]; yashirilganlar ko'rinmaydi |
 | 8.3 | 6+ signalda [➡️ Yana] | Keyingi sahifa; bitta ommaviy so'rov (`get_signals`), yo'qolgan signal jim o'tkazib yuboriladi |
-| 8.4 | `/holat` yoki `ℹ️ Holat / Yordam` | Rejim (🧪 namunaviy / 🟢 haqiqiy), API limitlari (ishlatilgan/limit, qoldi, qo'lda), oxirgi yangilanish vaqti va "N soat oldin", oxirgi ishlar ✅/❌, oxirgi xatolar (≤ 5) yoki "yo'q ✅"; oxirida /yordam havolasi |
+| 8.4 | `/holat` yoki `ℹ️ Holat / Yordam` | Rejim (🧪 namunaviy / 🟢 haqiqiy), API limitlari (ishlatilgan/limit, qoldi, qo'lda so'rovlar ishlatilgan/zaxira va qo'lda qoldi), AI (Gemini) so'rov va token sarfi, oxirgi yangilanish vaqti va "N soat oldin", oxirgi ishlar ✅/❌, oxirgi xatolar (≤ 5) yoki "yo'q ✅"; oxirida /yordam havolasi |
 | 8.5 | Xato matnida `<`, `&` (masalan, `<timeout>`) | `/holat` da to'g'ri ko'rinadi (escape qilingan) |
 
 ## 9. ✅ Stavka qildim va 🎟 Mening stavkalarim
@@ -139,15 +139,102 @@
 | 9.5 | Noto'g'ri qiymat (`abc`, `0.5`) | Format ko'rsatiladi, qadam ochiq qoladi; `/bekor` yoki ❌ — chiqish |
 | 9.6 | Unit sozlanmagan yoki tavsiya "stavka qilinmaydi" | [✅ Yozish] yo'q; summani o'zi kiritishi kerak ("💵 Summani o'zingiz kiriting…") |
 | 9.7 | Boshqa oqim (wizard) ochiqligida [✏️ Boshqa…] | Alert "Avval joriy amalni tugating yoki /bekor" |
-| 9.8 | `🎟 Mening stavkalarim` | Balans (boshlang'ich bank + yopilgan stavkalar foydasi), oy foydasi, ochiq stavkalar soni ("balansni kamaytirmaydi"), ochiq stavkalar ro'yxati; bo'sh holat: "Ochiq stavkalar yo'q…" |
+| 9.8 | `🎟 Mening stavkalarim` (to'liq UI: 15-bo'lim) | Balans (boshlang'ich bank + yopilgan stavkalar foydasi), oy foydasi, ochiq stavkalar soni ("balansni kamaytirmaydi"), ochiq stavkalar ro'yxati; bo'sh holat: "Ochiq stavkalar yo'q…" |
 
 ## 10. Avtomatik xabarlar (Notifier, `APP_SERVICES=real`)
 | # | Qadam | Kutilgan natija |
 |---|---|---|
-| 10.1 | Sozlangan vaqtda kunlik xabar | Sarlavha ("☀️ Kunlik tahlil — Payshanba, 22.10"), "📆 Kecha: 6 ta signal · 4 ✅ · 2 ❌ · +2.3 unit", natijalar xulosasi ([🔄 Hammasini yangilash]), kunlar bo'yicha kartalar (⭐ blok oxirida); signal yo'q bo'lsa "Value topilmadi" |
+| 10.1 | Sozlangan vaqtda kunlik xabar | Sarlavha ("☀️ Kunlik tahlil — Payshanba, 22.10"), "📆 Kecha: 6 ta signal · 4 ✅ · 2 ❌ · +2.3 unit", natijalar xulosasi ([🔄 Hammasini yangilash]), kunlar bo'yicha kartalar (⭐ blok oxirida); signal yo'q bo'lsa "Value topilmadi"; bukmeker narxi yo'q o'yinlar ("N ta o'yin: 1xBet narxi yo'q"), eskirgan narx va "Ma'lumot yangilanmadi — eski ma'lumot" ogohlantirishi; qayta hisoblangan kartada "📌 Tavsiya koeff.: 1.85 → hozir 1.72" |
 | 10.2 | Tinch soatlarda kunlik xabar | Tinch soat tugagach yuboriladi; 24 soat/pre-match xabarlari tashlanadi (pipeline qo'llaydi) |
 | 10.3 | 24 soat / pre-match yangilanishi | Kunlik xabarga javob (reply) sifatida farq xabari (⏰ / 🔔), kartadagi tugmalar bilan |
 | 10.4 | O'yin qoldirildi/bekor qilindi | "❌ Bekor: …" sabab bilan, javob sifatida |
 | 10.5 | Natija yopildi | "✅ O'tdi — …" / "❌ O'tmadi — …" va foyda unit da |
-| 10.6 | Foydalanuvchi botni bloklagan | Xabar yuborilmaydi, pipeline yiqilmaydi (logda `notify_user_blocked_bot`) |
+| 10.6 | Foydalanuvchi botni bloklagan | Xabar yuborilmaydi, pipeline yiqilmaydi (logda `notify_user_blocked_bot`); 19-bo'lim |
 | 10.7 | Tizim xatosi (API, Gemini) | Har bir admin'ga "🚨 Tizim xatosi · komponent · vaqt" |
+
+
+## 11. 🔍 Maxsus tahlil (F7.1)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 11.1 | `🔍 Maxsus tahlil` | Taklif matni, [📅 Bugungi o'yinlar] [📆 Ertangi o'yinlar] [❌ Bekor qilish]; "EV filtrisiz" izohi |
+| 11.2 | `Real` yozish | "Real Madrid, Real Sociedad, Real Betis…" tugmalari (jamoa va liga); lotin/kirill va xato yozilgan nom (`arsenl`) ham topiladi |
+| 11.3 | Jamoani tanlash | Shu jamoaning yaqin ≤ 3 o'yini ✅ checkbox bilan, eng yaqini oldindan belgilangan; [▶️ Tahlil qilish (N)] |
+| 11.4 | `/tahlil Arsenal - Chelsea` yoki oddiy matn `Arsenal Chelsea` | Topilgan o'yin(lar) ro'yxati (belgilanmagan); `/tahlil 25.10 - 31.10` esa oddiy tahlil tasdiqlash ekraniga o'tadi |
+| 11.5 | ▶️ Tahlil qilish | Progress xabari, keyin: sarlavha, har o'yin uchun **barcha bozorlar** ehtimolliklari (✅ chegaradan o'tdi / ▫️ / ❗ EV manfiy), o'tgan tanlovlar uchun to'liq karta; hech biri o'tmasa "Value topilmadi" |
+| 11.6 | Bir martada 10 tadan ko'p o'yin | Alert "ko'pi bilan 10 ta"; hech narsa belgilanmagan holda ▶️ — alert |
+| 11.7 | Tahlil davomida yana ▶️ yoki tugma | "⏳ allaqachon bajarilmoqda"; xato bo'lsa (limit, manba) sabab ko'rsatiladi va tanlov ekrani qaytadi |
+| 11.8 | Eski xabardagi tugma / restartdan keyin | "⌛ Bu tugma eskirgan" |
+| 11.9 | `<b>x&y` kabi matn | Escape qilingan, HTML buzilmaydi |
+
+## 12. 📋 Batafsil karta (F7.2)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 12.1 | Kartadagi [📋 Batafsil] | Karta shu xabarda batafsil kartaga aylanadi: forma `✅✅➖❌✅`, uy/mehmon statistikasi (+xG), so'nggi uchrashuvlar, jarohat/diskvalifikatsiya, eng ehtimolli 3 hisob, barcha bozorlar jadvali (model / adolatli / bukmeker / EV), koeffitsient harakati, "📦 Ma'lumot … holatiga" |
+| 12.2 | [⬅️ Kartaga qaytish] | Asl karta joriy raqamlar va tugmalar bilan |
+| 12.3 | Tugagan o'yin | "🏁 Hisob: 2:1" tarkib o'rniga |
+| 12.4 | Juda uzun nomlar / ko'p bozor | Karta bitta xabarga sig'adi ("…va yana N ta") |
+
+## 13. ⭐ Sevimlilar (F7.3)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 13.1 | `⭐ Sevimlilar` (bo'sh) | Tushuntirish va [➕ Jamoa] [➕ Liga] |
+| 13.2 | `/kuzat Barcelona` | Aniq topilsa darhol qo'shiladi va bildirishnoma tugmalari chiqadi; noaniq nomda (`Real`) tanlash ro'yxati; topilmasa xabar; takroran — dublikat yo'q |
+| 13.3 | ➕ Jamoa → nom yozish; ➕ Liga → ro'yxatdan | Qo'shiladi, element ekrani ochiladi |
+| 13.4 | [📋 Tarkib] [📉 Koeffitsient] [🏁 Natija] | Har biri yoqiladi/o'chadi (✅/▫️), ro'yxatda ko'rinadi |
+| 13.5 | [🗑 Olib tashlash]; boshqa joyda o'chirilgan elementning tugmasi | Ro'yxat qaytadi; "Bu element endi sevimlilarda yo'q" |
+| 13.6 | Kartadagi [⭐ Kuzatish] | Uy jamoasi, mehmon jamoasi, liga tugmalari; ikkinchi bosish — olib tashlaydi |
+| 13.7 | Sevimli jamoa o'yini tahlilda | Karta "⭐ Sevimli" belgisi bilan, har doim kiritiladi |
+| 13.8 | Ikkinchi foydalanuvchi | Ro'yxati alohida |
+
+## 14. 💾 Shablonlarim (F7.4)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 14.1 | Wizard tasdiqlash → 💾 → nom | Shablon saqlanadi; `💾 Shablonlarim` ro'yxatida qisqa xulosa (sana · sport · ≥ ehtimollik · EV) |
+| 14.2 | Shablonni tanlash | Barcha parametrlar va jadval; [▶️ Ishga tushirish] [🗓 Jadval] [🗑 O'chirish] |
+| 14.3 | ▶️ Ishga tushirish | Wizardning tasdiqlash ekrani shablon so'rovi bilan (nisbiy sana yangi davrga o'tadi, API sarfi ko'rinadi); ▶️ Boshlash → natijalar |
+| 14.4 | 🗓 Jadval: kunlar, vaqt (7–18 yoki ✏️ `08:30`), 💾 Saqlash | Jadval saqlanadi (ro'yxatda 🗓); kunsiz saqlash — alert; 🚫 — jadval o'chadi. **Eslatma: avtomatik ishga tushirish pipeline'da hali ulanmagan** (matnda aytilgan) |
+| 14.5 | 🗑 → tasdiq | O'chadi; "Yo'q" — o'zgarmaydi |
+| 14.6 | Boshqa joyda o'chirilgan shablon tugmasi | "Topilmadi" xabari |
+| 14.7 | 90 kundan eski oraliqli shablon | "Oraliq juda eski…" xabari |
+
+## 15. 🎟 Mening stavkalarim — to'liq (F7.5)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 15.1 | `🎟 Mening stavkalarim` yoki `/bank` | Balans, unit, oy foydasi, ochiq stavkalar, yopilgan hisobi (✅ ❌ ↩️ 💸), umumiy foyda va yield, limitlar; [🟡 Ochiq] [✅ Yopilgan] [📈 Bank grafigi] [⚙️ Bank va limitlar] |
+| 15.2 | ⚙️ Bank va limitlar | Bank, unit, kunlik va haftalik limit muharrirlari (sozlamalar bilan bir xil) |
+| 15.3 | 🟡 Ochiq → stavka → [✅ O'tdi] [❌ O'tmadi] [↩️ Qaytarildi] | O'yin boshlangan bo'lsa natija belgilanadi, balans yangilanadi; boshlanmagan bo'lsa alert |
+| 15.4 | [💸 Cashout] → `0.8` yoki `-0.4` | Unit da natija; `abc`, `500` — xato va qadam ochiq; ⬅️ — chiqish |
+| 15.5 | ✅ Yopilgan | Natija va foyda bilan oxirgi stavkalar |
+| 15.6 | 📈 Bank grafigi | PNG rasm (kun oxiridagi balans, boshlang'ich bank chizig'i); bank yoki yopilgan stavka yo'q — tushuntirish |
+| 15.7 | Zarar limitiga yetilgach ✅ Stavka qildim | "🛑 Zarar limitiga yetdingiz…" va [🛑 Baribir davom etaman] / [❌]; faqat tasdiqdan keyin odatiy so'rov |
+
+## 16. 📈 Hisobot va eksport (F7.6)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 16.1 | `📈 Hisobot` yoki `/hisobot` | 7 kunlik hisobot: signallar, ROI, yield, CLV, win rate, eng uzun mag'lubiyat seriyasi, kalibratsiya jadvali va "60–70% deb berilgan signallar haqiqatda 64% holatda o'tdi" jumlasi (n ≥ 10 bo'lsa) |
+| 16.2 | [30 kun] [Hammasi] | Davr almashadi, tanlangani ✅ |
+| 16.3 | [📅 O'zim] → `01.10 - 21.10` | Oraliq hisoboti; noto'g'ri sana / kelajak sana — xato, qadam ochiq; kesim tugmalari oralig'ni saqlaydi |
+| 16.4 | Kesim: sport, liga, bozor, risk profili, ishonch | Kesim jadvali (enumlar o'zbekcha), ≤ 15 qator |
+| 16.5 | 📊 Grafik | Kalibratsiya PNG, kesim tanlangan bo'lsa yield PNG; ma'lumot yo'q — tushuntirish |
+| 16.6 | `/eksport` yoki 📤 CSV | Ikkita fayl: `signals.csv` va `bets.csv` |
+| 16.7 | Retro tahlil signallari | Hisobotga kirmaydi |
+
+## 17. Retro-tahlil (F7.7)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 17.1 | Sana qadamida [🕰 Kecha (retro)] / [🕰 O'tgan hafta (retro)]; `/tahlil kecha`, `/tahlil o'tgan hafta` | Tasdiqlash ekrani "🕰 O'tgan sanalar: retro-tahlil" |
+| 17.2 | Natija | "🕰 Retro-tahlil…", "🧮 O'sha paytdagi tanlovlar: ✅ N · ❌ M — o'tish ulushi X%"; kartada "Natija: ✅/❌", 🔄 va ✅ Stavka tugmalari yo'q |
+| 17.3 | `/tahlil 01.07-05.07` (> 90 kun), 31 kundan uzun oraliq | "juda eski" / "juda uzun" va qoida (90 / 31 kun) |
+
+## 18. 🧩 Ekspress (F7.8)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 18.1 | `/ekspress` yoki ⚡ Bugungi signallar ostidagi [🧩 Ekspress] | Faol signallar ro'yxati (koeffitsienti bilan); signal < 2 bo'lsa tushuntirish |
+| 18.2 | Belgilash | 2–4 tadan [🧮 Hisoblash]; bir o'yindan ikkinchi tanlov — alert "bog'liq"; beshinchi — alert |
+| 18.3 | 🧮 Hisoblash | Tanlovlar, umumiy koeffitsient, umumiy ehtimollik (+ adolatli koeff.), EV (manfiy bo'lsa ❗), "3 ta 70% lik tanlovdan … atigi 34%" ogohlantirishi |
+| 18.4 | ⬅️ / ❌ | Tanlovga qaytadi / yopiladi |
+
+## 19. Yetkazib bo'lmaydigan foydalanuvchi (shartnoma v1.6)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 19.1 | Foydalanuvchi botni bloklagan, kunlik xabar vaqti | Bir marta urinish (`notify_user_blocked_bot`), pipeline kalitni yakunlaydi: 5 marta qayta urinish ham, adminga kunlik ogohlantirish ham yo'q; 24 soatdan keyin yana urinadi |
