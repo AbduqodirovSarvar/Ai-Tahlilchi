@@ -1,6 +1,6 @@
 {
   "id": "recorded_bad_verdict",
-  "description": "Yozib olingan javobda ruxsat etilmagan verdict: fallback.",
+  "description": "Yozib olingan javobda ruxsat etilmagan verdict qiymati (enum buzilishi): ikki urinishdan keyin fallback.",
   "candidates": [
     {
       "candidate_id": "g24",

@@ -48,10 +48,11 @@
   "expected": {
     "g22": {
       "verdict_in": [
-        "tasdiq",
-        "ehtiyot"
+        "tasdiq"
       ],
-      "flags_include": []
+      "flags_include": [
+        "jarohat"
+      ]
     }
   },
   "recorded_output": {
@@ -59,7 +60,9 @@
       {
         "candidate_id": "g22",
         "verdict": "tasdiq",
-        "risk_flags": [],
+        "risk_flags": [
+          "jarohat"
+        ],
         "izoh": "Everton himoyachilari Tarkowski va Mykolenko o'ynamaydi, bu gol urilishi ehtimolini oshiradi."
       }
     ]

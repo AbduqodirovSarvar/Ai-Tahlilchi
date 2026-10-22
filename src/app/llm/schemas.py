@@ -53,6 +53,7 @@ class ReviewStatus(StrEnum):
 # Flags added by code (not the model) to explain why a note was removed.
 FLAG_UNKNOWN_NAME: Final = "unknown_name_in_note"
 FLAG_NOTE_TOO_LONG: Final = "note_too_long"
+FLAG_NOTE_SUSPICIOUS: Final = "note_suspicious"
 
 
 class _Wire(BaseModel):

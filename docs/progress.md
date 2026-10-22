@@ -76,7 +76,7 @@
 - [x] F5.3 Kirish JSON yig'uvchi (delimitlangan ma'lumot bloki, deterministik token byudjeti, "Tajriba konteksti")
 - [x] F5.4 Validatsiya, qayta urinish, fallback (`LlmService`; gallyutsinatsiya qo'rig'i; `postmortem` minimal)
 - [x] F5.5 Bepul tarif limitlari nazorati (kunlik so'rov/token byudjeti, xotiradagi jurnal)
-- [x] F5.6 Gemini testlari (mock; 26 golden holat, `scripts/llm_eval.py` jonli faqat qo'lda; jonli baholash kalit kelgach bajariladi)
+- [x] F5.6 Gemini testlari (mock; 27 golden holat, `scripts/llm_eval.py` jonli faqat qo'lda; jonli baholash kalit kelgach bajariladi). T4 QA tuzatish raundi (F-1…F-14: rezerv-hisob limit, tuzilmaviy xato tasnifi, gap boshidagi nom qo'riqi, `reason` qo'riqi, baholangan token) bajarildi: [qa/T4-llm.md](qa/T4-llm.md), [ADR 0009](adr/0009-llm-integration.md)
 - [ ] F6.7 Qayta hisoblash
 - [ ] F6.8 Bugungi signallar va kunlik xabar
 - [ ] F6.9 `/holat`

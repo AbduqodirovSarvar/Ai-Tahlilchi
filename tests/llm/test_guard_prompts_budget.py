@@ -23,7 +23,6 @@ GROUNDING = '{"home":"Arsenal","away":"Chelsea","absences":[{"player":"Palmer"}]
         "Xavf bor, chunki Yevrokubok oldida Chelsea'ning tarkibi o'zgaradi.",
         "Palmerning jarohati Chelseaga ta'sir qiladi.",
         "Ma'lumot yetarli emas, EV past bo'lishi mumkin.",
-        "Haaland sentence-initial names are not checked.",
     ],
 )
 def test_grounded_notes_pass(note: str) -> None:
@@ -34,6 +33,8 @@ def test_grounded_notes_pass(note: str) -> None:
     ("note", "expected"),
     [
         ("Bu o'yinda Haaland gol uradi.", ("Haaland",)),
+        ("Haaland o'ynamaydi.", ("Haaland",)),
+        ("Arsenal ustun. Saka jarohatli.", ("Saka",)),
         ("Arsenal va Liverpool o'ynaydi.", ("Liverpool",)),
         ("Chelsea uchun Mbappé muhim.", ("Mbappé",)),
         ("Xavf: Manchester City ham bor, Manchester ham.", ("Manchester", "City")),

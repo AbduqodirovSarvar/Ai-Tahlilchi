@@ -329,11 +329,6 @@ async def test_concurrent_calls_are_all_journaled_and_counted() -> None:
     assert len(budget.journal()) == 25
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-3: allow() and record() are separated by an await, so N concurrent "
-    "calls all pass the check; the daily cap is overshot (service.py:167 / budget.py:329).",
-)
 async def test_concurrent_calls_cannot_overshoot_the_request_cap() -> None:
     answer = review_json(("a", "tasdiq", [], "Salbiy omil yo'q."))
 
@@ -350,11 +345,6 @@ async def test_concurrent_calls_cannot_overshoot_the_request_cap() -> None:
     assert len(backend.requests) <= 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-8: when the SDK returns no usage metadata the call is counted as 0 "
-    "tokens, so the daily TOKEN cap can never trip (gemini.py:202, budget.py:349).",
-)
 async def test_missing_usage_metadata_still_consumes_token_budget() -> None:
     answer = review_json(("a", "tasdiq", [], "Salbiy omil yo'q."))
     budget = LlmBudget()
@@ -439,12 +429,6 @@ async def test_prompt_text_is_not_logged_at_info_or_warning() -> None:
 POSTMORTEM_CASE = PostmortemInput(candidate=make_candidate("p"), final_score="0-2")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-9: postmortem reason skips the hallucination and length guards "
-    "that review notes get (service.py:129); F8 stores it as a lesson that is fed back "
-    "into later prompts.",
-)
 async def test_postmortem_reason_with_invented_name_is_not_stored() -> None:
     text = json.dumps(
         {"category": "ma'lumot yetishmadi", "reason": "Bu yerda Haaland jarohatlangan edi."}
@@ -455,10 +439,6 @@ async def test_postmortem_reason_with_invented_name_is_not_stored() -> None:
     assert result is None or "Haaland" not in result.reason
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA T4-llm F-9: postmortem reason has no 400-char cap (service.py:129).",
-)
 async def test_postmortem_reason_is_length_capped() -> None:
     text = json.dumps({"category": "omadsizlik", "reason": "Natija tasodif. " + "x" * 5000})
 

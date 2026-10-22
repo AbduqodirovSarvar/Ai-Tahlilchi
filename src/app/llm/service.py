@@ -7,7 +7,11 @@ sends the signal with numbers only.
 
 Flow of one request: build input within the token budget -> budget guard -> call backend ->
 validate against the Pydantic schema -> on invalid output ask once more -> map answers to
-candidates -> per-note guards (length, sentence count, names not in the input).
+candidates -> per-note guards (length, sentence count, markup, names not in the input).
+
+Budget: each backend call books its estimated cost first (``LlmBudget.reserve``) and is
+settled with the real usage afterwards; when the provider reports no usage, the cost is
+estimated from characters and journalled with ``estimated=True``.
 """
 
 import re
@@ -18,19 +22,24 @@ from typing import Final
 
 from pydantic import BaseModel, ValidationError
 
-from app.clients.gemini import GeminiError, JsonGenerator, create_gemini_client
+from app.clients.gemini import GeminiError, GeminiUsage, JsonGenerator, create_gemini_client
 from app.config import Settings
 from app.errors import ConfigurationError, DataError
-from app.llm.budget import CallOutcome, JournalEntry, LlmBudget
+from app.llm.budget import CallOutcome, JournalEntry, LlmBudget, Reservation
 from app.llm.builder import (
+    DATA_CLOSE,
+    DATA_OPEN,
     DEFAULT_INPUT_TOKEN_BUDGET,
     BuiltPrompt,
     build_postmortem_prompt,
     build_review_prompt,
+    estimate_tokens,
+    sanitize,
 )
 from app.llm.guard import unknown_names
 from app.llm.inputs import CandidateInput, ExperienceContext, PostmortemInput
 from app.llm.schemas import (
+    FLAG_NOTE_SUSPICIOUS,
     FLAG_NOTE_TOO_LONG,
     FLAG_UNKNOWN_NAME,
     LlmReview,
@@ -46,6 +55,7 @@ logger = get_logger(__name__)
 
 MAX_ATTEMPTS_ON_INVALID_OUTPUT: Final = 2
 MAX_NOTE_SENTENCES: Final = 2
+# Cap on a note the model writes (inputs.MAX_USER_NOTE_CHARS caps notes users write).
 MAX_NOTE_CHARS: Final = 400
 # Output tokens the budget guard reserves per candidate before the real usage is known.
 EXPECTED_OUTPUT_TOKENS_PER_CANDIDATE: Final = 120
@@ -60,6 +70,8 @@ REASON_OMITTED: Final = "omitted_by_token_budget"
 REASON_BAD_INPUT: Final = "invalid_input"
 REASON_INTERNAL: Final = "internal_error"
 
+# Markup or data-block delimiters in a note: the model echoed an instruction or an injection.
+_SUSPICIOUS_MARKUP: Final = re.compile(r"</?[A-Za-z][^>]*>|<<<|>>>")
 _SENTENCE_SPLIT: Final = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE: Final = re.compile(r"\s+")
 
@@ -108,7 +120,8 @@ class LlmService:
             return _all_fallback(candidates, REASON_BAD_INPUT, "unknown")
         except Exception:
             # The LLM is optional enhancement: whatever goes wrong, the signal still ships.
-            logger.exception("llm_review_unexpected_error")
+            # Unexpected by definition (known failures are handled above): keep the traceback.
+            logger.warning("llm_review_unexpected_error", exc_info=True)
             return _all_fallback(candidates, REASON_INTERNAL, "unknown")
 
     async def postmortem(self, case: PostmortemInput) -> PostmortemResult | None:
@@ -119,14 +132,14 @@ class LlmService:
                 built, PostmortemOutput, expected_output=EXPECTED_OUTPUT_TOKENS_POSTMORTEM
             )
         except Exception:
-            logger.exception("llm_postmortem_unexpected_error")
+            logger.warning("llm_postmortem_unexpected_error", exc_info=True)
             return None
         if outcome.parsed is None:
             logger.info("llm_postmortem_skipped", reason=outcome.reason)
             return None
         return PostmortemResult(
             category=outcome.parsed.category,
-            reason=_clean_note(outcome.parsed.reason) or "",
+            reason=_guard_reason(outcome.parsed.reason, built.data_text),
             prompt_version=built.prompt.version_id,
             model=outcome.model,
             input_tokens=outcome.input_tokens,
@@ -161,13 +174,15 @@ class LlmService:
         if self._backend is None:
             return _Outcome(None, REASON_DISABLED, None, 0, 0)
         model = self._backend.model
+        estimate = built.estimated_tokens + expected_output
         input_total = output_total = 0
         reason = REASON_INVALID
         for _ in range(MAX_ATTEMPTS_ON_INVALID_OUTPUT):
-            if not self._budget.allow(built.estimated_tokens + expected_output):
+            reservation = self._budget.reserve(estimate)
+            if reservation is None:
                 reason = REASON_BUDGET
                 break
-            attempt = await self._attempt(self._backend, built, schema)
+            attempt = await self._attempt(self._backend, built, schema, reservation)
             input_total += attempt.input_tokens
             output_total += attempt.output_tokens
             reason = attempt.reason or ""
@@ -176,7 +191,7 @@ class LlmService:
         return _Outcome(None, reason, model, input_total, output_total)
 
     async def _attempt[T: BaseModel](
-        self, backend: JsonGenerator, built: BuiltPrompt, schema: type[T]
+        self, backend: JsonGenerator, built: BuiltPrompt, schema: type[T], reservation: Reservation
     ) -> _Outcome[T]:
         """One request. ``reason`` is ``invalid_output`` (worth retrying) or unavailable."""
         started = monotonic()
@@ -185,31 +200,40 @@ class LlmService:
                 system_instruction=built.system, contents=built.user, response_schema=schema
             )
         except GeminiError as exc:
-            self._journal(built, CallOutcome.ERROR, 0, 0)
-            logger.warning("llm_call_failed", reason=type(exc).__name__)
-            return _Outcome(None, REASON_UNAVAILABLE, backend.model, 0, 0)
-        usage = response.usage
+            usage = exc.usage
+            spent = (usage.input_tokens, usage.output_tokens, False) if usage else (0, 0, False)
+            self._settle(reservation, built, CallOutcome.ERROR, spent, exc.attempts)
+            logger.warning("llm_call_failed", reason=type(exc).__name__, attempts=exc.attempts)
+            return _Outcome(None, REASON_UNAVAILABLE, backend.model, spent[0], spent[1])
+        except BaseException:
+            # Cancelled or crashed mid-call: the true cost is unknown, so give the booking back.
+            self._budget.release(reservation)
+            raise
+        cost = _effective_usage(built, response.text, response.usage)
         try:
             parsed = schema.model_validate_json(response.text)
         except ValidationError as exc:
-            self._journal(
-                built, CallOutcome.INVALID_OUTPUT, usage.input_tokens, usage.output_tokens
-            )
+            self._settle(reservation, built, CallOutcome.INVALID_OUTPUT, cost, response.attempts)
             logger.warning(
                 "llm_invalid_output",
                 errors=exc.error_count(),
                 latency_ms=round((monotonic() - started) * 1000),
             )
-            return _Outcome(
-                None, REASON_INVALID, response.model, usage.input_tokens, usage.output_tokens
-            )
-        self._journal(built, CallOutcome.OK, usage.input_tokens, usage.output_tokens)
-        return _Outcome(parsed, None, response.model, usage.input_tokens, usage.output_tokens)
+            return _Outcome(None, REASON_INVALID, response.model, cost[0], cost[1])
+        self._settle(reservation, built, CallOutcome.OK, cost, response.attempts)
+        return _Outcome(parsed, None, response.model, cost[0], cost[1])
 
-    def _journal(
-        self, built: BuiltPrompt, outcome: CallOutcome, tokens_in: int, tokens_out: int
+    def _settle(
+        self,
+        reservation: Reservation,
+        built: BuiltPrompt,
+        outcome: CallOutcome,
+        cost: tuple[int, int, bool],
+        attempts: int,
     ) -> None:
-        self._budget.record(
+        tokens_in, tokens_out, estimated = cost
+        self._budget.settle(
+            reservation,
             JournalEntry(
                 at=self._budget.now(),
                 purpose=built.prompt.name,
@@ -218,8 +242,25 @@ class LlmService:
                 input_tokens=tokens_in,
                 output_tokens=tokens_out,
                 outcome=outcome,
-            )
+                attempts=max(attempts, 1),
+                estimated=estimated,
+            ),
         )
+
+
+def _effective_usage(built: BuiltPrompt, answer: str, usage: GeminiUsage) -> tuple[int, int, bool]:
+    """Reported tokens, or a character-based estimate when the provider reported none.
+
+    A real call always has input tokens, so a zero total means "not reported"; counting it
+    as free would leave the daily token cap dead.
+    """
+    if usage.total_tokens > 0:
+        return usage.input_tokens, usage.output_tokens, False
+    return (
+        estimate_tokens(built.system) + estimate_tokens(built.user),
+        estimate_tokens(answer),
+        True,
+    )
 
 
 def create_llm_service(settings: Settings, budget: LlmBudget | None = None) -> LlmService:
@@ -307,18 +348,37 @@ def _map_candidate(
     )
 
 
+def _note_violation(note: str, grounding: str) -> str | None:
+    """The flag for the first rule a cleaned, non-empty note breaks, if any."""
+    if len(note) > MAX_NOTE_CHARS:
+        return FLAG_NOTE_TOO_LONG
+    if _SUSPICIOUS_MARKUP.search(note) or DATA_OPEN in note or DATA_CLOSE in note:
+        return FLAG_NOTE_SUSPICIOUS
+    invented = unknown_names(note, grounding)
+    if invented:
+        logger.warning("llm_note_dropped_unknown_names", names=list(invented))
+        return FLAG_UNKNOWN_NAME
+    return None
+
+
 def _guard_note(raw: str, grounding: str) -> tuple[str | None, tuple[str, ...]]:
     """Apply the note rules; a violating note is dropped (the verdict stays) and flagged."""
     note = _clean_note(raw)
     if not note:
         return None, ()
-    if len(note) > MAX_NOTE_CHARS:
-        return None, (FLAG_NOTE_TOO_LONG,)
-    invented = unknown_names(note, grounding)
-    if invented:
-        logger.warning("llm_note_dropped_unknown_names", names=list(invented))
-        return None, (FLAG_UNKNOWN_NAME,)
-    return note, ()
+    flag = _note_violation(note, grounding)
+    return (None, (flag,)) if flag else (note, ())
+
+
+def _guard_reason(raw: str, grounding: str) -> str:
+    """Post-mortem reason under the note rules; F8 stores it as a lesson and feeds it back.
+
+    A violating reason becomes ``""``: the category is still useful, an untrusted lesson is not.
+    """
+    note = _clean_note(sanitize(raw))
+    if not note or _note_violation(note, grounding):
+        return ""
+    return note
 
 
 def _log_summary(reviews: tuple[LlmReview, ...], outcome: _Outcome[ReviewResponse]) -> None:
