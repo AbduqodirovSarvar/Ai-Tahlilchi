@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.db.schema import LEDGER_SUBJECT_LENGTH, Base, LedgerRow
+from app.pipeline.redaction import scrub_text
 
 DEFAULT_LEASE: Final = timedelta(minutes=15)
 """A claim older than this is considered abandoned (the worker died) and may be retaken."""
@@ -38,6 +39,8 @@ STAMP_DAY: Final = date(1970, 1, 1)
 SYSTEM_USER: Final = 0
 RUN_PREFIX: Final = "run."
 ERROR_JOB: Final = "error"
+DETAIL_LIMIT: Final = 1000
+"""Longest detail text kept per ledger entry."""
 MAX_KEPT_ERRORS: Final = 100
 STATUS_CLAIMED: Final = "claimed"
 STATUS_DONE: Final = "done"
@@ -135,6 +138,11 @@ def _entry(row: object) -> LedgerEntry:
     )
 
 
+def _clean(detail: str | None) -> str | None:
+    """Error text reaches ``/holat``: credentials are masked (digests never pass through here)."""
+    return None if detail is None else scrub_text(detail, limit=DETAIL_LIMIT)
+
+
 class Ledger:
     """Idempotency keys, stamps, run status and errors over ``pipeline_ledger``."""
 
@@ -219,7 +227,7 @@ class Ledger:
             values = {
                 "status": STATUS_EXHAUSTED if exhausted else STATUS_FAILED,
                 "done_at": now,
-                "detail": detail,
+                "detail": _clean(detail),
                 "attempts": attempts,
                 "retry_after": retry_after,
             }
@@ -358,7 +366,7 @@ class Ledger:
         """Keep a recent error for ``/holat`` (the newest :data:`MAX_KEPT_ERRORS` are kept)."""
         subject = f"{component}:{int(now.timestamp() * 1_000_000)}"[:_SUBJECT_LENGTH]
         key = LedgerKey(ERROR_JOB, now.date(), SYSTEM_USER, subject)
-        await self._finish(key, STATUS_DONE, now, f"{component}\n{message}")
+        await self._finish(key, STATUS_DONE, now, _clean(f"{component}\n{message}"))
         async with self._sessions.begin() as session:
             newest = (
                 select(ledger_table.c.id)

@@ -36,7 +36,7 @@ from app.pipeline.errors import PipelineError
 from app.pipeline.ingest import ingest_odds, ingest_results, provider_of
 from app.pipeline.odds import current_quotes, data_as_of, load_decision_snapshots
 from app.pipeline.overlay import load_overlay
-from app.pipeline.persist import refresh_quote_time, unchanged
+from app.pipeline.persist import keep_backed_stake, refresh_quote_time, unchanged
 from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.provider import Purpose
 from app.pipeline.selection import passes
@@ -179,7 +179,9 @@ async def _recalc_fixture(
         profiles = {user: await load_profile(session, user) for user in {r.user_id for r in group}}
         for record in group:
             candidate = by_key.get((record.market, record.selection))
-            draft = _draft(ctx, record, candidate, profiles[record.user_id])
+            draft = await keep_backed_stake(
+                session, record, _draft(ctx, record, candidate, profiles[record.user_id])
+            )
             # A rerun that finds the same numbers (a retry after a failed message) must not
             # pile up identical versions.
             after = (
@@ -222,7 +224,7 @@ def _draft(
     else:
         odds, probability, ev = candidate.odds, candidate.probability, candidate.ev
         confidence = Confidence(candidate.confidence.value)
-        advised = stake_units(candidate, ctx.config, bank=profile.bank, unit=profile.unit)
+        advised = stake_units(candidate, ctx.config, bank=profile.balance, unit=profile.unit)
         stake = advised if advised > 0 and record.recommended_at is not None else record.stake_units
         fair_odds, quoted_at = candidate.fair_odds, candidate.quoted_at
         raw_probability = candidate.raw_probability

@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
 
-from app.clients.api_football import ApiFootballClient
+from app.clients.api_football import ApiFootballClient, BookmakerFilter
 from app.clients.api_football_models import FixtureItem
 from app.clients.quota import RequestPurpose
 from app.domain import (
@@ -50,6 +50,7 @@ from app.sports.football_mapping import (
     HandicapConvention,
     PlayerAbsence,
     TeamLineup,
+    bookmaker_slug,
     expected_goals,
     map_fixture,
     map_injuries,
@@ -107,14 +108,20 @@ class FootballAdapter:
         purpose: RequestPurpose = RequestPurpose.AUTOMATIC,
         clock: UtcClock = _utc_now,
         handicap_convention: HandicapConvention = HandicapConvention.HOME_LINE,
+        bookmakers: Collection[str] | None = None,
     ) -> None:
-        """Adapter over ``client`` for the leagues of ``catalog`` (default: the ten)."""
+        """Adapter over ``client`` for the leagues of ``catalog`` (default: the ten).
+
+        ``bookmakers`` (domain slugs; ``None`` = all) limits the odds that are fetched kept,
+        cached and stored to the ones the pipeline actually reads.
+        """
         self._client = client
         self._catalog = catalog or LeagueCatalog()
         self._identity = identity or IdentityMap()
         self._purpose = purpose
         self._clock = clock
         self._convention = handicap_convention
+        self._bookmakers = None if bookmakers is None else frozenset(bookmakers)
         self._seen: OrderedDict[int, _SeenFixture] = OrderedDict()
 
     def for_purpose(self, purpose: RequestPurpose) -> "FootballAdapter":
@@ -126,6 +133,7 @@ class FootballAdapter:
             purpose=purpose,
             clock=self._clock,
             handicap_convention=self._convention,
+            bookmakers=self._bookmakers,
         )
         adapter._seen = self._seen  # share odds grouping knowledge
         return adapter
@@ -135,6 +143,14 @@ class FootballAdapter:
         adapter = self.for_purpose(self._purpose)
         adapter._identity = identity
         return adapter
+
+    def _bookmaker_filter(self) -> BookmakerFilter | None:
+        wanted = self._bookmakers
+        if wanted is None:
+            return None
+        return BookmakerFilter(
+            ",".join(sorted(wanted)), lambda name: bookmaker_slug(name) in wanted
+        )
 
     @property
     def sport(self) -> Sport:
@@ -186,7 +202,9 @@ class FootballAdapter:
             by_day: list[FixtureItem] = []
             for offset in range(days):
                 day = date_from + timedelta(days=offset)
-                items = await self._client.fixtures_by_date(day, purpose=self._purpose)
+                items = await self._client.fixtures_by_date(
+                    day, purpose=self._purpose, league_ids=wanted
+                )
                 by_day.extend(item for item in items if item.league.id in wanted)
             return by_day
         by_league: list[FixtureItem] = []
@@ -276,18 +294,32 @@ class FootballAdapter:
                 continue
             items.extend(
                 await self._client.odds_by_league_date(
-                    key.league_id, key.season, key.day, purpose=self._purpose, cache_ttl=ttl
+                    key.league_id,
+                    key.season,
+                    key.day,
+                    purpose=self._purpose,
+                    cache_ttl=ttl,
+                    bookmakers=self._bookmaker_filter(),
                 )
             )
         for fixture_id in singles:
             seen = self._seen.get(fixture_id)
             ttl = _odds_ttl(kind, seen is not None and seen.group.day > today)
             items.extend(
-                await self._client.odds_by_fixture(fixture_id, purpose=self._purpose, cache_ttl=ttl)
+                await self._client.odds_by_fixture(
+                    fixture_id,
+                    purpose=self._purpose,
+                    cache_ttl=ttl,
+                    bookmakers=self._bookmaker_filter(),
+                )
             )
         relevant = [item for item in items if item.fixture.id in wanted]
         snapshots, stats = map_odds(
-            relevant, kind=kind, taken_at=self._clock(), convention=self._convention
+            relevant,
+            kind=kind,
+            taken_at=self._clock(),
+            convention=self._convention,
+            bookmakers=self._bookmakers,
         )
         if stats.invalid_prices:
             logger.warning("odds_prices_skipped", count=stats.invalid_prices)

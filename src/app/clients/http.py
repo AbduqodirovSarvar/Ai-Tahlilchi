@@ -20,9 +20,10 @@ Authentication is a header set once on the ``httpx.AsyncClient`` (see
 """
 
 import asyncio
+import json
 import random
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import partial
@@ -88,6 +89,24 @@ class _CachedBody:
     fetched_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class PayloadShape:
+    """A reduction applied to a body *before* it is cached and returned.
+
+    Provider bodies carry far more than the pipeline uses (every league of a day, every
+    bookmaker of a fixture). Cutting them down at the door keeps the cache and the parse cost
+    small. ``variant`` names the reduction and is part of the cache key, so a narrower body is
+    never served to a caller that asked for a wider one.
+    """
+
+    variant: str
+    apply: Callable[[JsonValue], JsonValue]
+
+
+# A parsed JSON value costs several times its wire size in Python objects.
+PARSED_SIZE_FACTOR: Final = 4
+
+
 class ProviderHttpError(ExternalServiceError):
     """The provider rejected the request (4xx other than 429) or sent a non-JSON body."""
 
@@ -145,6 +164,10 @@ def parse_retry_after(value: str | None, *, now: datetime | None = None) -> floa
     return max((moment - reference).total_seconds(), 0.0)
 
 
+def _key(path: str, params: QueryParams, shape: PayloadShape | None) -> str:
+    return cache_key(path, params) + ("" if shape is None else f"#{shape.variant}")
+
+
 class ApiClient:
     """GET-only JSON client for one provider (see the module docstring for the pipeline)."""
 
@@ -183,13 +206,13 @@ class ApiClient:
         """The daily quota guard (status for cost estimates and ``/holat``)."""
         return self._quota
 
-    def cached(self, path: str, params: QueryParams) -> bool:
+    def cached(self, path: str, params: QueryParams, shape: PayloadShape | None = None) -> bool:
         """Whether ``path``+``params`` would be answered from cache (costs nothing)."""
-        return self._cache.get(cache_key(path, params)) is not None
+        return self._cache.get(_key(path, params, shape)) is not None
 
-    def invalidate(self, path: str, params: QueryParams) -> None:
+    def invalidate(self, path: str, params: QueryParams, shape: PayloadShape | None = None) -> None:
         """Forget a cached body (e.g. one that turned out to carry provider errors)."""
-        self._cache.discard(cache_key(path, params))
+        self._cache.discard(_key(path, params, shape))
 
     async def get_json(
         self,
@@ -198,6 +221,7 @@ class ApiClient:
         *,
         purpose: RequestPurpose,
         cache_ttl: float | None = None,
+        shape: PayloadShape | None = None,
     ) -> JsonResponse:
         """GET ``path`` and return its JSON body.
 
@@ -208,13 +232,14 @@ class ApiClient:
             cache_ttl: seconds to cache the body; ``None`` = the provider default,
                 ``0`` = always ask the provider (the cache is neither read nor written;
                 use it when a price must be fresh, e.g. closing odds).
+            shape: reduce the body before it is cached and returned (see :class:`PayloadShape`).
 
         Raises:
             QuotaExceededError: today's quota for ``purpose`` is spent (nothing sent).
             ProviderHttpError: the provider rejected the request.
             ProviderUnavailableError: retries were exhausted.
         """
-        key = cache_key(path, params)
+        key = _key(path, params, shape)
         if cache_ttl is None or cache_ttl > 0:
             cached = self._cache.get(key)
             if cached is not None:
@@ -224,7 +249,9 @@ class ApiClient:
                 )
         flight = self._inflight.get(key)
         if flight is None:
-            flight = asyncio.ensure_future(self._fetch(key, path, params, purpose, cache_ttl))
+            flight = asyncio.ensure_future(
+                self._fetch(key, path, params, purpose, cache_ttl, shape)
+            )
             self._inflight[key] = flight
             flight.add_done_callback(partial(self._landed, key))
         else:
@@ -238,18 +265,23 @@ class ApiClient:
         if not flight.cancelled():
             flight.exception()  # mark retrieved: callers re-raise it themselves
 
-    async def _fetch(
+    async def _fetch(  # noqa: PLR0913, PLR0917 - one value per request facet
         self,
         key: str,
         path: str,
         params: QueryParams,
         purpose: RequestPurpose,
         cache_ttl: float | None,
+        shape: PayloadShape | None,
     ) -> JsonResponse:
         response = await self._get_with_retries(path, params, purpose)
+        if shape is not None:
+            response = replace(response, payload=shape.apply(response.payload))
         ttl = self._config.default_cache_ttl_seconds if cache_ttl is None else cache_ttl
         fetched_at = response.fetched_at or self._clock()
-        self._cache.set(key, _CachedBody(response.payload, fetched_at), ttl=ttl)
+        if ttl > 0:  # a body that is never cached is not measured either
+            size = len(json.dumps(response.payload, separators=(",", ":"))) * PARSED_SIZE_FACTOR
+            self._cache.set(key, _CachedBody(response.payload, fetched_at), ttl=ttl, size=size)
         return response
 
     async def _get_with_retries(

@@ -154,11 +154,19 @@ class FootballProvider:
         catalog: LeagueCatalog | None = None,
         clock: Clock = system_clock,
         handicap_convention: HandicapConvention = HandicapConvention.HOME_LINE,
+        bookmakers: Collection[str] | None = None,
     ) -> None:
-        """Serve the tracked leagues of ``catalog`` through ``client``."""
+        """Serve the tracked leagues of ``catalog`` through ``client``.
+
+        ``bookmakers`` limits the odds that are stored (``None`` = every bookmaker).
+        """
         self._client = client
         self._base = FootballAdapter(
-            client, catalog=catalog, clock=clock, handicap_convention=handicap_convention
+            client,
+            catalog=catalog,
+            clock=clock,
+            handicap_convention=handicap_convention,
+            bookmakers=bookmakers,
         )
 
     @property

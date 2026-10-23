@@ -224,6 +224,14 @@ async def get_bet_by_token(
     return None if row is None else _bet(row)
 
 
+async def get_bet(session: AsyncSession, user_id: int, bet_id: int) -> UserBetRecord | None:
+    """One of the user's bets by id (``None`` if unknown or another user's)."""
+    row = await session.scalar(
+        select(UserBetRow).where(UserBetRow.id == bet_id, UserBetRow.user_id == user_id)
+    )
+    return None if row is None else _bet(row)
+
+
 async def _bet_by_token(
     session: AsyncSession, user_id: int, client_token: str
 ) -> UserBetRow | None:
@@ -310,6 +318,24 @@ async def open_bets_of_settled_signals(session: AsyncSession) -> list[UserBetRec
         .order_by(UserBetRow.id)
     )
     return [_bet(row) for row in rows]
+
+
+async def signal_has_bets(session: AsyncSession, signal_id: int) -> bool:
+    """Whether any bet (open or settled) backs the signal."""
+    found = await session.scalar(
+        select(UserBetRow.id).where(UserBetRow.signal_id == signal_id).limit(1)
+    )
+    return found is not None
+
+
+async def settled_profit_total(session: AsyncSession, user_id: int) -> Decimal:
+    """The sum of the profit of every settled bet of the user (summed in Python: money is text)."""
+    rows = await session.scalars(
+        select(UserBetRow.profit).where(
+            UserBetRow.user_id == user_id, UserBetRow.profit.is_not(None)
+        )
+    )
+    return sum((value for value in rows if value is not None), Decimal(0))
 
 
 async def settle_bet(  # noqa: PLR0913 - one column per argument

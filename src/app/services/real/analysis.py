@@ -138,7 +138,7 @@ def build_request(
         sort=_SORTS[query.sort],
         include_no_value=query.include_no_value,
         source=StoredSource.CUSTOM if query.include_no_value else StoredSource.ANALYSIS,
-        bank=profile.bank,
+        bank=profile.balance,
         unit=profile.unit,
         prematch_minutes=s.prematch_minutes,
         purpose=MANUAL,

@@ -21,13 +21,13 @@ from app.db.repo import (
 from app.db.schema import CalibrationVersionRow
 from app.domain import Market, Selection
 from app.models.calibration import CalibrationReason
+from app.pipeline.context import PipelineContext
 from app.pipeline.learning import (
     KIND_CALIBRATION_ACTIVATED,
     KIND_SEGMENT_RELAXED,
     RollbackResult,
     can_push,
     rollback_change,
-    rollback_learning_change,
     run_learning,
     week_start,
 )
@@ -49,6 +49,10 @@ from tests.pipeline.test_learning import (
 )
 
 TASHKENT = ZoneInfo("Asia/Tashkent")
+
+
+async def _undone(ctx: PipelineContext, change_id: int) -> bool:
+    return await rollback_change(ctx, change_id) is RollbackResult.ROLLED_BACK
 
 
 async def activation_of(report_changes: tuple[object, ...]) -> int:
@@ -134,7 +138,7 @@ async def test_a_manual_calibration_rollback_survives_the_next_weekly_run(
     clock = Clock(last + timedelta(days=1))
     ctx = context(sessions, ledger, clock)
     change_id = await activation_of((await activate_calibration(sessions, ctx, clock)).changes)
-    assert await rollback_learning_change(ctx, change_id)
+    assert await _undone(ctx, change_id)
     await seed_batch(sessions, league="E8", fixtures=200, shift=0.15)
 
     report = await next_week(ctx, clock)

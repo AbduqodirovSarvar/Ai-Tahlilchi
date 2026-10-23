@@ -941,12 +941,10 @@ TPL_TIME_PROMPT: Final = "✏️ Jadval vaqtini yozing, masalan: <code>08:30</co
 TPL_SCHEDULE_SAVED: Final = "🗓 Jadval saqlandi: <b>{schedule}</b>."
 TPL_SCHEDULE_CLEARED: Final = "🗓 <b>{name}</b>: jadval o'chirildi."
 TPL_PICK_A_DAY: Final = "Kamida bitta kunni belgilang"
-TPL_GONE: Final = "ℹ️ Bu shablon endi yo'q."
 TPL_RUNNING: Final = "💾 Shablon: <b>{name}</b>"
 
 
 # --------------------------------------------------------------------------- bank and bets (F7.5)
-BANK_TITLE: Final = "🎟 <b>Mening stavkalarim</b>"
 BANK_UNIT: Final = "🎲 Unit: <b>{unit}</b>"
 BANK_UNIT_UNSET: Final = "🎲 Unit kiritilmagan: ⚙️ Bank va limitlar."
 BANK_SETTLED: Final = "📊 Yopilgan: {count} ta · ✅ {won} · ❌ {lost} · ↩️ {void} · 💸 {cashout}"
@@ -981,7 +979,10 @@ BANK_CASHOUT_PROMPT: Final = (
     "masalan <code>200</code>. Foyda = to'langan summa − stavka; "
     "to'lov bo'lmagan bo'lsa <code>0</code> yozing."
 )
-BANK_CASHOUT_RANGE: Final = "To'langan summa 0 dan katta yoki unga teng haqiqiy son bo'lishi kerak."
+BANK_CASHOUT_RANGE: Final = (
+    "To'langan summa 0 dan {ceiling} gacha bo'lishi kerak "
+    "(stavka yutganda to'lanadigan eng ko'p summa)."
+)
 BANK_NO_SIGNAL: Final = "Bu stavka signalga bog'lanmagan: natijani belgilab bo'lmaydi."
 BANK_NO_CHART: Final = (
     "📈 Grafik uchun bank (⚙️ Bank va limitlar) va kamida bitta yopilgan stavka kerak."
@@ -1008,7 +1009,6 @@ CHART_SEGMENTS_TITLE: Final = "Yield: {group} bo'yicha"
 REPORT_TITLE: Final = "📈 <b>Hisobot</b> — {period}"
 REPORT_PERIOD_ALL: Final = "hammasi ({end} gacha)"
 REPORT_PERIOD_RANGE: Final = "{start}–{end}"
-REPORT_GROUP_LINE: Final = "🧩 Kesim: <b>{group}</b>"
 REPORT_COUNTS: Final = (
     "📊 Signallar: <b>{signals}</b> · yopilgan {settled}: ✅ {won} · ❌ {lost} · ↩️ {void}"
 )
@@ -1064,7 +1064,6 @@ REPORT_CHART_CALIBRATION: Final = "📉 Kalibratsiya: model va'dasi va haqiqat"
 REPORT_CHART_SEGMENTS: Final = "🧩 Yield: {group} bo'yicha"
 EXPORT_CAPTION_SIGNALS: Final = "📤 Signallar (CSV)"
 EXPORT_CAPTION_BETS: Final = "📤 Stavkalar (CSV)"
-EXPORT_INTRO: Final = "📤 Eksport tayyorlanmoqda…"
 
 
 # --------------------------------------------------------------------------- express (F7.8)
@@ -1131,7 +1130,7 @@ RESULT_CASHOUT_PROMPT: Final = (
     "Bukmeker to'lagan summa bo'yicha yopmoqchi bo'lsangiz, 🎟 Mening stavkalarim orqali "
     "summani yozing."
 )
-RESULT_CASHOUT_RANGE: Final = "Cashout natijasi -100 dan 100 gacha unit bo'lishi kerak."
+RESULT_CASHOUT_RANGE: Final = "Cashout natijasi {low} dan {high} gacha unit bo'lishi kerak."
 RESULT_NOTE_PROMPT: Final = (
     "💬 <b>{fixture}</b>\nIzohingizni yozing (eng ko'pi {limit} belgi), masalan: "
     "<i>tarkibda asosiy hujumchi yo'q edi</i>. U keyingi tahlilda kontekst sifatida ishlatiladi."
@@ -1139,8 +1138,6 @@ RESULT_NOTE_PROMPT: Final = (
 RESULT_NOTE_SAVED: Final = "💬 Izoh saqlandi: «{note}»"
 RESULT_NOTE_TOO_LONG: Final = "Izoh juda uzun: {limit} belgidan oshmasin ({length} belgi yozildi)."
 RESULT_NOTE_EMPTY: Final = "Izoh bo'sh bo'lishi mumkin emas. Matn yozing yoki /bekor."
-BTN_RESULT_BACK_TO_CARD: Final = "⬅️ Kartaga"
-RESULT_INPUT_STALE: Final = "ℹ️ Bu so'rov eskirgan. Signal kartasidagi tugmani qaytadan bosing."
 
 
 # ------------------------------------------------------------ learning journal (F8.8)

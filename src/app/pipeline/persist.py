@@ -26,6 +26,7 @@ from app.db.repo import (
     SignalRecord,
     enqueue_recalc,
     list_user_signals,
+    signal_has_bets,
     touch_signal_quote_time,
     upsert_signal,
 )
@@ -160,6 +161,21 @@ def unchanged(prior: SignalRecord, draft: SignalDraft) -> bool:
     )
 
 
+async def keep_backed_stake(
+    session: AsyncSession, prior: SignalRecord | None, draft: SignalDraft
+) -> SignalDraft:
+    """``draft`` with the stake of ``prior`` when bets already back it.
+
+    The signal's profit is measured on its advised stake and the user's bets were sized from
+    it, so a later Kelly recalculation (the bank moved) must not rewrite it.
+    """
+    if prior is None or prior.stake_units == draft.stake_units:
+        return draft
+    if not await signal_has_bets(session, prior.id):
+        return draft
+    return replace(draft, stake_units=prior.stake_units)
+
+
 def _draft(  # noqa: PLR0913, PLR0917 - everything one draft is made of
     ctx: PipelineContext,
     request: AnalysisRequest,
@@ -241,7 +257,9 @@ async def store_picks(
         for pick in adjusted:
             review = reviews.get(_key(pick))
             prior = existing.get((pick.fixture.id, pick.candidate.market, pick.candidate.selection))
-            draft = _draft(ctx, request, pick, prior, review, now)
+            draft = await keep_backed_stake(
+                session, prior, _draft(ctx, request, pick, prior, review, now)
+            )
             if prior is not None and unchanged(prior, draft):
                 record = await refresh_quote_time(session, prior, draft)
             else:

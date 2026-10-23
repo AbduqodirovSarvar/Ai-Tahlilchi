@@ -26,7 +26,7 @@ from typing import Final
 
 from app.clients.cost import FetchPlan, estimate_requests
 from app.db.enums import QueryScope
-from app.db.repo import FixtureRecord, list_fixtures
+from app.db.repo import FixtureRecord, league_refs, list_fixtures, team_refs
 from app.domain import ExternalRef, FixtureStatus, OddsKind, OddsSnapshot, Sport
 from app.logging import get_logger
 from app.pipeline.context import PipelineContext
@@ -44,7 +44,6 @@ from app.pipeline.odds import current_quotes, load_decision_snapshots
 from app.pipeline.overlay import EMPTY_OVERLAY, LearningOverlay, load_overlay
 from app.pipeline.persist import store_picks
 from app.pipeline.provider import MANUAL, QuotaSnapshot
-from app.pipeline.queries import league_refs, team_refs
 from app.pipeline.selection import Pick, assemble, picks_for_fixture
 from app.pipeline.types import AnalysisOutcome, AnalysisRequest, DataPlan
 from app.pipeline.valuation import SKIP_NO_PRICE, SKIP_STALE_PRICE, ValuationInput, value_fixture

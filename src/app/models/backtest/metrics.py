@@ -48,12 +48,14 @@ class Interval:
 class BettingSummary:
     """Returns of a set of bets under flat and fractional-Kelly staking.
 
-    ROI is profit per unit staked (also called yield). ``kelly_bank_return`` is the Kelly
-    profit relative to the starting bank. CLV statistics cover only bets whose market has
-    a closing price (an Asian line can move between opening and closing, leaving the bet
-    without one); ``n_without_closing`` and ``roi_without_closing`` (at the odds taken)
-    describe the excluded bets so the coverage is visible. ``roi_at_closing`` re-prices
-    the bets that have a closing quote at the bookmaker's closing odds.
+    ROI is profit per unit *at risk* (also called yield): a push returns its stake, so it adds
+    to neither the turnover nor the denominator (decision #21, one definition app-wide).
+    ``kelly_bank_return`` is the Kelly profit relative to the starting bank. CLV statistics
+    cover only bets whose market has a closing price (an Asian line can move between opening
+    and closing, leaving the bet without one); ``n_without_closing`` and
+    ``roi_without_closing`` (at the odds taken) describe the excluded bets so the coverage is
+    visible. ``roi_at_closing`` re-prices the bets that have a closing
+    quote at the bookmaker's closing odds.
     """
 
     n_bets: int
@@ -85,15 +87,15 @@ def summarize_bets(
 ) -> BettingSummary:
     """Summary statistics; CIs are percentile bootstraps over bets (seeded)."""
     rng = np.random.default_rng(seed)
-    flat_stake = np.array([bet.flat_stake for bet in bets], dtype=np.float64)
+    flat_stake = np.array([bet.flat_at_risk for bet in bets], dtype=np.float64)
     flat_profit = np.array([bet.flat_profit for bet in bets], dtype=np.float64)
-    kelly_stake = np.array([bet.kelly_stake for bet in bets], dtype=np.float64)
+    kelly_stake = np.array([bet.kelly_at_risk for bet in bets], dtype=np.float64)
     kelly_profit = np.array([bet.kelly_profit for bet in bets], dtype=np.float64)
     clv = np.array([bet.clv for bet in bets if bet.clv is not None], dtype=np.float64)
     closing_ev = [bet.closing_ev for bet in bets if bet.closing_ev is not None]
     at_closing = [bet for bet in bets if bet.closing_profit is not None]
     closing_profit = np.array([bet.closing_profit for bet in at_closing], dtype=np.float64)
-    closing_stake = np.array([bet.flat_stake for bet in at_closing], dtype=np.float64)
+    closing_stake = np.array([bet.flat_at_risk for bet in at_closing], dtype=np.float64)
     without = [bet for bet in bets if bet.clv is None]
     return BettingSummary(
         n_bets=len(bets),
@@ -106,7 +108,10 @@ def summarize_bets(
         n_clv=len(clv),
         n_without_closing=len(without),
         roi_without_closing=(
-            math.fsum(b.flat_profit for b in without) / math.fsum(b.flat_stake for b in without)
+            _ratio(
+                np.array([b.flat_profit for b in without], dtype=np.float64),
+                np.array([b.flat_at_risk for b in without], dtype=np.float64),
+            )
             if without
             else None
         ),

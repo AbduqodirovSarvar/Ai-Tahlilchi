@@ -10,7 +10,8 @@ Every call states its :class:`~app.clients.quota.RequestPurpose`, so automatic j
 charged against the automatic part of the daily quota and user actions against all of it.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Sequence
+from dataclasses import dataclass
 from datetime import date
 from itertools import batched
 from typing import Final
@@ -27,7 +28,7 @@ from app.clients.api_football_models import (
     TeamStatisticsItem,
 )
 from app.clients.cache import QueryParams, TtlCache
-from app.clients.http import ApiClient, ProviderConfig, create_http_client
+from app.clients.http import ApiClient, PayloadShape, ProviderConfig, create_http_client
 from app.clients.quota import (
     DEFAULT_MANUAL_RESERVE_SHARE,
     QuotaPolicy,
@@ -69,6 +70,73 @@ API_FOOTBALL_CONFIG: Final = ProviderConfig(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class BookmakerFilter:
+    """Which bookmakers of an odds body are kept (the rest is dropped before caching).
+
+    ``variant`` names the selection (part of the cache key); ``accepts`` decides by the
+    bookmaker's name as the provider spells it.
+    """
+
+    variant: str
+    accepts: Callable[[str], bool]
+
+
+type _Keep = Callable[[dict[str, JsonValue]], dict[str, JsonValue] | None]
+
+
+def _reduced(payload: JsonValue, keep: _Keep) -> JsonValue:
+    """``payload`` with ``keep`` applied to each record of ``response`` (``None`` drops it).
+
+    A body that does not look like an envelope (an error body) is returned untouched.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    response = payload.get("response")
+    if not isinstance(response, list):
+        return payload
+    records: list[JsonValue] = []
+    for record in response:
+        if not isinstance(record, dict):
+            continue
+        reduced = keep(record)
+        if reduced is not None:
+            records.append(reduced)
+    return {**payload, "response": records}
+
+
+def league_shape(league_ids: Collection[int]) -> PayloadShape:
+    """Keep the fixtures of ``league_ids`` only (a day's body lists every league of the world)."""
+    wanted = frozenset(league_ids)
+
+    def keep(record: dict[str, JsonValue]) -> dict[str, JsonValue] | None:
+        league = record.get("league")
+        in_scope = isinstance(league, dict) and league.get("id") in wanted
+        return record if in_scope else None
+
+    variant = "leagues=" + ",".join(str(i) for i in sorted(wanted))
+    return PayloadShape(variant, lambda payload: _reduced(payload, keep))
+
+
+def bookmaker_shape(selection: BookmakerFilter) -> PayloadShape:
+    """Keep the odds of the accepted bookmakers only (a fixture lists fifteen or more)."""
+
+    def keep(record: dict[str, JsonValue]) -> dict[str, JsonValue] | None:
+        books = record.get("bookmakers")
+        if not isinstance(books, list):
+            return record
+        kept: list[JsonValue] = [
+            book
+            for book in books
+            if isinstance(book, dict)
+            and isinstance(book.get("name"), str)
+            and selection.accepts(str(book["name"]))
+        ]
+        return {**record, "bookmakers": kept}
+
+    return PayloadShape(f"bookmakers={selection.variant}", lambda payload: _reduced(payload, keep))
+
+
 class ApiFootballError(ExternalServiceError):
     """API-Football answered HTTP 200 with an ``errors`` object (bad key, plan, params)."""
 
@@ -93,9 +161,18 @@ class ApiFootballClient:
 
     # ------------------------------------------------------------------ fixtures
 
-    async def fixtures_by_date(self, day: date, *, purpose: RequestPurpose) -> list[FixtureItem]:
-        """All fixtures (every league) on ``day`` (UTC): 1 request."""
-        return await self._records("fixtures", {"date": day.isoformat()}, FixtureItem, purpose)
+    async def fixtures_by_date(
+        self, day: date, *, purpose: RequestPurpose, league_ids: Collection[int] | None = None
+    ) -> list[FixtureItem]:
+        """Fixtures on ``day`` (UTC): 1 request.
+
+        The body lists every league of the world; with ``league_ids`` only those are kept
+        (and cached), which is all a caller that tracks ten leagues ever reads.
+        """
+        shape = None if league_ids is None else league_shape(league_ids)
+        return await self._records(
+            "fixtures", {"date": day.isoformat()}, FixtureItem, purpose, shape=shape
+        )
 
     async def fixtures_by_league(
         self,
@@ -142,12 +219,20 @@ class ApiFootballClient:
     # ------------------------------------------------------------------ odds
 
     async def odds_by_fixture(
-        self, fixture_id: int, *, purpose: RequestPurpose, cache_ttl: float | None = None
+        self,
+        fixture_id: int,
+        *,
+        purpose: RequestPurpose,
+        cache_ttl: float | None = None,
+        bookmakers: BookmakerFilter | None = None,
     ) -> list[OddsItem]:
-        """Pre-match odds of one fixture (all bookmakers): 1 request."""
-        return await self._paged("odds", {"fixture": fixture_id}, OddsItem, purpose, cache_ttl)
+        """Pre-match odds of one fixture (the ``bookmakers`` asked for, default all): 1 request."""
+        shape = None if bookmakers is None else bookmaker_shape(bookmakers)
+        return await self._paged(
+            "odds", {"fixture": fixture_id}, OddsItem, purpose, cache_ttl, shape
+        )
 
-    async def odds_by_league_date(
+    async def odds_by_league_date(  # noqa: PLR0913 - one value per request facet
         self,
         league_id: int,
         season: int,
@@ -155,6 +240,7 @@ class ApiFootballClient:
         *,
         purpose: RequestPurpose,
         cache_ttl: float | None = None,
+        bookmakers: BookmakerFilter | None = None,
     ) -> list[OddsItem]:
         """Odds of every fixture of a league on ``day``: one request per page."""
         params: dict[str, str | int] = {
@@ -162,7 +248,8 @@ class ApiFootballClient:
             "season": season,
             "date": day.isoformat(),
         }
-        return await self._paged("odds", params, OddsItem, purpose, cache_ttl)
+        shape = None if bookmakers is None else bookmaker_shape(bookmakers)
+        return await self._paged("odds", params, OddsItem, purpose, cache_ttl, shape)
 
     # ------------------------------------------------------------------ context
 
@@ -200,6 +287,7 @@ class ApiFootballClient:
         *,
         purpose: RequestPurpose,
         cache_ttl: float | None = None,
+        shape: PayloadShape | None = None,
     ) -> Envelope:
         """One raw (envelope-validated) response; used by the probe script and pagination.
 
@@ -207,44 +295,52 @@ class ApiFootballClient:
             ApiFootballError: the provider reported errors in the body.
             ExternalServiceError: transport, HTTP or envelope validation failure.
         """
-        response = await self._api.get_json(endpoint, params, purpose=purpose, cache_ttl=cache_ttl)
+        response = await self._api.get_json(
+            endpoint, params, purpose=purpose, cache_ttl=cache_ttl, shape=shape
+        )
         try:
             envelope = Envelope.model_validate(response.payload)
         except ValidationError as exc:
-            self._api.invalidate(endpoint, params)  # never replay a body we cannot read
+            self._api.invalidate(endpoint, params, shape)  # never replay a body we cannot read
             msg = f"{PROVIDER} {endpoint}: unexpected response format ({exc.error_count()} errors)"
             raise ExternalServiceError(msg) from exc
         envelope = envelope.model_copy(update={"fetched_at": response.fetched_at})
         if envelope.error_messages:
             # An error body (rate limit, plan, bad key) must not be served from cache.
-            self._api.invalidate(endpoint, params)
+            self._api.invalidate(endpoint, params, shape)
             raise ApiFootballError(endpoint, envelope.error_messages)
         return envelope
 
-    async def _records[M: BaseModel](
+    async def _records[M: BaseModel](  # noqa: PLR0913, PLR0917 - one value per request facet
         self,
         endpoint: str,
         params: QueryParams,
         model: type[M],
         purpose: RequestPurpose,
         cache_ttl: float | None = None,
+        shape: PayloadShape | None = None,
     ) -> list[M]:
-        envelope = await self.envelope(endpoint, params, purpose=purpose, cache_ttl=cache_ttl)
+        envelope = await self.envelope(
+            endpoint, params, purpose=purpose, cache_ttl=cache_ttl, shape=shape
+        )
         return validate_records(envelope, model, endpoint=endpoint)
 
-    async def _paged[M: BaseModel](
+    async def _paged[M: BaseModel](  # noqa: PLR0913, PLR0917 - one value per request facet
         self,
         endpoint: str,
         params: QueryParams,
         model: type[M],
         purpose: RequestPurpose,
         cache_ttl: float | None,
+        shape: PayloadShape | None = None,
     ) -> list[M]:
         records: list[M] = []
         page, total = 1, 1
         while page <= min(total, MAX_PAGES):
             paged = {**params, "page": page} if page > 1 else dict(params)
-            envelope = await self.envelope(endpoint, paged, purpose=purpose, cache_ttl=cache_ttl)
+            envelope = await self.envelope(
+                endpoint, paged, purpose=purpose, cache_ttl=cache_ttl, shape=shape
+            )
             records.extend(validate_records(envelope, model, endpoint=endpoint))
             total = envelope.paging.total
             page += 1

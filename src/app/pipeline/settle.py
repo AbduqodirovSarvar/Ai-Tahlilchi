@@ -73,7 +73,7 @@ from app.models.asian import settlement_returns
 from app.pipeline.alerts import alert_throttled
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery, SettledDelivery, WatchDelivery
-from app.pipeline.errors import DeliveryNotConfirmedError, PipelineError
+from app.pipeline.errors import DeliveryNotConfirmedError, ManualResultError, PipelineError
 from app.pipeline.ingest import ingest_results, provider_of
 from app.pipeline.ledger import LedgerKey
 from app.pipeline.outbox import deliver_watch_event
@@ -105,6 +105,7 @@ class BetPayout:
 
     bet_id: int
     stake: Decimal
+    odds_taken: float
     amount: Decimal
 
     @property
@@ -214,24 +215,48 @@ async def run_settlement(ctx: PipelineContext, delivery: Delivery) -> SettleRepo
             session, {r.fixture.id for r in pending}, statuses=tuple(SignalStatus)
         )
     ids = {record.id for record in pending}
-    settled = waiting = notified = failed = 0
+    settled = waiting = notified = failed = errored = 0
     for record in (r for r in fresh if r.id in ids and r.result is None):
-        stored = await _settle_one(ctx, record)
+        try:
+            stored = await _settle_one(ctx, record)
+            if stored is not None:
+                sent = await _announce(ctx, delivery, record, stored)
+        except Exception as error:
+            await _record_failure(ctx, delivery, record, error)
+            errored += 1
+            continue
         if stored is None:
             waiting += 1
             continue
         settled += 1
-        sent = await _announce(ctx, delivery, record, stored)
         notified += sent == 1
         failed += sent == -1
     bets_closed = await _close_orphan_bets(ctx)
     retried = await _retry_announcements(ctx, delivery)
     await ctx.ledger.purge_expired(now=ctx.clock())
     await ctx.ledger.record_run(
-        JOB, ok=not fetch_failed, detail=f"settled={settled} waiting={waiting}", now=ctx.clock()
+        JOB,
+        ok=not fetch_failed and not errored,
+        detail=f"settled={settled} waiting={waiting} errors={errored}",
+        now=ctx.clock(),
     )
     return SettleReport(
         settled, waiting, notified + retried, fetch_failed, bets_closed, announce_failed=failed
+    )
+
+
+async def _record_failure(
+    ctx: PipelineContext, delivery: Delivery, record: SignalRecord, error: Exception
+) -> None:
+    """Log an unsettleable signal, note it in the ledger and alert the administrator."""
+    logger.error("settle_signal_failed", signal_id=record.id, error=repr(error))
+    await ctx.ledger.record_error(JOB, f"signal {record.id}: {error}", now=ctx.clock())
+    await alert_throttled(
+        ctx,
+        delivery,
+        JOB,
+        f"signal {record.id} could not be settled: {error}",
+        throttle_key=f"{JOB}.signal_failed",
     )
 
 
@@ -311,16 +336,14 @@ async def _store(
     record: SignalRecord,
     result: SignalResultRecord,
     settlement: Settlement | None = None,
-    payout: BetPayout | None = None,
 ) -> SignalResultRecord:
     """Persist the result and settle the user's bets on the signal in one transaction."""
     async with ctx.sessions.begin() as session:
         stored = await settle_signal(session, result)
         for bet in await bets_for_signal(session, record.id):
-            if payout is not None and bet.id == payout.bet_id:
-                profit = payout.profit  # exact money, not a rescaled ratio
-            else:
-                profit = _bet_profit(bet.stake, bet.odds_taken, stored, record, settlement)
+            if bet.outcome is Outcome.CASHOUT and stored.outcome is not Outcome.CASHOUT:
+                continue  # the exact money the user entered for that bet is never rescaled
+            profit = _bet_profit(bet.stake, bet.odds_taken, stored, record, settlement)
             await settle_bet(
                 session,
                 bet.id,
@@ -475,27 +498,39 @@ async def settle_manually(
     *,
     cashout_units: Decimal | None = None,
     payout: BetPayout | None = None,
-) -> SignalResultRecord:
+) -> SignalResultRecord | None:
     """The user's own result (win, loss, void or cash-out) for ``record`` and its bets.
 
     A manual result replaces an automatic one and is never overwritten by a later automatic
-    settlement (``settle_signal``). Bets follow: a cash-out in units scales to each bet's
-    stake; a money ``payout`` closes that bet at exactly ``payout - stake`` and gives the
-    signal the same return on its recommended stake (other bets scale by that ratio); void
-    returns the stake.
+    settlement (``settle_signal``). A cash-out in units gives the signal that result and scales
+    to each bet's stake; void returns the stake. A money ``payout`` concerns that one bet only
+    (decision #22): the bet closes at exactly ``payout - stake`` and the other bets stay open;
+    the signal gets its result (the same return on its recommended stake) only when it has
+    none yet and no other bet of it is still open; otherwise it is left as it is (its stored
+    result, or ``None`` while it waits).
+
+    Raises:
+        ManualResultError: a cash-out beyond what the bet or the signal could ever pay.
     """
-    stake = record.stake_units
-    odds = record.first_odds
-    cashout = cashout_units or Decimal(0)
     if payout is not None:
-        cashout = stake * payout.profit / payout.stake
+        return await _cash_out_bet(ctx, record, payout)
+    stake = record.stake_units
+    cashout = Decimal(0)
+    if outcome is Outcome.CASHOUT:
+        cashout = _checked_units(record, cashout_units or Decimal(0))
     profit = {
-        Outcome.WIN: profit_of(stake, odds, Settlement.WIN),
-        Outcome.LOSS: profit_of(stake, odds, Settlement.LOSS),
+        Outcome.WIN: profit_of(stake, record.first_odds, Settlement.WIN),
+        Outcome.LOSS: profit_of(stake, record.first_odds, Settlement.LOSS),
         Outcome.VOID: Decimal(0),
         Outcome.CASHOUT: cashout,
     }[outcome]
-    result = SignalResultRecord(
+    return await _store(ctx, record, _manual_result(ctx, record, outcome, profit))
+
+
+def _manual_result(
+    ctx: PipelineContext, record: SignalRecord, outcome: Outcome, profit: Decimal
+) -> SignalResultRecord:
+    return SignalResultRecord(
         signal_id=record.id,
         outcome=outcome,
         source=ResultSource.MANUAL,
@@ -505,4 +540,44 @@ async def settle_manually(
         user_note=None,
         settled_at=ctx.clock(),
     )
-    return await _store(ctx, record, result, payout=payout)
+
+
+def _checked_units(record: SignalRecord, units: Decimal) -> Decimal:
+    """A signal-level cash-out lies between losing the stake and winning the full payout."""
+    low = -record.stake_units
+    high = record.stake_units * (Decimal(str(record.first_odds)) - 1)
+    if not low <= units <= high:
+        raise ManualResultError(f"cash-out of {units} units is outside [{low}, {high}]")
+    return units
+
+
+def _checked_payout(payout: BetPayout) -> None:
+    """A cash-out cannot exceed what the bet pays when it wins."""
+    ceiling = payout.stake * Decimal(str(payout.odds_taken))
+    if not 0 <= payout.amount <= ceiling:
+        raise ManualResultError(f"payout {payout.amount} is outside [0, {ceiling}]")
+
+
+async def _cash_out_bet(
+    ctx: PipelineContext, record: SignalRecord, payout: BetPayout
+) -> SignalResultRecord | None:
+    """Close one bet at the money the bookmaker paid; the signal follows when none is left."""
+    _checked_payout(payout)
+    now = ctx.clock()
+    async with ctx.sessions.begin() as session:
+        await settle_bet(
+            session,
+            payout.bet_id,
+            user_id=record.user_id,
+            outcome=Outcome.CASHOUT,
+            profit=payout.profit,
+            settled_at=now,
+        )
+        others_open = any(
+            bet.outcome is None and bet.id != payout.bet_id
+            for bet in await bets_for_signal(session, record.id)
+        )
+        if others_open or record.result is not None:
+            return record.result  # open bets keep the signal waiting; a result is not rewritten
+        units = record.stake_units * payout.profit / payout.stake
+        return await settle_signal(session, _manual_result(ctx, record, Outcome.CASHOUT, units))

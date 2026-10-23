@@ -20,7 +20,7 @@ Conventions decided here (ADR 0007):
 """
 
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -202,8 +202,12 @@ def map_odds(
     kind: OddsKind,
     taken_at: datetime,
     convention: HandicapConvention = HandicapConvention.HOME_LINE,
+    bookmakers: Collection[str] | None = None,
 ) -> tuple[list[OddsSnapshot], OddsMappingStats]:
-    """Snapshots for every supported market of every bookmaker in ``items``.
+    """Snapshots for every supported market of the ``bookmakers`` (default all) in ``items``.
+
+    ``bookmakers`` are domain slugs: only the sharp reference and the user's bookmaker are
+    ever read, and every other quote would only grow ``odds_snapshots``.
 
     The first price of a (fixture, bookmaker, market, selection) wins; unsupported bets
     (correct score, first half...) and invalid prices (including ``null``) are skipped and
@@ -214,6 +218,8 @@ def map_odds(
     unknown: set[str] = set()
     invalid = 0
     for fixture_ref, slug, bet, fetched_at in _bets(items):
+        if bookmakers is not None and slug not in bookmakers:
+            continue
         quotes, bad = _bet_quotes(bet, convention)
         invalid += bad
         if quotes is None:

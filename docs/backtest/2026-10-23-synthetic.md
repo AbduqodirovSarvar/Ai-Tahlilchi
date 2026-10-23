@@ -4,14 +4,14 @@
 > Sanity tekshiruvi (samarali bozor): validatsiya sof bozorni (w = 0) tanladi va hold-out da stavka qo'yilmadi — samarali bozorda kutilgan to'g'ri natija (DC bozorga ma'lumot qo'shmaydi, bozor narxida EV doim manfiy).
 
 - **Rejim:** sintetik
-- **Sana:** 2026-10-21T10:46:47+00:00
+- **Sana:** 2026-10-23T11:13:32+00:00
 - **F3 darvozasi (shu ma'lumotda):** ❌ bajarilmadi
 
 ## Qayta olinadiganlik
 
 | Parametr | Qiymat |
 |---|---|
-| Git commit | `19607df74cb185b6d95ae338c1bb1cd0c19ba9b0` |
+| Git commit | `bdf8c1fedb6d6038141b8ca13a4dca09dc8450a0-dirty` |
 | Ma'lumot izi (SHA-256) | `64a643c158179830f5b4170e7ae806e66ab89ab18d39736d9e41b409e436c5c9` |
 | Seed (bootstrap) | `20261021` |
 | O'yinlar (tugagan) | 5700 |
@@ -56,16 +56,16 @@ Validatsiya ROI bo'yicha eng yaxshi 10 ta qator:
 
 | xi | w | min EV | min p | signallar | ROI | log-loss (ansambl) |
 |---|---|---|---|---|---|---|
-| 0.0019 | 0.25 | +8.00% | 30.0% | 94 | +14.01% | 0.7678 |
-| 0 | 0.25 | +8.00% | 30.0% | 109 | +9.39% | 0.7681 |
-| 0 | 0.25 | +5.00% | 30.0% | 291 | +7.58% | 0.7681 |
-| 0.0019 | 0.25 | +5.00% | 30.0% | 277 | +7.56% | 0.7678 |
+| 0.0019 | 0.25 | +8.00% | 30.0% | 94 | +14.31% | 0.7678 |
+| 0 | 0.25 | +8.00% | 30.0% | 109 | +9.66% | 0.7681 |
+| 0 | 0.25 | +5.00% | 30.0% | 291 | +7.91% | 0.7681 |
+| 0.0019 | 0.25 | +5.00% | 30.0% | 277 | +7.90% | 0.7678 |
 | 0 | 0.25 | +5.00% | 55.0% | 110 | +4.05% | 0.7681 |
-| 0 | 0.25 | +5.00% | 45.0% | 216 | +3.18% | 0.7681 |
-| 0 | 0.75 | +8.00% | 45.0% | 669 | +2.70% | 0.7819 |
-| 0 | 0.75 | +8.00% | 30.0% | 750 | +2.09% | 0.7819 |
-| 0 | 0.25 | +0.00% | 30.0% | 864 | +2.07% | 0.7681 |
-| 0 | 1 | +8.00% | 45.0% | 800 | +1.66% | 0.7943 |
+| 0 | 0.25 | +5.00% | 45.0% | 216 | +3.31% | 0.7681 |
+| 0 | 0.75 | +8.00% | 45.0% | 669 | +2.79% | 0.7819 |
+| 0 | 0.75 | +8.00% | 30.0% | 750 | +2.18% | 0.7819 |
+| 0 | 0.25 | +0.00% | 30.0% | 864 | +2.16% | 0.7681 |
+| 0 | 1 | +8.00% | 45.0% | 800 | +1.73% | 0.7943 |
 
 ## Hold-out natijasi (bir marta baholandi): mavsum 2023
 
@@ -171,9 +171,9 @@ _signal yo'q_
 
 ## Grafiklar
 
-![Kalibratsiya](2026-10-21-synthetic-calibration.png)
+![Kalibratsiya](2026-10-23-synthetic-calibration.png)
 
-![Foyda egri chizig'i](2026-10-21-synthetic-equity.png)
+![Foyda egri chizig'i](2026-10-23-synthetic-equity.png)
 
 ## F3 darvozasi (hold-out, qaror #11)
 

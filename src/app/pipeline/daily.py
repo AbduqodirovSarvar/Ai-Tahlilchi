@@ -19,9 +19,10 @@ administrator alert. The analysis itself is the same engine as every other path.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Final
 
+from app.db.repo import user_ids
 from app.logging import get_logger
 from app.pipeline.alerts import alert_throttled, fail_key
 from app.pipeline.analyze import AnalysisEngine
@@ -33,7 +34,6 @@ from app.pipeline.ledger import LedgerKey
 from app.pipeline.limit_notice import LIMIT_DETAIL, announce_loss_limit
 from app.pipeline.limits import load_loss_status
 from app.pipeline.profile import UserProfile, default_request, load_profile, local_moment
-from app.pipeline.queries import user_ids
 
 logger = get_logger(__name__)
 
@@ -128,9 +128,3 @@ async def _finish(ctx: PipelineContext, profile: UserProfile, key: LedgerKey, de
     now = ctx.clock()
     await ctx.ledger.complete(key, now=now, detail=detail)
     await ctx.ledger.record_run(JOB, ok=True, detail=f"user={profile.user_id}", now=now)
-
-
-def next_send_after(profile: UserProfile, now: datetime) -> datetime:
-    """The next UTC instant this user's digest becomes due (for status displays)."""
-    due = send_moment(profile, now)
-    return due if due > now else due + timedelta(days=1)
