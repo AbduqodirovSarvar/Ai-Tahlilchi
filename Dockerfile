@@ -68,6 +68,14 @@ COPY alembic /app/alembic
 COPY scripts /app/scripts
 COPY --chmod=0755 deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+# Build identity, logged at startup (app_started) and readable via app.ops.version:
+#   docker build --build-arg APP_VERSION=0.6.1 --build-arg GIT_SHA=<commit> .
+# Declared last so a new commit only invalidates this (tiny) layer, never the dependencies.
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_SHA=${GIT_SHA}
+
 WORKDIR /data
 USER app:app
 

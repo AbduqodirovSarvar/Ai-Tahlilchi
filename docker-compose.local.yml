@@ -28,7 +28,12 @@ name: ai-tahlilchi-local
 
 services:
   bot:
-    build: .
+    build:
+      context: .
+      args:
+        # Shown at startup (app_started) and by the status tooling; both optional.
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ai-tahlilchi:local
     restart: "no"
     init: true
@@ -61,18 +66,22 @@ services:
         max-file: "3"
 
   # Optional: browse the SQLite database in a browser (tables, rows, SQL console), read-only.
+  # Pinned by digest (sqlite-web 2025-03 build): a moving tag would run unreviewed code next to
+  # your data. The volume is mounted read-write on purpose: the database is in WAL mode, and a
+  # reader needs to open the -shm file, which a `:ro` mount forbids; `--read-only` makes
+  # sqlite-web itself refuse every write.
   db-browser:
     profiles: ["tools"]
-    image: coleifer/sqlite-web
+    image: coleifer/sqlite-web@sha256:1e5b86237968ed747554f951c6df2fc2fe4bf4ef070b8ca23d553d7f6c6426f7
     depends_on:
       bot:
         condition: service_started
     command: ["sqlite_web", "--host", "0.0.0.0", "--port", "8080", "--read-only", "/data/app.db"]
     volumes:
-      - local-data:/data:ro
+      - local-data:/data
     ports:
       # Bound to localhost only: the database contains your bets and settings.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${DB_BROWSER_PORT:-8080}:8080"
     restart: "no"
 
 volumes:

@@ -9,7 +9,12 @@
 # error (exit 2) is throttled by deploy/entrypoint.sh, which waits before exiting 2.
 services:
   bot:
-    build: .
+    build:
+      context: .
+      args:
+        # Local builds: APP_VERSION=0.6.1 GIT_SHA=<commit> docker compose build
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: ${AI_TAHLILCHI_IMAGE:-ai-tahlilchi:local}
     restart: ${RESTART_POLICY:-unless-stopped}
     init: true
