@@ -399,17 +399,19 @@ def test_ledger_summary_roi_drawdown_and_hit_rate_match_hand_values(
     ledger_bets: list[Bet],
 ) -> None:
     summary = summarize_bets(ledger_bets, bank=100.0, seed=1, n_resamples=200)
-    # Turnover counts every placed bet, the void one included (stake 1 each): 5 units.
+    # Turnover is the stake at risk: the void (push) bet returned its stake, so 4 of 5 units.
     assert summary.n_bets == 5
-    assert summary.turnover == pytest.approx(5.0)
+    assert summary.turnover == pytest.approx(4.0)
     assert summary.profit == pytest.approx(0.6)  # 1.5 + 0 - 0.5 + 0.6 - 1
-    assert summary.roi == pytest.approx(0.12)
+    assert summary.roi == pytest.approx(0.15)
     assert summary.hit_rate == pytest.approx(0.4)  # the win and the half win
     # Equity 0 -> 1.5 -> 1.5 -> 1.0 -> 1.6 -> 0.6: deepest fall 1.6 -> 0.6.
     assert summary.max_drawdown == pytest.approx(1.0)
     assert summary.mean_clv == pytest.approx(sum(EXPECTED_CLV) / 5, abs=1e-12)
     assert summary.beat_close_rate == pytest.approx(0.2)  # only bet 2 beat the close
-    assert summary.roi_at_closing == pytest.approx(sum(EXPECTED_CLOSING_PROFIT) / 5)
+    assert summary.roi_at_closing == pytest.approx(
+        sum(EXPECTED_CLOSING_PROFIT) / 4
+    )  # push: no risk
     assert summary.roi_ci is not None
     assert summary.roi_ci.low <= summary.roi <= summary.roi_ci.high
 

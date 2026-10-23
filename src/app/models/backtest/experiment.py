@@ -283,7 +283,7 @@ def _grid_rows(runs: Mapping[float, WalkForwardResult], config: ExperimentConfig
         )
         for min_ev, min_probability in itertools.product(grid.min_evs, grid.min_probabilities):
             bets = select_bets(candidates, config.bet_filter(min_ev, min_probability))
-            stake = math.fsum(bet.flat_stake for bet in bets)
+            stake = math.fsum(bet.flat_at_risk for bet in bets)
             profit = math.fsum(bet.flat_profit for bet in bets)
             rows.append(
                 GridRow(

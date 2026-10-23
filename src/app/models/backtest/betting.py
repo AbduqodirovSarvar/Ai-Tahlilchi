@@ -112,6 +112,16 @@ class Bet:
     closing_profit: float | None
 
     @property
+    def flat_at_risk(self) -> float:
+        """The flat stake that was at risk: a push returns the stake, so it counts for nothing."""
+        return 0.0 if self.settlement is Settlement.PUSH else self.flat_stake
+
+    @property
+    def kelly_at_risk(self) -> float:
+        """The Kelly stake that was at risk (same rule as :attr:`flat_at_risk`)."""
+        return 0.0 if self.settlement is Settlement.PUSH else self.kelly_stake
+
+    @property
     def clv(self) -> float | None:
         """Closing line value: ``log(odds taken / fair closing odds)`` (> 0 beat the close)."""
         if self.closing_fair_odds is None:
