@@ -124,6 +124,18 @@ CA_BUNDLE_FILE=C:/certs/corp-ca.pem \
 
 > Ogohlantirish: korporativ firewall (masalan, FortiGate Application Control) Telegram'ni siyosat bo'yicha bloklashi mumkin. Bunda TLS ishlaydi, lekin `api.telegram.org` dan "Application Blocked" HTML sahifasi keladi (`ClientDecodeError`). Bu sertifikat muammosi emas: botni boshqa tarmoqda (server, uy interneti) ishga tushiring yoki IT'dan ruxsat so'rang.
 
+## Lokal test (Docker)
+[docker-compose.local.yml](docker-compose.local.yml): server faylidan (`docker-compose.yml`) alohida, faqat sinov uchun.
+```bash
+cp .env.example .env     # TELEGRAM_BOT_TOKEN va ADMIN_IDS ni to'ldiring
+docker compose -f docker-compose.local.yml up --build
+```
+- Namunaviy ma'lumot (`APP_SERVICES=fake`), API kalitlari kerak emas. O'qishga qulay (rangli) loglar; xato bo'lsa qayta-qayta urinmasdan sababini ko'rsatib to'xtaydi (`restart: "no"`).
+- Bazani brauzerda ko'rish (faqat o'qish, `http://127.0.0.1:8080`): `docker compose -f docker-compose.local.yml --profile tools up --build`.
+- Korporativ TLS-proksi ortida: `CA_BUNDLE_FILE=C:/yo'l/ca.pem docker compose -f docker-compose.local.yml -f docker-compose.proxy.yml up --build`.
+- To'xtatish: `docker compose -f docker-compose.local.yml down` (bazani ham o'chirish: `down -v`).
+- Bot `api.telegram.org` ga ulanadi. Ba'zi tarmoqlarda (korporativ firewall) Telegram bloklangan bo'ladi, bunda Telegram ruxsat berilgan tarmoqdan sinang.
+
 ## Serverga deploy (F9)
 To'liq qo'llanma: **[RUNBOOK.md](RUNBOOK.md)** (o'zbekcha): birinchi deploy, kalitlar, F0 probe va backtest serverda, yangilash/rollback, zaxira va tiklash, kalit almashtirish, loglar, muammolar, production ro'yxati.
 

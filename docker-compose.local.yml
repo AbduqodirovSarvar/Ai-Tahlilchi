@@ -1,0 +1,79 @@
+# LOCAL TESTING (not for the server: the server uses docker-compose.yml).
+#
+# Self-contained: no other compose file is needed.
+#
+#   cp .env.example .env            # then set TELEGRAM_BOT_TOKEN and ADMIN_IDS
+#   docker compose -f docker-compose.local.yml up --build
+#
+# Differences from docker-compose.yml, all chosen for fast feedback on a developer machine:
+#   - restart: "no"        a failing bot stops and shows the reason instead of looping;
+#   - APP_ENV=dev          readable coloured logs instead of JSON;
+#   - fast exit on config  CONFIG_ERROR_BACKOFF_SECONDS=1 (the server waits 60 s to avoid a hot loop);
+#   - APP_SERVICES=fake    in-memory sample data, no API keys needed (override in .env: real);
+#   - read-only rootfs and resource limits are dropped so debugging inside the container works.
+#
+# Behind a TLS-intercepting corporate proxy, add the proxy override (build + runtime CA):
+#   CA_BUNDLE_FILE=C:/path/ca.pem docker compose -f docker-compose.local.yml \
+#       -f docker-compose.proxy.yml up --build
+#
+# Optional database browser (read-only, http://127.0.0.1:8080, pulls a third-party image):
+#   docker compose -f docker-compose.local.yml --profile tools up --build
+#
+# Stop:                docker compose -f docker-compose.local.yml down
+# Stop + wipe the DB:  docker compose -f docker-compose.local.yml down -v
+#
+# Note: the bot talks to api.telegram.org. Some networks (e.g. corporate firewalls with
+# application control) block it; use a network where Telegram is reachable.
+name: ai-tahlilchi-local
+
+services:
+  bot:
+    build: .
+    image: ai-tahlilchi:local
+    restart: "no"
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: dev
+      DB_PATH: /data/app.db
+      APP_SERVICES: ${APP_SERVICES:-fake}
+      CONFIG_ERROR_BACKOFF_SECONDS: "1"
+    volumes:
+      # Named volume (owned by the app user inside the image): no host-side chown needed.
+      - local-data:/data
+    tmpfs:
+      - /tmp
+    # Colour output in `docker compose up` needs a pseudo-TTY.
+    tty: true
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.ops.healthcheck"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    stop_grace_period: 75s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: browse the SQLite database in a browser (tables, rows, SQL console), read-only.
+  db-browser:
+    profiles: ["tools"]
+    image: coleifer/sqlite-web
+    depends_on:
+      bot:
+        condition: service_started
+    command: ["sqlite_web", "--host", "0.0.0.0", "--port", "8080", "--read-only", "/data/app.db"]
+    volumes:
+      - local-data:/data:ro
+    ports:
+      # Bound to localhost only: the database contains your bets and settings.
+      - "127.0.0.1:8080:8080"
+    restart: "no"
+
+volumes:
+  local-data:
