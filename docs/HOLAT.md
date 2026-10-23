@@ -9,7 +9,7 @@
 |---|---|
 | To'lqinlar | T1 ✅ · T2 ✅ · T3 ✅ · T4 ✅ · T5 ✅ · **T6 jarayonda** (tuzatish raundlari va mustaqil QA) |
 | Teglar | `v0.1.0` … `v0.6.0` (har to'lqin yopilganda) |
-| Testlar | ≈ **3813** (`main`), 0 xfail; `slow` belgisi bilan ≈ 94 tasi ajratilgan (CI da alohida ish) |
+| Testlar | ≈ **3813** (`main`), 3859 (`wave/T6-fix-b`), 0 xfail; `slow` belgisi bilan ≈ 94 tasi ajratilgan (CI da alohida ish) |
 | Sifat darvozalari | ruff, `mypy --strict`, import-linter (6 shartnoma), deptry, pip-audit, gitleaks, qamrov (umumiy ≥ 85%, `models`/`pipeline` ≥ 90%): CI da majburiy |
 | Kod | `src/app/` (src layout), Python 3.13, aiogram 3, SQLAlchemy 2 (async) + SQLite |
 | Docker image | ≈ 768 MB (pandas va scikit-learn runtime'dan olib tashlangan), non-root, health probe, kod `3` bilan o'z-o'zini qayta ishga tushirish |
