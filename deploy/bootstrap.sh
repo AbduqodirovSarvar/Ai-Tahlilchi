@@ -215,8 +215,11 @@ ADMIN_IDS=
 APP_SERVICES=fake
 API_FOOTBALL_KEY=
 GEMINI_API_KEY=
-ODDS_API_KEY=
 HEALTHCHECKS_URL=
+# How API-Football writes Asian handicap lines: take it from the F0 probe result (home_line or
+# own_line), uncomment it BEFORE the first real odds are stored and never change it afterwards.
+# APP_SERVICES=real refuses to start while this line is missing.
+# HANDICAP_CONVENTION=home_line
 EOF
     log "created $APP_DIR/.env (empty): fill it in as the $DEPLOY_USER user"
 else

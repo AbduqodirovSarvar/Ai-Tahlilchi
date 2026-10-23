@@ -17,7 +17,8 @@ Server /opt/ai-tahlilchi/
   deploy.env           joriy image (AI_TAHLILCHI_IMAGE=...), deploy.env.prev oldingisi
   backups/             kunlik zaxiralar (app-YYYYMMDDTHHMMSSZ-daily.db.gz)
   bin/                 dc, backup.sh, restore.sh, remote-deploy.sh
-Docker volume ai-tahlilchi_bot-data (/data): app.db (+ -wal), fsm.db, pre-restore/
+Docker volume ai-tahlilchi_bot-data (/data): app.db (+ -wal), jobs.db, fsm.db, pre-restore/
+  (jobs.db = rejalashtiruvchi jadvali: zaxiraga KIRMAYDI, har startda qayta quriladi, 8-bo'lim)
 ```
 
 Qisqa buyruqlar (`bin/dc` = loyiha sozlamalari bilan `docker compose`):
@@ -73,10 +74,16 @@ Repozitoriy → Settings → Secrets and variables → Actions → **Repository 
 |---|---|
 | `SSH_HOST` | server IP yoki domen |
 | `SSH_USER` | `deploy` |
-| `SSH_KEY` | deploy kalitining **maxfiy** qismi (butun fayl, `-----BEGIN` dan `END` gacha) |
-| `SSH_KNOWN_HOSTS` | (tavsiya) `ssh-keyscan -t ed25519 SERVER` natijasi, serverning haqiqiy kaliti ekanini tekshirgach. Bo'lmasa workflow birinchi ulanishda ishonadi va ogohlantiradi |
+| `SSH_KEY` | deploy kalitining **maxfiy** qismi (butun fayl, `-----BEGIN` dan `END` gacha); **`production` environment ichida** saqlang (pastga qarang) |
+| `SSH_KNOWN_HOSTS` | **majburiy.** `ssh-keyscan -t ed25519 SERVER` natijasi, serverning haqiqiy kaliti (barmoq izi) ekanini boshqa kanal orqali tekshirgach. Birinchi ulanishga ko'r-ko'rona ishonish (TOFU) yo'q: bu secret bo'lmasa workflow o'tkazib yuboriladi |
 
-Secret'lar yo'q bo'lsa `Deploy` workflow **o'tkazib yuboriladi va yashil tugaydi** (hech narsa buzilmaydi). Ixtiyoriy: Settings → Environments → `production` → Required reviewers (har deploy'dan oldin tasdiqlash). GHCR paketi repozitoriy bilan bog'lanadi; server tokenni deploy paytida stdin orqali oladi, doimiy parol saqlanmaydi.
+`SSH_HOST`, `SSH_USER`, `SSH_KNOWN_HOSTS` yo'q bo'lsa `Deploy` workflow **o'tkazib yuboriladi va yashil tugaydi** (hech narsa buzilmaydi).
+
+**`production` environment (tavsiya etiladi):** Settings → Environments → `production` → *Required reviewers* (o'zingizni qo'shing) va `SSH_KEY` ni (xohlasangiz `SSH_HOST`/`SSH_USER` ni ham) shu yerdagi *Environment secrets* ga ko'chiring, repozitoriy secret'laridan o'chiring. Shunda kalitni faqat siz tasdiqlagan deploy ishi o'qiy oladi: boshqa workflow yoki shoxlardagi kod unga yetmaydi. `SSH_KEY` environment ichida bo'lgani uchun `gate` uni ko'rmaydi; yo'qligi deploy ishida aniq xato bilan chiqadi.
+
+**Deploy faqat yashil CI da:** deploy qilinadigan commit uchun `ci.yml` ning barcha tekshiruvlari (lint, tezkor va sekin testlar, xavfsizlik, Docker build) `success` bo'lishi shart, aks holda `ci` ishi workflow'ni to'xtatadi va image qurilmaydi. Shuning uchun tegni oldin `main` ga CI o'tgan commit'ga qo'ying. Image'ga `APP_VERSION` (teg) va `GIT_SHA` (commit) quriladi (6.1).
+
+GHCR paketi repozitoriy bilan bog'lanadi; server tokenni deploy paytida stdin orqali oladi, doimiy parol saqlanmaydi. Haftalik `Dependency audit` workflow (`pip-audit`) va Dependabot (Python, Actions, Docker) yangi zaifliklar va yangilanishlarni o'zi ko'rsatadi: audit qizil bo'lsa Actions xabari keladi, issue ochilmaydi.
 
 ### 3.5 Birinchi reliz
 ```bash
@@ -96,27 +103,28 @@ Workflow: image → GHCR → serverga fayllar → `remote-deploy.sh`. Birinchi d
 
 `APP_SERVICES=fake` (standart) botni namunaviy ma'lumotlar bilan ishga tushiradi (log: `services_backend ... sample_data=true`). Real rejim uchun:
 
-1. Kalitlarni oling (F0): `API_FOOTBALL_KEY` (api-sports.io), `GEMINI_API_KEY` (Google AI Studio), ixtiyoriy `ODDS_API_KEY`.
+1. Kalitlarni oling (F0): `API_FOOTBALL_KEY` (api-sports.io), `GEMINI_API_KEY` (Google AI Studio). (`ODDS_API_KEY` endi ishlatilmaydi; `.env` da qolgan bo'lsa e'tiborga olinmaydi.)
 2. `nano /opt/ai-tahlilchi/.env`: kalitlarni yozing. **Hali** `APP_SERVICES=real` qilmang.
-3. F0 probe (7-bo'lim): API reja nimani berishini tekshiring, `HANDICAP_CONVENTION` ni birinchi haqiqiy koeffitsientdan **oldin** belgilang (keyin o'zgartirib bo'lmaydi).
+3. F0 probe (7-bo'lim): API reja nimani berishini tekshiring va `.env` ga `HANDICAP_CONVENTION=home_line` yoki `own_line` ni probe natijasiga qarab **aniq** yozing. Bu birinchi haqiqiy koeffitsientdan **oldin** bo'lishi shart va keyin **hech qachon o'zgartirilmaydi** (saqlangan chiziqlarni qayta o'qib bo'lmaydi). `APP_SERVICES=real` bu o'zgaruvchi `.env`/muhitda aniq berilmaguncha ishga tushmaydi (chiqish kodi `2`, xabar `HANDICAP_CONVENTION is not set`). Probe natijasi standart `home_line` ni tasdiqlasa ham, `HANDICAP_CONVENTION=home_line` ni o'zingiz yozing: bu tasdiq.
 4. `APP_SERVICES=real` ga o'zgartiring, `bin/dc up -d --no-build bot` (yangi muhit bilan qayta yaratiladi; `restart` yetmaydi).
-5. Loglarda `services_backend ... backend=real`, `scheduler_started jobs=[settle, refresh, daily-tick, recalc-tick]`. Healthcheck endi rejalashtiruvchi tirikligini ham tekshiradi.
+5. Loglarda `services_backend ... backend=real`, `scheduler_started jobs=[...]` (8 ta job: `settle`, `refresh`, `daily-tick`, `template-tick`, `recalc-tick`, `learning`, `feedback`, `lessons`; ro'yxat `app.scheduler.JOB_NAMES` da). Healthcheck endi rejalashtiruvchi tirikligini ham tekshiradi.
 6. Botda `/holat`: API limitlari va oxirgi ishlar ko'rinadi. Birinchi `refresh` 08:30 (Toshkent) da yoki qo'lda: `bin/dc exec bot python -m app.pipeline.refresh`.
 
 ### 4.1 O'rganish halqasi rejimi (`LEARNING_MODE`)
 
-Haftalik o'rganish (dushanba 09:00) uch rejimda ishlaydi: `off` (hech narsa), **`shadow` (standart)** va `apply`. `shadow` da job hisoblaydi va "nima qilgan bo'lardi" ni `learning_changes` jadvaliga `applied=0` bilan yozadi, lekin tahlil xom model bilan ishlaydi: EV chegarasi ko'tarilmaydi, segment o'chirilmaydi, kalibratsiya qo'llanmaydi. Paper trading (F10) davomida jurnalni ko'rib turing: `sqlite3 data/app.db "SELECT created_at, kind, subject, reason FROM learning_changes WHERE applied=0 ORDER BY id DESC LIMIT 20"`. `apply` ga o'tish faqat odam qarori: `.env` da `LEARNING_MODE=apply`, keyin `bin/dc up -d --no-build bot`. Qo'lda rollbackdan keyin segment va kalibratsiya `LEARNING_MANUAL_HOLD_DAYS` (standart 30) kun muzlatiladi. Sabab va simulyatsiyalar: [ADR 0013](docs/adr/0013-learning-loop-math.md). Botda: `/ozgarishlar` — jurnal (kuzatuv rejimidagi yozuvlar "shunday qilgan bo'lardi" deb belgilanadi), qo'llangan o'zgarishni tasdiq bilan qaytarish (`STALE` bo'lsa rad etiladi); har dushanba haftalik "model nimani o'rgandi" xabari; `/holat` da rejim va haftalik ish 8 kundan ko'p ishlamasa "hafta yo'qolgan" ogohlantirishi ([ADR 0016](docs/adr/0016-t5-bot-fix-and-f8-ui.md)).
+Haftalik o'rganish (dushanba 09:00) uch rejimda ishlaydi: `off` (hech narsa), **`shadow` (standart)** va `apply`. `shadow` da job hisoblaydi va "nima qilgan bo'lardi" ni `learning_changes` jadvaliga `applied=0` bilan yozadi, lekin tahlil xom model bilan ishlaydi: EV chegarasi ko'tarilmaydi, segment o'chirilmaydi, kalibratsiya qo'llanmaydi. Paper trading (F10) davomida jurnalni ko'rib turing: serverda `sqlite3` dasturi yo'q, shuning uchun image ichidagi vosita (faqat o'qiydi): `bin/dc exec -T bot python -m app.ops.sqlite_tool query --db /data/app.db "SELECT created_at, kind, subject, reason FROM learning_changes WHERE applied=0 ORDER BY id DESC LIMIT 20"` (bot to'xtagan bo'lsa `exec` o'rniga `bin/dc run --rm --no-deps -T --entrypoint python bot -m app.ops.sqlite_tool query ...`; natija TSV, eng ko'pi 1000 qator). `apply` ga o'tish faqat odam qarori: `.env` da `LEARNING_MODE=apply`, keyin `bin/dc up -d --no-build bot`. Qo'lda rollbackdan keyin segment va kalibratsiya `LEARNING_MANUAL_HOLD_DAYS` (standart 30) kun muzlatiladi. Sabab va simulyatsiyalar: [ADR 0013](docs/adr/0013-learning-loop-math.md). Botda: `/ozgarishlar` — jurnal (kuzatuv rejimidagi yozuvlar "shunday qilgan bo'lardi" deb belgilanadi), qo'llangan o'zgarishni tasdiq bilan qaytarish (`STALE` bo'lsa rad etiladi); har dushanba haftalik "model nimani o'rgandi" xabari; `/holat` da rejim va haftalik ish 8 kundan ko'p ishlamasa "hafta yo'qolgan" ogohlantirishi ([ADR 0016](docs/adr/0016-t5-bot-fix-and-f8-ui.md)).
 
 ## 5. Monitoring
 
-- **Docker healthcheck** (har 60 s): sozlama xatosi belgisi yo'q, baza ochiladi, disk ≥ 200 MB bo'sh, (real rejimda) `daily-tick` 5 daqiqadan ortiq kechikmagan. Natija: `bin/dc exec bot python -m app.ops.healthcheck` (JSON: tekshiruvlar, baza/WAL hajmi, oxirgi ishlar).
+- **Docker healthcheck** (har 60 s): sozlama xatosi belgisi yo'q, baza ochiladi, disk ≥ 200 MB bo'sh, (real rejimda) `daily-tick` 5 daqiqadan ortiq kechikmagan (rejalashtiruvchi o'z faylida: `/data/jobs.db`). Natija: `bin/dc exec bot python -m app.ops.healthcheck` (JSON: tekshiruvlar, baza/WAL hajmi, oxirgi ishlar).
 - **healthchecks.io (dead-man's switch):** hisob oching → yangi check: *Period* 1 kun, *Grace* 4 soat → ping URL'ni `.env` dagi `HEALTHCHECKS_URL` ga yozing (URL maxfiy), `bin/dc up -d --no-build bot`. Ilova `settle` (08:00) va `refresh` (08:30) muvaffaqiyatli tugagach ping yuboradi, xato bo'lsa `/fail`. Ping to'xtasa, healthchecks.io sizga e-pochta/Telegram orqali xabar beradi: bu jarayon o'lgan, qotgan yoki server o'chgan holatni ushlaydi. Ikkinchi check (ixtiyoriy): zaxira uchun, URL'ni `/opt/ai-tahlilchi/backup.env` ga `BACKUP_PING_URL=...` deb yozing.
+- **Ichki qorovul (watchdog):** rejalashtiruvchining `daily-tick` ishi `WATCHDOG_STALL_MINUTES` (standart 10) daqiqa ishlamasa, jarayon logga `watchdog_stalled` yozadi, tartibli to'xtaydi va **kod 3** bilan chiqadi; `restart: unless-stopped` uni qayta ko'taradi (Docker healthcheck o'zi qayta ishga tushirmaydi, shuning uchun bu kerak). Start va migratsiya paytida ishlamaydi (hisob rejalashtiruvchi ishga tushgandan boshlanadi). Tekshirish: `bin/dc logs bot | grep -E 'watchdog|scheduler_stalled_exit'`; `bin/dc ps` da qayta-qayta restart ko'rinsa sababini logdan qidiring.
 - **Admin Telegram ogohlantirishi:** job qayta-qayta xato bersa pipeline adminlarga xabar yuboradi (cheklangan chastota bilan); `/holat` oxirgi xatolarni ko'rsatadi.
 - **Disk:** healthcheck chiqishida `free ... MB`; 200 MB dan kam bo'lsa konteyner `unhealthy`. `docker system df` va `du -sh backups` bilan qo'lda ham qarang. Loglar Docker'da 5 × 10 MB bilan aylanadi.
 
 ## 6. Yangilash va orqaga qaytarish
 
-**Yangilash:** `git tag vX.Y.Z && git push origin vX.Y.Z`. Workflow: image quradi → serverda: zaxira (`pre-deploy`) → `pull` → `up -d` (entrypoint avval `alembic upgrade head` ni bajaradi) → 5 daqiqagacha `healthy` kutadi. `healthy` bo'lmasa **avtomatik oldingi image'ga qaytadi** va workflow qizil tugaydi.
+**Yangilash:** `git tag vX.Y.Z && git push origin vX.Y.Z`. Workflow: CI shu commit uchun yashilligini tekshiradi → image quradi → serverda: zaxira (`pre-deploy`) → `pull` → `up -d` (entrypoint avval `alembic upgrade head` ni bajaradi) → 5 daqiqagacha `healthy` kutadi. `healthy` bo'lmasa **avtomatik oldingi image'ga qaytadi** va workflow qizil tugaydi.
 
 **Qo'lda yangilash/rollback** (serverda, bir buyruq):
 ```bash
@@ -125,6 +133,15 @@ bin/remote-deploy.sh ghcr.io/<egasi>/ai-tahlilchi:v0.9.0               # GHCR'ga
 cat deploy.env deploy.env.prev                                          # joriy va oldingi image
 ```
 **Sxema ogohlantirishi:** migratsiya orqaga qaytmaydi. Rollback faqat image'ni almashtiradi. Migratsiyalar bir reliz davomida orqaga mos (faqat qo'shish) yozilishi kerak. Eski image yangi sxemada ishlamasa, bazani `pre-deploy` zaxirasidan tiklang (8-bo'lim).
+
+### 6.1 Qaysi versiya ishlayapti
+
+Image'ga build vaqtida `APP_VERSION` (teg, `v` siz) va `GIT_SHA` (to'liq commit) quriladi. Ilova har startda `app_started version=... sha=...` yozadi:
+```bash
+bin/dc logs bot | grep app_started | tail -1
+bin/dc exec -T bot python -c "import os; print(os.environ['APP_VERSION'], os.environ['GIT_SHA'])"
+```
+Lokal build: `APP_VERSION=0.6.1 GIT_SHA=$(git rev-parse HEAD) docker compose build` (bermasangiz `dev` / `unknown`). `/holat` da ko'rsatish uchun bot/servis qatlami `app.ops.version.get_version().label` ni chaqiradi.
 
 **Konfiguratsiyani yangilash** (`.env`): o'zgartiring, so'ng `bin/dc up -d --no-build bot`.
 
@@ -152,10 +169,12 @@ bin/dc run --rm --no-deps --entrypoint ls bot /data/backtest
 
 ## 8. Zaxiradan tiklash
 
-Zaxiralar: `/opt/ai-tahlilchi/backups/app-*.db.gz` (14 kun) + `RCLONE_REMOTE` bo'lsa masofaviy nusxa. **Mahalliy zaxira server disk'i bilan birga yo'qolishi mumkin: masofaviy nusxa sozlang:**
+Zaxiralar: `/opt/ai-tahlilchi/backups/app-*.db.gz` (14 kun) + `RCLONE_REMOTE` bo'lsa masofaviy nusxa. Zaxiraga faqat `app.db` kiradi. `jobs.db` (rejalashtiruvchi, pickle saqlaydi) va `fsm.db` kirmaydi: rejalashtiruvchi jadvali har startda o'zi qayta quriladi.
+
+**Mahalliy zaxira server disk'i bilan birga yo'qolishi mumkin: masofaviy nusxa sozlang.** Zaxira siqilgan, lekin **shifrlanmagan** baza: unda stavkalar, bank va sozlamalar bor. Tashqi omborga shifrlab yuklang: `rclone crypt` remote yarating (`rclone config` → *New remote* → type `crypt`, remote sifatida B2/Drive/S3 ni ko'rsating, parol va tuz saqlang) va `RCLONE_REMOTE` ni **crypt remote** ga yo'naltiring. Parolni zaxiradan alohida joyda saqlang: usiz zaxirani tiklab bo'lmaydi.
 ```bash
 sudo apt-get install -y rclone && rclone config        # masalan Backblaze B2 / Google Drive / S3
-echo 'RCLONE_REMOTE=remote:ai-tahlilchi' >> /opt/ai-tahlilchi/backup.env      # taymer shuni o'qiydi
+echo 'RCLONE_REMOTE=ai-tahlilchi-crypt:' >> /opt/ai-tahlilchi/backup.env      # taymer shuni o'qiydi (crypt remote!)
 ```
 
 **Tiklash** (bot avtomatik to'xtatiladi va qayta ishga tushiriladi):
@@ -165,7 +184,9 @@ bin/restore.sh --dry-run backups/app-20261101T023000Z-daily.db.gz     # tekshira
 bin/restore.sh backups/app-20261101T023000Z-daily.db.gz               # "RESTORE" deb tasdiqlang
 bin/dc logs --tail 50 bot ; # botda /holat
 ```
-Xavfsizlik: tiklashdan oldin joriy baza `/data/pre-restore/` ga saqlanadi; buzuq zaxira hech narsani o'zgartirmaydi; eski sxemali zaxira keyingi startda avtomatik migratsiya qilinadi. Masofaviy zaxirani avval yuklab oling: `rclone copy remote:ai-tahlilchi/app-....db.gz backups/`.
+> **Faqat o'zingiz olgan zaxirani tiklang.** Zaxira ichidagi bazani ilova ishonchli deb o'qiydi, boshqa odam yasagan fayl esa kutilmagan ma'lumot yoki sxema olib kelishi mumkin. Rejalashtiruvchi jadvali (`jobs.db`) pickle saqlaydi: begona `jobs.db` ni nusxalash serverda kodni ishga tushirishi mumkin. Shuning uchun `jobs.db` zaxiraga kiritilmaydi va tiklanmaydi; begona fayldan tiklamang va `jobs.db` ni hech qachon tashqaridan olib kelmang (zarur bo'lsa, o'chiring: keyingi startda qayta quriladi, o'tkazib yuborilgan bitta kunlik ish tushishi mumkin).
+
+Xavfsizlik: tiklashdan oldin joriy baza `/data/pre-restore/` ga saqlanadi (eng so'nggi **5** nusxa qoladi, eskilari o'zi o'chadi); buzuq zaxira hech narsani o'zgartirmaydi; eski sxemali zaxira keyingi startda avtomatik migratsiya qilinadi. Masofaviy zaxirani avval yuklab oling: `rclone copy remote:ai-tahlilchi/app-....db.gz backups/`.
 
 **Oylik mashq (5 daqiqa):** eng so'nggi zaxirani `bin/restore.sh --dry-run` bilan tekshiring. Sinalmagan zaxira zaxira emas. (Avtomatik test: `tests/ops/test_backup_restore_scripts.py::test_restore_drill_recovers_content_and_schema`.)
 
@@ -200,6 +221,8 @@ Foydali maydonlar: `event`, `level`, `job`, `fixture_id`, `user_id`. Loglarda ka
 | Belgi | Sabab | Yechim |
 |---|---|---|
 | Konteyner `unhealthy`, logda `startup_failed`, `config_error_backoff` (**chiqish kodi 2**) | `.env` da token/`ADMIN_IDS` yo'q yoki noto'g'ri, Telegram tokenni rad etdi | Xabar sababni aytadi (faqat o'zgaruvchi nomi). `.env` ni tuzating → `bin/dc up -d --no-build bot`. Halqa daqiqada bir marta (60 s kutish), qayta urinish yordam bermaydi |
+| `startup_failed ... HANDICAP_CONVENTION is not set` (**kod 2**, `APP_SERVICES=real`) | handicap konventsiyasi aniq tanlanmagan | F0 probe natijasiga qarab `.env` ga `HANDICAP_CONVENTION=home_line` yoki `own_line` yozing (4-bo'lim, 3-qadam). Birinchi koeffitsientdan keyin o'zgartirmang |
+| `watchdog_stalled` logda, konteyner qayta-qayta ko'tariladi (**kod 3**) | rejalashtiruvchi to'xtab qoldi (`daily-tick` yo'q) | Qayta ishga tushish odatda tuzatadi. Takrorlansa `bin/dc logs bot` da undan oldingi xatoni toping (`job_failed`, xotira), `free -m`; `WATCHDOG_STALL_MINUTES` ni oshirish faqat og'ir ishlar uzoq bo'lsa |
 | `migrations_failed` (kod 1), ilova ishga tushmaydi | migratsiya xatosi yoki `/data` yozib bo'lmaydi | Logdagi alembic xatosini o'qing; deploy bo'lsa avtomatik rollback bo'ladi. Sxema buzilgan bo'lsa `pre-deploy` zaxirasidan tiklang |
 | `healthy` emas: `scheduler lag ...` | event loop qotgan yoki jarayon og'ir ishda (masalan, backtest xotira yetmasligi) | `bin/dc logs`, `free -m`, `bin/dc restart bot`. Takrorlansa, server hajmini oshiring |
 | `disk free ... < min` | zaxiralar yoki loglar disk'ni to'ldirdi | `du -sh backups /var/lib/docker`, `docker system prune -f`, eski zaxiralarni o'chiring, `RETENTION_DAYS` ni kamaytiring |

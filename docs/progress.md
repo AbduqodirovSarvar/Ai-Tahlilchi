@@ -4,7 +4,7 @@
 > Belgilar: `[x]` bajarildi · `[ ]` ochiq · `[~]` kechiktirilgan / qisman (izoh bilan).
 > Vazifa faqat barcha darvozalar yashil bo'lganda (`pytest`, `ruff`, `mypy`, `lint-imports`) belgilanadi.
 
-**Joriy to'lqin:** T1 (skelet): QA va sharh topilmalari tuzatildi (fix round 1), qayta tekshiruv kutilmoqda.
+**Joriy to'lqin:** T6 (yakuniy integratsiya): sharh topilmalarini tuzatish raundi (fix-a: pipeline/servislar; fix-b: infratuzilma) va mustaqil QA. T1–T5 yopilgan, teglar `v0.1.0`–`v0.6.0`. Qolgan ishlar foydalanuvchiga bog'liq: kalitlar, F0 probe, haqiqiy backtest, server, F10 paper trading ([HOLAT.md](HOLAT.md)).
 
 ## T0 — Ma'lumot manbalarini tekshirish (F0)
 > Kechiktirilgan: API kalitlari hali yo'q (qarang: [decisions_log.md](decisions_log.md)).
@@ -115,7 +115,8 @@
 - [ ] To'liq e2e va qabul mezonlarini qayta tekshirish (test-engineer)
 - [ ] Butun kod bazasi sharhi (code-reviewer)
 - [x] TLS ishonch sozlamasi (infra-engineer, 2026-10-23): `TLS_USE_SYSTEM_TRUST_STORE` / `TLS_CA_BUNDLE`, `src/app/tls.py`, aiogram/httpx/Gemini ulanishi, `docker-compose.proxy.yml` ishga tushirishda ham CA ni ulaydi ([ADR 0017](adr/0017-tls-trust-configuration.md))
-- [ ] Production deploy va zaxiradan tiklash sinovi (infra-engineer)
+- [x] T6 fix-b: infratuzilma sharh topilmalari (infra-engineer, 2026-10-23, [ADR 0018](adr/0018-t6-ops-hardening.md)): `HEALTHCHECKS_URL` `SecretStr` va HTTP klient loglari WARNING; ping tanasi faqat qisqa kod; backup/verify vaqtinchalik fayllari baza yonida, `pre-restore/` da 5 nusxa; rejalashtiruvchi alohida `jobs.db`, bot ulangandan keyin start, ichki qorovul (kod 3); `APP_VERSION`/`GIT_SHA` va `app.ops.version`; `HANDICAP_CONVENTION` aniq berilmasa `real` ishga tushmaydi; deploy: yashil CI sharti, `IMAGE_REFERENCE` tekshiruvi, majburiy `SSH_KNOWN_HOSTS`; CI tezkor/sekin testlarga bo'lindi; Dependabot va haftalik `pip-audit`; `pandas`/`scikit-learn`/`ODDS_API_KEY` olib tashlandi (image 938 -> 768 MB); `clean_worktrees.sh`
+- [ ] Production deploy va zaxiradan tiklash sinovi (foydalanuvchi: server va kalitlar kerak)
 
 ## F10 — Paper trading
 - [ ] F10.1 Serverda to'liq rejim (faqat qog'ozda)
