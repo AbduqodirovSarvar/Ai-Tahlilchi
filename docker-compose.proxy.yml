@@ -1,0 +1,19 @@
+# Optional override for networks with a TLS-intercepting corporate proxy: the image build
+# cannot reach PyPI unless it trusts the proxy's CA certificate.
+#
+#   CA_BUNDLE_FILE=C:/path/to/ca-bundle.pem \
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+#
+# (PowerShell: $env:CA_BUNDLE_FILE="C:/path/to/ca-bundle.pem"; docker compose -f ... up -d --build)
+#
+# The certificate is passed as a BuildKit secret: it is available only during the build and is
+# never stored in an image layer. Do not commit the certificate file.
+services:
+  bot:
+    build:
+      secrets:
+        - ca_bundle
+
+secrets:
+  ca_bundle:
+    file: ${CA_BUNDLE_FILE:?set CA_BUNDLE_FILE to the PEM bundle of your proxy's CA}
