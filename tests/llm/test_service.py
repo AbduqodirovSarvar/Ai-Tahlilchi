@@ -304,7 +304,7 @@ async def test_postmortem_valid() -> None:
     assert result is not None
     assert result.category == PostmortemCategory.MISSING_INFO
     assert result.reason == "Palmer o'ynamasligi ma'lum edi. Bu e'tiborga olinmagan."
-    assert result.prompt_version == "postmortem.v1"
+    assert result.prompt_version == "postmortem.v2"
     assert backend.requests[0]["schema"] == "PostmortemOutput"
 
 

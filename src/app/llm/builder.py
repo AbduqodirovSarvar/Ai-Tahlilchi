@@ -31,7 +31,7 @@ from app.llm.inputs import (
 from app.llm.prompts import Prompt, load_prompt
 
 CONTEXT_CHECK_PROMPT: Final = ("context_check", "v1")
-POSTMORTEM_PROMPT: Final = ("postmortem", "v1")
+POSTMORTEM_PROMPT: Final = ("postmortem", "v2")
 
 DATA_OPEN: Final = "<<<DATA>>>"
 DATA_CLOSE: Final = "<<<END_DATA>>>"
@@ -262,6 +262,13 @@ def build_postmortem_prompt(case: PostmortemInput) -> BuiltPrompt:
         payload["xg_summary"] = case.xg_summary
     if case.match_events:
         payload["match_events"] = list(case.match_events)
+    if case.original_verdict or case.original_note:
+        review: dict[str, Json] = {}
+        if case.original_verdict:
+            review["verdict"] = case.original_verdict
+        if case.original_note:
+            review["note"] = case.original_note
+        payload["original_review"] = review
     text = _render(payload)
     prompt = load_prompt(*POSTMORTEM_PROMPT)
     return BuiltPrompt(

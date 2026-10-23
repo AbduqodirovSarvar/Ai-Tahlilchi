@@ -97,6 +97,16 @@ def utc_bounds(zone: ZoneInfo, first: date, last: date) -> tuple[datetime, datet
     return start.astimezone(UTC), end.astimezone(UTC)
 
 
+def local_moment(zone: ZoneInfo, day: date, at: time) -> datetime:
+    """The UTC instant of the wall-clock time ``at`` on the local ``day``.
+
+    One rule for every "at HH:MM local" schedule: a time that does not exist (the clocks jump
+    over it) resolves to the instant after the jump, an ambiguous one (the clocks repeat it)
+    to its first occurrence, so every local day has exactly one such instant.
+    """
+    return datetime.combine(day, at, tzinfo=zone).astimezone(UTC)
+
+
 def default_request(
     profile: UserProfile,
     first: date,

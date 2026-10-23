@@ -15,6 +15,7 @@ from app.domain import MarketType, Sport
 from app.pipeline import data
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.context import PipelineContext
+from app.pipeline.limits import LossStatus
 from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.settle import outcome_of
 from app.pipeline.types import SignalCard
@@ -23,6 +24,8 @@ from app.services.interfaces import (
     PRELIMINARY_AFTER,
     ConfidenceLevel,
     EntityId,
+    LimitPeriod,
+    LossLimitNotice,
     QuietHours,
     ResultMark,
     RiskProfile,
@@ -138,6 +141,23 @@ def to_view(
         recommended_at=record.recommended_at if recommended else None,
         recommended_odds=record.recommended_odds if recommended else None,
         zero_ev_odds=record.fair_odds,
+        home_team_id=_entity_id(record.fixture.home_team_id),
+        away_team_id=_entity_id(record.fixture.away_team_id),
+        league_id=_entity_id(record.fixture.league_id),
+    )
+
+
+def _entity_id(value: int | None) -> EntityId | None:
+    """The bot-facing id of a storage id (``None`` stays unknown)."""
+    return None if value is None else str(value)
+
+
+def loss_limit_notice(status: LossStatus | None) -> LossLimitNotice | None:
+    """The contract notice of a reached loss limit (``None`` when none is reached)."""
+    if status is None or status.period is None or status.limit is None:
+        return None
+    return LossLimitNotice(
+        period=LimitPeriod(status.period.value), limit=status.limit, loss=status.loss
     )
 
 

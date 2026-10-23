@@ -18,16 +18,24 @@ from typing import Final, Protocol
 from app.db.enums import RecalcKind
 from app.db.repo import FixtureRecord
 from app.pipeline.ledger import LedgerKey
+from app.pipeline.limits import LossStatus
 from app.pipeline.recalc import RecalcResult
 from app.pipeline.types import AnalysisOutcome, SignalCard
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DailyDelivery:
-    """The morning digest: the user's analysis of ``day`` (their local date)."""
+    """The morning digest: the user's analysis of ``day`` (their local date).
+
+    ``label`` names the saved query of a scheduled template (then it is a template digest, not
+    the morning one); ``loss_limit`` is set when a reached loss limit replaced the signals
+    (``outcome`` is then empty): the message is the day's single "limit reached" notice.
+    """
 
     day: date
     outcome: AnalysisOutcome
+    label: str | None = None
+    loss_limit: LossStatus | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

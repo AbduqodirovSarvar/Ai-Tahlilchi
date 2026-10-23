@@ -38,8 +38,8 @@ from app.domain import OddsKind
 from app.logging import get_logger
 from app.pipeline.alerts import alert_throttled
 from app.pipeline.context import PipelineContext
-from app.pipeline.daily import message_key
 from app.pipeline.delivery import CancelDelivery, Delivery, UpdateDelivery, WatchDelivery
+from app.pipeline.digest_store import message_key
 from app.pipeline.errors import DeliveryNotConfirmedError
 from app.pipeline.ledger import STAMP_DAY, LedgerKey
 from app.pipeline.outbox import deliver_watch_event

@@ -266,6 +266,28 @@ async def bets_placed_between(
     return [_bet(row) for row in rows]
 
 
+async def bets_settled_between(
+    session: AsyncSession, user_id: int, *, start: datetime, end: datetime
+) -> list[UserBetRecord]:
+    """A user's bets settled in ``[start, end)`` with a known profit, oldest first.
+
+    The loss limits of the responsible-gaming rule read it: they are judged on the day a bet
+    was *settled*, not placed. Money is summed in Python by the caller (ADR 0002).
+    """
+    rows = await session.scalars(
+        select(UserBetRow)
+        .where(
+            UserBetRow.user_id == user_id,
+            UserBetRow.settled_at.is_not(None),
+            UserBetRow.profit.is_not(None),
+            UserBetRow.settled_at >= start,
+            UserBetRow.settled_at < end,
+        )
+        .order_by(UserBetRow.settled_at, UserBetRow.id)
+    )
+    return [_bet(row) for row in rows]
+
+
 async def bets_for_signal(session: AsyncSession, signal_id: int) -> list[UserBetRecord]:
     """Every bet placed on a signal (settlement), oldest first."""
     rows = await session.scalars(

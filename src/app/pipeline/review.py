@@ -15,8 +15,15 @@ from typing import Final, Protocol
 
 from app.db.enums import Confidence, LlmVerdict
 from app.domain import Market, Selection
-from app.llm.inputs import MAX_CANDIDATES, CandidateInput, ExperienceContext
-from app.llm.schemas import ReviewStatus
+from app.llm.inputs import (
+    MAX_CANDIDATES,
+    Absence,
+    CandidateInput,
+    ExperienceContext,
+    PostmortemInput,
+    TeamForm,
+)
+from app.llm.schemas import PostmortemResult, ReviewStatus
 from app.llm.schemas import Verdict as LlmVerdictWire
 from app.llm.service import LlmService
 from app.logging import get_logger
@@ -48,6 +55,13 @@ class ReviewCandidate:
     market_probability: float | None = None
     confidence_reasons: tuple[str, ...] = ()
     lineups_known: bool = False
+    user_id: int | None = None
+    """Whose analysis it is (the experience block reads this user's notes)."""
+    league_id: int | None = None
+    home_team_id: int | None = None
+    away_team_id: int | None = None
+    forms: tuple[TeamForm, ...] = ()
+    absences: tuple[Absence, ...] = ()
 
     @property
     def key(self) -> ReviewKey:
@@ -82,6 +96,14 @@ class CandidateReviewer(Protocol):
         ...
 
 
+class ExperienceSource(Protocol):
+    """Builds the "Tajriba konteksti" block of one review batch (F8.7)."""
+
+    async def build(self, candidates: Sequence[ReviewCandidate]) -> ExperienceContext | None:
+        """The block for ``candidates`` (only what is relevant to them), ``None`` when empty."""
+        ...
+
+
 class LlmCandidateReviewer:
     """Adapts :class:`app.llm.service.LlmService` to :class:`CandidateReviewer`.
 
@@ -92,10 +114,20 @@ class LlmCandidateReviewer:
     #14) and ``ehtiyot`` keeps it recommended - the pipeline applies that, not this adapter.
     """
 
-    def __init__(self, service: LlmService, context: ExperienceContext | None = None) -> None:
-        """Review through ``service`` with an optional experience block (F8 fills it)."""
+    def __init__(
+        self,
+        service: LlmService,
+        context: ExperienceContext | None = None,
+        *,
+        experience: ExperienceSource | None = None,
+    ) -> None:
+        """Review through ``service``; the experience block is ``experience``'s (per batch).
+
+        A fixed ``context`` is the fallback when no source is wired or the source has nothing.
+        """
         self._service = service
         self._context = context
+        self._experience = experience
 
     def usage(self) -> LlmUsage:
         """Today's requests and tokens against the daily caps."""
@@ -113,7 +145,7 @@ class LlmCandidateReviewer:
         reviews: dict[ReviewKey, Review] = {}
         for batch in itertools.batched(candidates, MAX_CANDIDATES, strict=False):
             inputs = [_to_input(candidate) for candidate in batch]
-            answers = await self._service.review_candidates(inputs, self._context)
+            answers = await self._service.review_candidates(inputs, await self._context_for(batch))
             for candidate, answer in zip(batch, answers, strict=True):
                 if answer.status is ReviewStatus.FALLBACK or answer.verdict is None:
                     continue
@@ -124,12 +156,29 @@ class LlmCandidateReviewer:
                 )
         return reviews
 
+    async def _context_for(self, batch: Sequence[ReviewCandidate]) -> ExperienceContext | None:
+        """The experience block of ``batch``; a source that fails costs only the block."""
+        if self._experience is None:
+            return self._context
+        try:
+            built = await self._experience.build(batch)
+        except Exception as error:  # experience is an enhancement: the review goes on without it
+            logger.warning("experience_unavailable", error=repr(error))
+            return self._context
+        return built or self._context
+
 
 _VERDICTS: Final = {
     LlmVerdictWire.CONFIRM: LlmVerdict.CONFIRM,
     LlmVerdictWire.CAUTION: LlmVerdict.CAUTION,
     LlmVerdictWire.REJECT: LlmVerdict.REJECT,
 }
+_WIRE_VERDICTS: Final = {stored: wire for wire, stored in _VERDICTS.items()}
+
+
+def wire_verdict(verdict: LlmVerdict) -> str:
+    """The word the LLM prompts use for a stored verdict (``tasdiq``, ``ehtiyot``, ``rad``)."""
+    return _WIRE_VERDICTS[verdict].value
 
 
 def _to_input(candidate: ReviewCandidate) -> CandidateInput:
@@ -151,6 +200,8 @@ def _to_input(candidate: ReviewCandidate) -> CandidateInput:
         confidence_level=candidate.confidence.value,
         confidence_reasons=candidate.confidence_reasons[:5],
         lineup_known=candidate.lineups_known,
+        forms=candidate.forms,
+        absences=candidate.absences,
     )
 
 
@@ -187,3 +238,35 @@ async def review_safely(
     except Exception as error:  # an LLM failure must never lose the signals
         logger.warning("review_failed", candidates=len(candidates), error=repr(error))
     return {}
+
+
+class PostmortemAnalyst(Protocol):
+    """Classifies why a recommended signal lost (F8.3)."""
+
+    async def classify(self, case: PostmortemInput) -> PostmortemResult | None:
+        """The classification, or ``None`` when no answer is available now (try again later)."""
+        ...
+
+
+class NoPostmortem:
+    """The default analyst: never answers, so no post-mortem is ever stored."""
+
+    async def classify(self, case: PostmortemInput) -> PostmortemResult | None:  # noqa: ARG002 - protocol signature
+        """No answer."""
+        return None
+
+
+class LlmPostmortemAnalyst:
+    """Adapts :class:`app.llm.service.LlmService.postmortem` (which never raises) to the port."""
+
+    def __init__(self, service: LlmService) -> None:
+        """Classify through ``service`` (the one that also reviews, so the budget is shared)."""
+        self._service = service
+
+    async def classify(self, case: PostmortemInput) -> PostmortemResult | None:
+        """The service's answer; an unexpected failure is the same as no answer."""
+        try:
+            return await self._service.postmortem(case)
+        except Exception as error:  # the contract says it never raises; a bug must not stop the job
+            logger.warning("postmortem_failed", error=repr(error))
+            return None

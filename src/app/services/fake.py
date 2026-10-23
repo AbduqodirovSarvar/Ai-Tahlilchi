@@ -472,6 +472,9 @@ class FakeState:
             source=stored.source,
             recommended_at=stored.recommended_at,
             recommended_odds=stored.recommended_odds,
+            home_team_id=fixture.home.team_id,
+            away_team_id=fixture.away.team_id,
+            league_id=fixture.league.league_id,
         )
 
     def outcomes(self, user_id: int) -> list[SignalOutcome]:

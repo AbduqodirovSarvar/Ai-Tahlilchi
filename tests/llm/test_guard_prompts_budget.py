@@ -68,6 +68,7 @@ def test_prompts_are_packaged_and_cached() -> None:
     assert review.version_id == "context_check.v1"
     assert "<<<DATA>>>" in review.text
     assert load_prompt("postmortem", "v1").version_id == "postmortem.v1"
+    assert load_prompt("postmortem", "v2").version_id == "postmortem.v2"
 
 
 def test_review_prompt_lists_every_allowed_value() -> None:
@@ -77,11 +78,19 @@ def test_review_prompt_lists_every_allowed_value() -> None:
         assert f"`{value}`" in text
 
 
-def test_postmortem_prompt_lists_every_category() -> None:
-    text = load_prompt("postmortem", "v1").text
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_postmortem_prompt_lists_every_category(version: str) -> None:
+    text = load_prompt("postmortem", version).text
 
     for category in PostmortemCategory:
         assert f"`{category.value}`" in text
+
+
+def test_postmortem_prompt_v2_explains_the_original_review_block() -> None:
+    text = load_prompt("postmortem", "v2").text
+
+    assert "`original_review`" in text
+    assert "<<<DATA>>>" in text
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,14 @@
 """Real signal, result, bet and report services (everything that reads stored signals)."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Final
 
 from app.domain import FixtureStatus
 from app.pipeline import data
+from app.pipeline.limits import limit_reached, net_loss, week_start
 from app.pipeline.profile import utc_bounds
 from app.pipeline.settle import settle_manually
 from app.services.errors import (
@@ -299,9 +300,9 @@ class RealBetService:
         by_day: dict[date, Decimal] = {}
         for item in settled:
             by_day[item.day] = by_day.get(item.day, Decimal(0)) + item.profit
-        week_start = today - timedelta(days=today.weekday())
-        loss_today = _loss(p for d, p in by_day.items() if d == today)
-        loss_week = _loss(p for d, p in by_day.items() if d >= week_start)
+        first_day = week_start(today)
+        loss_today = net_loss(p for d, p in by_day.items() if d == today)
+        loss_week = net_loss(p for d, p in by_day.items() if d >= first_day)
         s = profile.settings
         return BankView(
             balance=None
@@ -316,17 +317,9 @@ class RealBetService:
             history=_history(profile.bank, by_day),
             loss_today=loss_today,
             loss_this_week=loss_week,
-            loss_limit_reached=_limit_hit(s.daily_loss_limit, loss_today)
-            or _limit_hit(s.weekly_loss_limit, loss_week),
+            loss_limit_reached=limit_reached(s.daily_loss_limit, loss_today)
+            or limit_reached(s.weekly_loss_limit, loss_week),
         )
-
-
-def _loss(profits: Iterable[Decimal]) -> Decimal:
-    return max(-sum(profits, Decimal(0)), Decimal(0))
-
-
-def _limit_hit(limit: Decimal | None, loss: Decimal) -> bool:
-    return limit is not None and loss >= limit
 
 
 def _history(bank: Decimal | None, by_day: dict[date, Decimal]) -> tuple[BankPoint, ...]:

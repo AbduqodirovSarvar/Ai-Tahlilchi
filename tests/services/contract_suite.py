@@ -715,6 +715,26 @@ class SignalContract:
         assert await services.signals.get_signals(OTHER_USER, ids) == ()
         assert await services.signals.get_signals(user_id, []) == ()
 
+    async def test_cards_carry_the_catalog_ids_of_their_teams_and_league(
+        self, services: Services, user_id: int
+    ) -> None:
+        """v1.7: the follow buttons need no name search - the ids are the catalog's own."""
+        signals = (await analyze_week(services, user_id)).signals[:3]
+        assert signals
+
+        for signal in signals:
+            assert signal.home_team_id and signal.away_team_id and signal.league_id
+            assert signal.home_team_id != signal.away_team_id
+            for team_id, name in (
+                (signal.home_team_id, signal.home_team),
+                (signal.away_team_id, signal.away_team),
+            ):
+                found = await services.catalog.search_teams(name, sport=signal.sport)
+                assert team_id in {team.team_id for team in found}
+            leagues = await services.catalog.list_leagues(signal.sport)
+            assert signal.league_id in {league.league_id for league in leagues}
+            assert signal.league in {x.name for x in leagues if x.league_id == signal.league_id}
+
     async def test_foreign_signals_are_invisible(self, services: Services, user_id: int) -> None:
         signal = (await analyze_week(services, user_id)).signals[0]
         with pytest.raises(NotFoundError):

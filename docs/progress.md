@@ -89,16 +89,16 @@
 - [x] F7.1 Maxsus tahlil: jamoa/o'yin qidiruvi (lotin/kirill, noaniq), `/tahlil A - B`, oddiy matn, jamoaning yaqin 3 o'yini, checkbox tanlov, `include_no_value` natijasi (barcha bozorlar, "Value topilmadi") ([ADR 0012](adr/0012-t5-bot-features.md)) (bot-engineer)
 - [x] F7.2 Batafsil karta: forma, statistika/xG, H2H, jarohatlar, top-3 hisob, bozorlar jadvali, koeffitsient harakati, kartaga qaytish
 - [x] F7.3 Sevimlilar: ro'yxat, `/kuzat`, jamoa/liga qo'shish, kartadagi tugma, har element uchun bildirishnoma tugmalari (tarkib, koeffitsient, natija). Yuborish tomoni T4 da mavjud
-- [x] F7.4 Shablonlar: ro'yxat, wizardda ishga tushirish, jadval tahrirlash UI, o'chirish. **Jadval bo'yicha avtomatik ishga tushirish pipeline'da hali yo'q** (hisobotda so'ralgan)
-- [x] F7.5 Mening stavkalarim va bank: umumiy ko'rinish, ochiq/yopilgan ro'yxat, qo'lda natija va cashout, bank grafigi (PNG), zarar limiti tasdig'i, `/bank`. "Limitda yangi signal yubormaslik" pipeline'da hali yo'q
+- [x] F7.4 Shablonlar: ro'yxat, wizardda ishga tushirish, jadval tahrirlash UI, o'chirish. Jadval bo'yicha avtomatik ishga tushirish pipeline'da: `template-tick`, foydalanuvchi mintaqasida kuniga bir marta, tinch soat, qayta urinish, shablon nomi bilan sarlavha (T5 pipeline, [ADR 0015](adr/0015-feedback-loop-pipeline.md)); botda sarlavhani ko'rsatish keyingi bot vazifasi
+- [x] F7.5 Mening stavkalarim va bank: umumiy ko'rinish, ochiq/yopilgan ro'yxat, qo'lda natija va cashout, bank grafigi (PNG), zarar limiti tasdig'i, `/bank`. Limitda yangi signal yubormaslik pipeline'da bajarildi (kunlik xabar + shablonlar: kuniga bitta "Zarar limitiga yetildi" xabari, qo'lda tahlilda banner; T5 pipeline, [ADR 0015](adr/0015-feedback-loop-pipeline.md)); botda xabar/banner matni keyingi bot vazifasi
 - [x] F7.6 Hisobot va eksport: davrlar (7/30/hammasi/o'zim), kesimlar, kalibratsiya jadvali, grafik PNG, `/eksport` (signals.csv + bets.csv, shartnoma v1.6)
 - [x] F7.7 Retro-tahlil: Kecha / O'tgan hafta tugmalari va kalit so'zlari, o'tish ulushi, 90/31 kun qoidalari xabari
 - [x] F7.8 Ekspress tuzuvchi: `/ekspress` va bugungi signallar ostidagi tugma, `ExpressService` (shartnoma v1.6), 34% ogohlantirishi
-- [ ] F8.3 Post-mortem
-- [ ] F8.4 Saboqlar
+- [x] F8.3 Post-mortem: `pipeline/postmortem.py` (kunlik `feedback` job, bir tanlov — bitta chaqiruv, N/run byudjet, LLM yo'q bo'lsa keyinga, idempotent), prompt `postmortem.v2` (T5 pipeline; [ADR 0015](adr/0015-feedback-loop-pipeline.md))
+- [x] F8.4 Saboqlar: `pipeline/lessons.py` (post-mortemlardan qayta qurish, ≥ 2 turli o'yin bilan `active`, 90 kunda `expired`, shablon matn, haftalik `lessons` job) (T5 pipeline; ADR 0015)
 - [x] F8.5 `segment_stats` (T5: `models/segments.py`, `pipeline/learning.py`, Alembic 0008, ADR 0013). T5 fix: 99.5% oraliq + BH FDR + ketma-ket 2 run, sinov davri oynasi, `LEARNING_MODE=shadow` standart, Alembic 0009 (ADR 0013 qo'shimchasi)
 - [x] F8.6 Kalibratsiya (T5: `models/calibration.py`, `pipeline/overlay.py`, ADR 0013). T5 fix: 0.995 + ketma-ket 2 run, push bozorlari chiqarilgan, rollback muzlatish va STALE, `passed_gate`, retro xom model
-- [ ] F8.7 Promptga "Tajriba konteksti"
+- [x] F8.7 Promptga "Tajriba konteksti": `pipeline/experience.py` (segment statistikasi, ≤ 5 saboq, ≤ 3 izoh, har sharh paketi uchun), nomzodlarga forma (`pipeline/form.py`); jarohatlar bazada yo'q — `absences` bo'sh (T5 pipeline; ADR 0015)
 - [x] F9.1 VPS xavfsizligi: `deploy/bootstrap.sh` (kalit-faqat SSH, ufw, fail2ban, unattended-upgrades, `--dry-run`, shellcheck toza). Serverda bajarish foydalanuvchida ([RUNBOOK 3.2](../RUNBOOK.md))
 - [x] F9.2 Docker va `/opt/ai-tahlilchi`: bootstrap (Docker, papkalar, bo'sh `.env` chmod 600), `restart: unless-stopped` + entrypoint (migratsiya oldin, SIGTERM, exit 2 kechiktirish), `bin/dc`; image Docker'da qurildi va smoke-test qilindi ([ADR 0014](adr/0014-deploy-and-ops.md))
 - [x] F9.3 Deploy workflow (GHCR + SSH + Alembic): `deploy.yml` (teg/qo'lda; secret yo'q bo'lsa o'tkazib yuboriladi), `remote-deploy.sh` (zaxira, pull, up, healthy kutish, avtomatik rollback), `actionlint` toza. Jonli ishga tushirish GitHub secret'lari va serverdan keyin
@@ -109,7 +109,7 @@
 
 ## T6 — Yakuniy integratsiya
 - [ ] F8.1 Natijalarni qo'lda belgilash
-- [ ] F8.2 "Kecha yakuni" bloki
+- [x] F8.2 "Kecha yakuni" bloki: ma'lumot (`DailyDigest.yesterday`: mahalliy kun, retro/begona hisobga olinmaydi, signal/✅/❌/void/kutilmoqda/unit/CLV) tekshirildi va chegaraviy testlar bilan qotirildi (T5 pipeline); bot bloki F6.8 da mavjud
 - [ ] F8.8 `/ozgarishlar` jurnali
 - [ ] To'liq e2e va qabul mezonlarini qayta tekshirish (test-engineer)
 - [ ] Butun kod bazasi sharhi (code-reviewer)
