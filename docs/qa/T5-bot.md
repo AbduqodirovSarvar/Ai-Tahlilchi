@@ -131,3 +131,15 @@ Sekin testlar `@pytest.mark.slow` bilan belgilangan (haqiqiy servislar).
 ## Tekshiruvlar
 
 Natijalar pastda "Darvoza" bo'limida.
+
+## Darvoza (main bilan birlashtirilgandan keyin)
+
+| Buyruq | Natija |
+|---|---|
+| `python -m uv run pytest` | `3459 passed, 8 skipped, 23 xfailed` (1406 s), umumiy qamrov **98.33%** (`fail_under=85`) |
+| `python -m uv run ruff check .` | `All checks passed!` |
+| `python -m uv run ruff format --check .` | `401 files already formatted` |
+| `python -m uv run mypy src` | `Success: no issues found in 185 source files` |
+| `python -m uv run lint-imports` | `Contracts: 6 kept, 0 broken.` |
+
+23 xfail — hammasi shu hisobotdagi topilmalar (F-1, F-2, F-3, F-4, F-5, F-6, F-7, F-8, F-9, F-10); tuzatilganda strict XPASS bo'lib yiqiladi. Jonli Telegram'da qo'lda sinov bajarilmadi (token yo'q).
