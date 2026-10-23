@@ -33,7 +33,6 @@ from app.services.interfaces import (
 from tests.pipeline.doubles import Crash, RecordingDelivery, draft_query, ids
 from tests.pipeline.harness import Env
 
-UTC_ = UTC
 TASHKENT = ZoneInfo("Asia/Tashkent")
 NEW_YORK = ZoneInfo("America/New_York")
 AUCKLAND = ZoneInfo("Pacific/Auckland")
