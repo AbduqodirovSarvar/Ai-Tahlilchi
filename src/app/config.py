@@ -8,7 +8,7 @@ needs a secret asks for it via :meth:`Settings.require_secret`, which fails with
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, HttpUrl, SecretStr, TypeAdapter, ValidationError, field_validator
@@ -16,15 +16,15 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.errors import ConfigurationError
 
+JOBS_DB_NAME: Final = "jobs.db"
+
 type AppEnv = Literal["dev", "prod"]
 type ServicesBackend = Literal["fake", "real"]
 type HandicapConventionName = Literal["home_line", "own_line"]
 type StakingModeName = Literal["flat", "kelly"]
 type LearningModeName = Literal["off", "shadow", "apply"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-type SecretName = Literal[
-    "telegram_bot_token", "api_football_key", "odds_api_key", "gemini_api_key"
-]
+type SecretName = Literal["telegram_bot_token", "api_football_key", "gemini_api_key"]
 
 _HTTP_URL: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
 
@@ -48,7 +48,6 @@ class Settings(BaseSettings):
     admin_ids: Annotated[frozenset[int], NoDecode] = frozenset()
 
     api_football_key: SecretStr | None = None
-    odds_api_key: SecretStr | None = None
     gemini_api_key: SecretStr | None = None
     gemini_model: str = Field(default="gemini-flash-latest", min_length=1)
 
@@ -57,7 +56,9 @@ class Settings(BaseSettings):
     display_tz: str = "Asia/Tashkent"
     db_path: Path = Path("data/app.db")
     # How API-Football writes Asian handicap numbers (see docs/api_probe_report.md); set it
-    # before the first real odds are stored, stored lines cannot be re-read afterwards.
+    # from the F0 probe BEFORE the first real odds are stored and never change it afterwards:
+    # stored lines cannot be re-read. APP_SERVICES=real refuses to start unless it is set
+    # explicitly (see `require_explicit_handicap_convention`).
     handicap_convention: HandicapConventionName = "home_line"
     # Which implementation of the service contract the bot talks to: the in-memory sample
     # data ("fake", the default until API keys exist) or the pipeline-backed one ("real").
@@ -73,6 +74,13 @@ class Settings(BaseSettings):
     learning_manual_hold_days: int = Field(default=30, ge=0, le=365)
     # The ping URL's path is the credential of the check, so it is a secret (never logged).
     healthchecks_url: SecretStr | None = None
+    # Baked into the image by the build (`--build-arg APP_VERSION=... GIT_SHA=...`); shown in the
+    # startup log and /holat so "which build is running" is never a guess.
+    app_version: str | None = None
+    git_sha: str = "unknown"
+    # The in-app watchdog restarts the process (exit code 3, Docker restarts it) when the
+    # scheduler's tick has not run for this many minutes; the scheduler is stuck or dead.
+    watchdog_stall_minutes: float = Field(default=10.0, ge=1.0, le=1440.0)
     # Outbound HTTPS behind a TLS-intercepting corporate proxy (src/app/tls.py): either trust the
     # OS certificate store, or a PEM file with the proxy's CA. Both unset = library defaults.
     tls_ca_bundle: Path | None = None
@@ -128,6 +136,15 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def jobs_db_path(self) -> Path:
+        """The scheduler's own SQLite file, next to the application database.
+
+        Separate because APScheduler stores pickles in it: it is rebuilt on every start, kept
+        out of backups, and never restored from someone else's data.
+        """
+        return self.db_path.with_name(JOBS_DB_NAME)
+
+    @property
     def display_timezone(self) -> ZoneInfo:
         """Time zone used only when presenting times to users (storage is always UTC)."""
         return ZoneInfo(self.display_tz)
@@ -152,6 +169,25 @@ class Settings(BaseSettings):
             msg = f"{name.upper()} is not set; add it to .env (see .env.example)"
             raise ConfigurationError(msg)
         return secret.get_secret_value()
+
+    def require_explicit_handicap_convention(self) -> None:
+        """Refuse real services while ``HANDICAP_CONVENTION`` was never chosen on purpose.
+
+        The default is only a guess; odds stored under a wrong convention are silently wrong
+        for good, so the operator must have looked at the F0 probe result and said so (setting
+        ``HANDICAP_CONVENTION=home_line`` explicitly is the escape hatch).
+
+        Raises:
+            ConfigurationError: the variable is absent from the environment and ``.env``.
+        """
+        if "handicap_convention" not in self.model_fields_set:
+            msg = (
+                "HANDICAP_CONVENTION is not set; set it from the F0 probe result "
+                "(home_line or own_line) before the first real odds are stored, "
+                "and do not change it afterwards (RUNBOOK.md). "
+                "Set HANDICAP_CONVENTION=home_line explicitly to accept the default."
+            )
+            raise ConfigurationError(msg)
 
     def require_admin_ids(self) -> frozenset[int]:
         """Return the bot whitelist, refusing to run a bot that nobody may use.

@@ -6,10 +6,12 @@ scheduler is alive (with the real services) and the disk has room. Exit code 0 h
 
 Scheduler liveness without touching application code: APScheduler stores each job's
 ``next_run_time`` in the job store after every run, and the ``daily-tick`` job fires every
-minute. A live scheduler therefore always has that time in the future or just behind; a
-stuck event loop or a dead scheduler leaves it further and further in the past. Bot polling
-runs in the same process and event loop, so a hung loop fails this check too, and a crashed
-polling task ends the process, which Docker restarts.
+minute (in the scheduler's own ``jobs.db``). A live scheduler therefore always has that time
+in the future or just behind; a stuck event loop or a dead scheduler leaves it further and
+further in the past. Bot polling runs in the same process and event loop, so a hung loop
+fails this check too, and a crashed polling task ends the process, which Docker restarts. The
+in-app watchdog (:mod:`app.ops.watchdog`) additionally restarts a process whose scheduler
+stopped ticking.
 
 The probe only reads (``mode=ro``) and imports nothing heavy, so it is cheap to run every
 minute and cannot compete with the application for the write lock.
@@ -28,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-from app.config import get_settings
+from app.config import JOBS_DB_NAME, get_settings
 from app.errors import ConfigurationError
 
 EXIT_HEALTHY: Final = 0
@@ -124,19 +126,33 @@ def last_runs(path: Path) -> dict[str, str]:
     return {str(subject): f"{status} {done_at}" for subject, status, done_at in rows}
 
 
+@dataclass(frozen=True, slots=True)
+class Limits:
+    """Thresholds of the probe."""
+
+    max_tick_lag_minutes: float = DEFAULT_MAX_TICK_LAG_MINUTES
+    min_free_mb: int = DEFAULT_MIN_FREE_MB
+
+
 def run_checks(
     path: Path,
     *,
     expect_scheduler: bool,
     now: datetime,
-    max_lag_minutes: float = DEFAULT_MAX_TICK_LAG_MINUTES,
-    min_free_mb: int = DEFAULT_MIN_FREE_MB,
+    jobs_path: Path | None = None,
+    limits: Limits = Limits(),  # noqa: B008 - frozen, shared on purpose
 ) -> list[CheckResult]:
     """All checks in order; the scheduler is checked only when the real services run."""
     results = [check_config_marker(), check_database(path)]
     if results[1].ok and expect_scheduler:
-        results.append(check_scheduler(path, now=now, max_lag_minutes=max_lag_minutes))
-    results.append(check_disk(path, min_free_mb=min_free_mb))
+        results.append(
+            check_scheduler(
+                jobs_path or path.with_name(JOBS_DB_NAME),
+                now=now,
+                max_lag_minutes=limits.max_tick_lag_minutes,
+            )
+        )
+    results.append(check_disk(path, min_free_mb=limits.min_free_mb))
     return results
 
 
@@ -159,8 +175,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings.db_path,
         expect_scheduler=settings.app_services == "real",
         now=datetime.now(UTC),
-        max_lag_minutes=arguments.max_tick_lag_minutes,
-        min_free_mb=arguments.min_free_mb,
+        jobs_path=settings.jobs_db_path,
+        limits=Limits(arguments.max_tick_lag_minutes, arguments.min_free_mb),
     )
     healthy = all(result.ok for result in results)
     report = {

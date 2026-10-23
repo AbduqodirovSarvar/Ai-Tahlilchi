@@ -226,7 +226,11 @@ def forbidden_system_tmp(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail loudly if a database copy would be placed in the system temp directory (tmpfs)."""
     original = tempfile.mkdtemp
 
-    def guarded(suffix: str | None = None, prefix: str | None = None, dir: str | None = None) -> str:  # noqa: A002
+    def guarded(
+        suffix: str | None = None,
+        prefix: str | None = None,
+        dir: str | None = None,  # noqa: A002 - mirrors tempfile.mkdtemp
+    ) -> str:
         if dir is None:
             msg = "temporary directory requested without dir=: would land in /tmp"
             raise AssertionError(msg)
@@ -235,9 +239,8 @@ def forbidden_system_tmp(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tempfile, "mkdtemp", guarded)
 
 
-def test_backup_scratch_space_is_next_to_the_database(
-    tmp_path: Path, forbidden_system_tmp: None
-) -> None:
+@pytest.mark.usefixtures("forbidden_system_tmp")
+def test_backup_scratch_space_is_next_to_the_database(tmp_path: Path) -> None:
     (tmp_path / "data").mkdir()
     source = make_db(tmp_path / "data" / "app.db")
     archive = backup_bytes(source)
@@ -245,9 +248,8 @@ def test_backup_scratch_space_is_next_to_the_database(
     assert not [p for p in source.parent.iterdir() if p.name.startswith(".backup-")]
 
 
-def test_verify_scratch_space_is_the_given_work_dir(
-    tmp_path: Path, forbidden_system_tmp: None
-) -> None:
+@pytest.mark.usefixtures("forbidden_system_tmp")
+def test_verify_scratch_space_is_the_given_work_dir(tmp_path: Path) -> None:
     archive = backup_bytes(make_db(tmp_path / "app.db"))
     work_dir = tmp_path / "volume" / "scratch"
     assert "abc123" in verify(io.BytesIO(archive), work_dir)

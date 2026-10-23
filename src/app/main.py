@@ -4,10 +4,11 @@ Composition root: loads settings, configures logging, validates what the bot nee
 long polling until SIGINT/SIGTERM (aiogram stops polling and closes the HTTP session).
 
 Exit codes: 0 normal stop, 1 unexpected error, 2 configuration error (fix ``.env``; retrying
-will not help).
+will not help), 3 the watchdog found the scheduler stalled (a restart is the cure).
 """
 
 import asyncio
+import os
 import ssl
 import sys
 from typing import Final
@@ -26,6 +27,8 @@ from app.config import Settings, get_settings
 from app.errors import ConfigurationError
 from app.logging import configure_logging, get_logger
 from app.ops.heartbeat import Heartbeat
+from app.ops.version import get_version
+from app.ops.watchdog import EXIT_STALLED, SchedulerStalledError, Watchdog
 from app.pipeline.runtime import open_runtime
 from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
@@ -39,6 +42,7 @@ logger = get_logger("app.main")
 EXIT_OK: Final = 0
 EXIT_UNEXPECTED_ERROR: Final = 1
 EXIT_CONFIGURATION_ERROR: Final = 2
+SECONDS_PER_MINUTE: Final = 60
 
 
 class TrustedAiohttpSession(AiohttpSession):
@@ -127,10 +131,17 @@ async def poll(
 async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) -> None:
     """Bot over the pipeline-backed services, with the scheduler running beside it.
 
-    The scheduler is stopped (running jobs finish) and the database closed on every exit.
-    Messages the pipeline sends on its own go through the :class:`TelegramNotifier`, which is
-    bound to the bot when the dispatcher starts (the services need it before the bot exists).
+    The scheduler starts in the dispatcher's startup phase, after the bot is connected and the
+    :class:`TelegramNotifier` is bound to it: a job that fires at once (a missed run inside its
+    grace time) can then deliver its messages instead of finding no bot. It is stopped (running
+    jobs finish) and the database closed on every exit. The watchdog turns a stalled scheduler
+    into a restart (exit code 3).
+
+    Raises:
+        ConfigurationError: ``HANDICAP_CONVENTION`` was never set explicitly.
+        SchedulerStalledError: the watchdog found the scheduler no longer ticking.
     """
+    settings.require_explicit_handicap_convention()
     async with open_runtime(settings) as runtime:
         notifier = TelegramNotifier(admin_ids=admin_ids, default_zone=settings.display_timezone)
         system = create_real_services(runtime.ctx, notifier=notifier)
@@ -138,21 +149,39 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
         logger.info("services_backend", backend="real", sample_data=False)
         scheduler = PipelineScheduler(
             PipelineJobs(runtime.ctx, system.delivery, heartbeat=Heartbeat.from_settings(settings)),
-            db_path=settings.db_path,
+            db_path=settings.jobs_db_path,
             timezone=settings.display_timezone,
         )
-        scheduler.start()
+        dispatcher = build_dispatcher(
+            admin_ids,
+            system.services,
+            storage=SqliteStorage(fsm_db_path(settings.db_path)),
+        )
+        dispatcher["backend"] = "real"
+        watchdog = Watchdog(
+            scheduler.seconds_since_tick,
+            stall_after=settings.watchdog_stall_minutes * SECONDS_PER_MINUTE,
+            request_stop=dispatcher.stop_polling,
+            force_exit=lambda: os._exit(EXIT_STALLED),  # last resort when the orderly stop hangs
+        )
+        watchdog_task: asyncio.Task[None] | None = None
+
+        async def start_scheduler() -> None:
+            nonlocal watchdog_task
+            scheduler.start()
+            watchdog_task = asyncio.create_task(watchdog.run(), name="watchdog")
+
+        dispatcher.startup.register(notifier.on_startup)
+        dispatcher.startup.register(start_scheduler)
         try:
-            dispatcher = build_dispatcher(
-                admin_ids,
-                system.services,
-                storage=SqliteStorage(fsm_db_path(settings.db_path)),
-            )
-            dispatcher["backend"] = "real"
-            dispatcher.startup.register(notifier.on_startup)
             await poll(dispatcher, token, admin_ids, settings)
         finally:
+            if watchdog_task is not None and not watchdog.stalled:
+                watchdog_task.cancel()
             await scheduler.stop()
+        if watchdog.stalled:
+            msg = "the scheduler stopped ticking; restarting the process"
+            raise SchedulerStalledError(msg)
 
 
 def main() -> int:
@@ -166,7 +195,14 @@ def main() -> int:
             app_env=settings.app_env,
             secret_values=settings.secret_values(),
         )
+        build = get_version(settings)
+        logger.info(
+            "app_started", version=build.version, sha=build.git_sha, services=settings.app_services
+        )
         asyncio.run(run_bot(settings))
+    except SchedulerStalledError as exc:
+        logger.critical("scheduler_stalled_exit", reason=str(exc))
+        return EXIT_STALLED
     except ConfigurationError as exc:
         logger.critical("startup_failed", reason=str(exc))
         return EXIT_CONFIGURATION_ERROR
