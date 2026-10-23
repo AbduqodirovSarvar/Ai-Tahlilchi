@@ -239,7 +239,12 @@ async def store_picks(
         _to_review_candidate(pick, request.user_id, forms.get(pick.fixture.id, ()))
         for pick in reviewable
     ]
-    reviews = await review_safely(ctx.reviewer, to_review, limit_seconds=ctx.config.review_timeout)
+    reviews = await review_safely(
+        ctx.reviewer,
+        to_review,
+        limit_seconds=ctx.config.review_timeout,
+        total_seconds=ctx.config.review_total_timeout,
+    )
     adjusted, rejected = apply_reviews(picks, reviews, request)
     cards: list[SignalCard] = []
     async with ctx.sessions.begin() as session:

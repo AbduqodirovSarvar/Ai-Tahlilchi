@@ -10,7 +10,7 @@ from app.domain import BOOKMAKER_1XBET, BOOKMAKER_PINNACLE
 from app.errors import ConfigurationError
 from app.models import DEFAULT_MODEL_WEIGHT, DEFAULT_XI_PER_DAY
 from app.models.confidence import MIN_TEAM_MATCHES
-from app.pipeline.review import DEFAULT_REVIEW_TIMEOUT
+from app.pipeline.review import DEFAULT_REVIEW_TIMEOUT, DEFAULT_REVIEW_TOTAL_TIMEOUT
 
 HISTORY_DAYS: Final = 1100
 """Model fit window (the backtest's choice, ADR 0005)."""
@@ -69,6 +69,9 @@ class PipelineConfig:
     """A loss older than this since settlement is not explained any more (lessons age out)."""
     odds_move_threshold: float = 0.10
     review_timeout: float = DEFAULT_REVIEW_TIMEOUT
+    """Seconds one LLM review batch may take (T6-F-6)."""
+    review_total_timeout: float = DEFAULT_REVIEW_TOTAL_TIMEOUT
+    """Seconds all the review batches of one analysis may take together."""
     history_sources: tuple[str, ...] = ("api-football", "football-data")
     """Which stored copy of the same match the model fit prefers."""
 
