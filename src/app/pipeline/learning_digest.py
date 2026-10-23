@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Final, Protocol, runtime_checkable
 
-from app.db.repo import LearningChange, list_learning_changes
+from app.db.repo import LearningChange, list_learning_changes, user_ids
 from app.logging import get_logger
 from app.pipeline.alerts import fail_key
 from app.pipeline.context import PipelineContext
@@ -25,7 +25,6 @@ from app.pipeline.learning import week_start
 from app.pipeline.learning_settings import LearningMode
 from app.pipeline.ledger import LedgerKey
 from app.pipeline.profile import load_profile
-from app.pipeline.queries import user_ids
 
 logger = get_logger(__name__)
 

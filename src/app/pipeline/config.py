@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Final
 
-from app.domain import BOOKMAKER_1XBET
+from app.domain import BOOKMAKER_1XBET, BOOKMAKER_PINNACLE
 from app.errors import ConfigurationError
 from app.models import DEFAULT_MODEL_WEIGHT, DEFAULT_XI_PER_DAY
 from app.models.confidence import MIN_TEAM_MATCHES
@@ -27,8 +27,18 @@ class StakingMode(StrEnum):
 class PipelineConfig:
     """Configuration of the analysis, refresh and notification jobs."""
 
+    @property
+    def ingest_bookmakers(self) -> frozenset[str]:
+        """Bookmakers whose odds are fetched and stored (any other quote only grows the database).
+
+        The sharp reference, the user's own bookmaker and the configured extras.
+        """
+        return frozenset({BOOKMAKER_PINNACLE, self.bet_bookmaker, *self.extra_bookmakers})
+
     bet_bookmaker: str = BOOKMAKER_1XBET
     """Whose price the user bets at (decision #10); fair probabilities come from Pinnacle."""
+    extra_bookmakers: frozenset[str] = frozenset()
+    """Bookmakers stored besides Pinnacle and ``bet_bookmaker`` (default none: see ADR 0018)."""
     model_weight: float = DEFAULT_MODEL_WEIGHT
     xi: float = DEFAULT_XI_PER_DAY
     history_days: int = HISTORY_DAYS

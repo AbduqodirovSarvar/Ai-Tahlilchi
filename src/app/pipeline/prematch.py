@@ -32,7 +32,9 @@ from app.db.repo import (
     claim_due_recalcs,
     complete_recalc,
     get_signal,
+    league_refs,
     reschedule_recalc,
+    team_refs,
 )
 from app.domain import OddsKind
 from app.logging import get_logger
@@ -45,7 +47,6 @@ from app.pipeline.ledger import STAMP_DAY, LedgerKey
 from app.pipeline.outbox import deliver_watch_event
 from app.pipeline.profile import UserProfile, load_profile
 from app.pipeline.provider import AUTOMATIC
-from app.pipeline.queries import league_refs, team_refs
 from app.pipeline.recalc import RecalcOptions, RecalcResult, RecalcVerdict, recalc_signals
 
 logger = get_logger(__name__)

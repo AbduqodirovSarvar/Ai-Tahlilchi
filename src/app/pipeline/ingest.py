@@ -14,14 +14,13 @@ from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Final
 
-from app.db.repo import upsert_live
+from app.db.repo import league_teams, upsert_live
 from app.domain import ExternalRef, FixtureResult, OddsKind, Sport
 from app.logging import get_logger
 from app.pipeline.context import PipelineContext
 from app.pipeline.errors import PipelineError, ProviderUnavailableError
 from app.pipeline.leagues import HISTORY_SOURCE
 from app.pipeline.provider import Purpose, SportProvider
-from app.pipeline.queries import league_teams
 from app.sports.base import FixtureQuery
 
 logger = get_logger(__name__)
