@@ -7,7 +7,6 @@ journals but must change nothing) and in apply mode (a losing segment is really 
 import random
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 
 import pytest
 
@@ -246,4 +245,3 @@ async def test_the_weekly_learning_job_is_wrapped_recorded_and_idempotent(
         await jobs(w).run(JOB_LEARNING)  # same week: a no-op
         runs = await w.ctx.ledger.last_runs()
         assert runs[JOB_LEARNING].ok
-        assert Decimal(0) == Decimal(0)

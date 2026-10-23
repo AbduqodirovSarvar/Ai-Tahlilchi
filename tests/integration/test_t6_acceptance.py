@@ -6,6 +6,7 @@ scripted provider, hand-checked elsewhere).
 """
 
 import asyncio
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -167,12 +168,12 @@ def run_health(
     db_path: Path, *extra: str, services: str = "fake", workdir: Path
 ) -> tuple[int, str]:
     env = {
-        "PATH": "",
+        **os.environ,  # the suite fixture already removed every app setting from it
         "DB_PATH": str(db_path),
         "APP_SERVICES": services,
-        "SYSTEMROOT": "C:/Windows",
-        "TEMP": str(workdir),
+        "TEMP": str(workdir),  # the config-error marker lives in the temp dir
         "TMP": str(workdir),
+        "TMPDIR": str(workdir),
     }
     done = subprocess.run(  # noqa: S603 - fixed argv, no shell
         [sys.executable, "-I", "-m", "app.ops.healthcheck", *extra],
@@ -186,7 +187,6 @@ def run_health(
     return done.returncode, done.stdout
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="env scrubbing recipe tuned for Windows")
 def test_the_health_check_states_on_a_lived_database(
     lived: tuple[Week, Path], tmp_path: Path
 ) -> None:

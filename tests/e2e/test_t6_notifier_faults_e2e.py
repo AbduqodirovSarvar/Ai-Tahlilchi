@@ -250,7 +250,6 @@ async def test_a_scheduled_update_failure_is_retried_and_never_doubled(
         for m in updates:
             per_signal[m.text.splitlines()[0]] = per_signal.get(m.text.splitlines()[0], 0) + 1
         assert max(per_signal.values(), default=0) <= 2  # 24h and pre-match kinds, never doubled
-        await w.ctx.ledger.last_runs()
         await jobs(w).run(JOB_RECALC_TICK)
 
 

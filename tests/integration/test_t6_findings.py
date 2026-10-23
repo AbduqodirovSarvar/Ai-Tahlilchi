@@ -89,3 +89,19 @@ async def test_the_bets_export_costs_a_constant_number_of_queries(week: Week) ->
 async def test_the_findings_fixture_is_alive(week: Week) -> None:
     placed = await week.services.bets.place_bet(USER, BetDraft(signal_id=1))
     assert placed.stake == Decimal(10)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="T6 finding (hardening): aiogram's FSM middleware runs BEFORE the whitelist, so every "
+    "distinct stranger leaves a lock in SimpleEventIsolation._locks for the life of the process "
+    "(src/app/bot/dispatcher.py build_dispatcher: whitelist is registered after the FSM one)",
+)
+async def test_strangers_leave_nothing_behind_in_the_process(week: Week) -> None:
+    from tests.e2e.bot_client import Client  # noqa: PLC0415
+
+    isolation = week.dispatcher.fsm.events_isolation
+    before = len(getattr(isolation, "_locks", {}))
+    for stranger in range(3_000, 3_060):
+        await Client(week.dispatcher, week.bot, week.session, stranger).send("/start")
+    assert len(getattr(isolation, "_locks", {})) == before

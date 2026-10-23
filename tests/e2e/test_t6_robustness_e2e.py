@@ -19,9 +19,9 @@ from sqlalchemy.exc import OperationalError
 
 from app.bot import callbacks, texts
 from app.bot.callbacks import CardCb
-from app.services.interfaces import BetDraft, DateSpec, Services
+from app.services.interfaces import DateSpec, Services
 from tests.e2e.bot_client import Client, answers
-from tests.e2e.t6_world import PERMISSIVE, USER, at, jobs, open_week, tick
+from tests.e2e.t6_world import PERMISSIVE, USER, jobs, open_week, tick
 
 PREFIXES = tuple(
     sorted(
@@ -271,12 +271,13 @@ async def test_a_locked_database_during_a_bet_tap_gives_a_message_and_a_retry_wo
         finally:
             blocker.execute("ROLLBACK")
             blocker.close()
-        assert answers(locked) or locked  # the tap was answered or a message was shown
-        assert not unexpected([m for m in locked if not isinstance(m, AnswerCallbackQuery)]) or True
+        assert answers(locked)  # the spinner stops ...
+        seen = [m.text for m in locked if isinstance(m, SendMessage | EditMessageText)]
+        seen += [a.text or "" for a in answers(locked)]
+        assert any("xatolik" in t or "Kutilmagan" in t or "qayta urinib" in t for t in seen), seen
         assert await reborn.services.bets.list_bets(USER) == ()  # nothing half-written
         await client.press_data(confirm_data, confirm_id)  # the user taps again
         assert len(await reborn.services.bets.list_bets(USER)) == 1
-        _ = BetDraft, at  # (imports used by sibling tests)
 
 
 async def test_a_locked_fsm_database_does_not_kill_the_bot(
