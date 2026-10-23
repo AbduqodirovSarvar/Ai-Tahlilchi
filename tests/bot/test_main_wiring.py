@@ -39,6 +39,7 @@ async def test_run_real_wires_the_telegram_notifier(
         db_path=tmp_path / "wired.db",
         app_services="real",
         telegram_bot_token="42:TEST",
+        handicap_convention="home_line",
         admin_ids="1",
     )
 

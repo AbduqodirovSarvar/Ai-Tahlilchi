@@ -23,6 +23,7 @@ DEPLOY = ROOT / ".github" / "workflows" / "deploy.yml"
 BASH_SCRIPTS = [
     ROOT / "scripts" / "ops" / "backup.sh",
     ROOT / "scripts" / "ops" / "restore.sh",
+    ROOT / "scripts" / "ops" / "clean_worktrees.sh",
     ROOT / "deploy" / "bootstrap.sh",
     ROOT / "deploy" / "remote-deploy.sh",
     ROOT / "deploy" / "dc.sh",
@@ -88,13 +89,66 @@ def test_deploy_is_a_noop_without_secrets() -> None:
     gate = jobs["gate"]
     assert "if" not in gate, "the gate must always run so the workflow ends green"
     gate_script = "\n".join(step.get("run", "") for step in gate["steps"])
-    for secret in ("SSH_HOST", "SSH_USER", "SSH_KEY"):
+    for secret in ("SSH_HOST", "SSH_USER", "SSH_KNOWN_HOSTS"):
         assert f"secrets.{secret}" in yaml.safe_dump(gate)
         assert f'-n "${secret}"' in gate_script
     assert "exit 1" not in gate_script
-    for name in ("image", "deploy"):
+    for name in ("ci", "image", "deploy"):
         assert "needs.gate.outputs.enabled == 'true'" in jobs[name]["if"]
         assert "gate" in jobs[name]["needs"]
+
+
+def test_deploy_has_no_trust_on_first_use_and_validates_what_enters_the_remote_command() -> None:
+    text = DEPLOY.read_text(encoding="utf-8")
+    assert "ssh-keyscan" not in text
+    assert "^[A-Za-z0-9._:/@-]+$" in text
+    steps = load(DEPLOY)["jobs"]["deploy"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.index("Validate inputs") < names.index("Prepare SSH")
+    assert names.index("Validate inputs") < names.index(
+        "Deploy (backup, switch, health wait, automatic rollback)"
+    )
+
+
+def test_image_is_built_and_deployed_only_after_ci_is_green_for_the_commit() -> None:
+    jobs = load(DEPLOY)["jobs"]
+    assert "ci" in jobs["image"]["needs"]
+    assert "ci" in jobs["deploy"]["needs"]
+    assert jobs["ci"]["permissions"]["checks"] == "read"
+    required = [
+        line.strip()
+        for line in jobs["ci"]["steps"][1]["env"]["REQUIRED_CHECKS"].splitlines()
+        if line.strip()
+    ]
+    ci_names = {
+        job["name"] for job in load(ROOT / ".github" / "workflows" / "ci.yml")["jobs"].values()
+    }
+    assert required, "the list of required checks must not be empty"
+    assert set(required) == ci_names
+
+
+def test_image_receives_its_version_and_commit_as_build_arguments() -> None:
+    text = DEPLOY.read_text(encoding="utf-8")
+    assert "APP_VERSION=${{ steps.ref.outputs.version }}" in text
+    assert "GIT_SHA=${{ steps.ref.outputs.commit }}" in text
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG APP_VERSION" in dockerfile
+    assert "ARG GIT_SHA" in dockerfile
+    assert "APP_VERSION=${APP_VERSION}" in dockerfile
+
+
+def test_dependabot_covers_python_actions_and_docker_weekly() -> None:
+    config = load(ROOT / ".github" / "dependabot.yml")
+    updates = {entry["package-ecosystem"]: entry for entry in config["updates"]}
+    assert set(updates) == {"uv", "github-actions", "docker"}
+    assert all(entry["schedule"]["interval"] == "weekly" for entry in updates.values())
+
+
+def test_pip_audit_runs_weekly_and_opens_no_issues() -> None:
+    workflow = load(ROOT / ".github" / "workflows" / "audit.yml")
+    assert triggers(workflow)["schedule"][0]["cron"].split()[4] == "1"
+    assert workflow["permissions"] == {"contents": "read"}
+    assert "issues" not in yaml.safe_dump(workflow)
 
 
 def test_deploy_never_runs_twice_at_once_and_uses_a_protected_environment() -> None:
@@ -320,3 +374,13 @@ def test_backup_timer_is_persistent_and_runs_the_backup_script() -> None:
     service_section = unit("ai-tahlilchi-backup.service")["Service"]
     assert service_section["ExecStart"].endswith("backup.sh")
     assert service_section["Type"] == "oneshot"
+
+
+def test_templates_explain_the_handicap_convention_and_drop_the_dead_odds_key() -> None:
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "deploy" / "bootstrap.sh").read_text(encoding="utf-8")
+    for template in (example, bootstrap):
+        assert "HANDICAP_CONVENTION=home_line" in template
+        assert "ODDS_API_KEY" not in template
+        assert "never change it afterwards" in template.lower()
+    assert "WATCHDOG_STALL_MINUTES" in example

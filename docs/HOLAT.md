@@ -1,87 +1,72 @@
 # Loyiha holati — bajarilgan va qolgan ishlar
 
-> Holat sanasi: **2026-10-21** · `main`: `e378c40` · So'nggi teg: `v0.2.0` (`v0.3.0` T3 yopilganda qo'yiladi)
-> Batafsil vazifalar ro'yxati: [progress.md](progress.md) · Qarorlar: [decisions_log.md](decisions_log.md) · Ochiq masalalar: [ochiq_masalalar.md](ochiq_masalalar.md)
+> Holat sanasi: **2026-10-23** · So'nggi teg: `v0.6.0` · `pyproject` versiyasi: `0.6.1` (keyingi teg) · Joriy to'lqin: **T6** (yakuniy integratsiya, sharh tuzatishlari)
+> Batafsil vazifalar ro'yxati: [progress.md](progress.md) · Qarorlar: [decisions_log.md](decisions_log.md) · Ochiq masalalar: [ochiq_masalalar.md](ochiq_masalalar.md) · Server: [RUNBOOK.md](../RUNBOOK.md)
 
 ## Qisqacha
 
 | Ko'rsatkich | Qiymat |
 |---|---|
-| To'lqinlar | T1 ✅ · T2 ✅ · T3 ≈ 90% (data tuzatishlari qoldi) · T4 boshlangan · T5–T6 kutilmoqda |
-| Testlar (`main`) | **1687 passed**, 0 xfail |
-| Test qamrovi | ≈ 99% (umumiy), `app/models` ≈ 99.8% |
-| Sifat darvozalari | ruff, `mypy --strict`, import-linter (6 shartnoma), deptry, pip-audit, gitleaks — yashil |
-| Kod | `src/app/` (src layout), Python 3.13 |
+| To'lqinlar | T1 ✅ · T2 ✅ · T3 ✅ · T4 ✅ · T5 ✅ · **T6 jarayonda** (tuzatish raundlari va mustaqil QA) |
+| Teglar | `v0.1.0` … `v0.6.0` (har to'lqin yopilganda) |
+| Testlar | ≈ **3813** (`main`), 3859 (`wave/T6-fix-b`), 0 xfail; `slow` belgisi bilan ≈ 94 tasi ajratilgan (CI da alohida ish) |
+| Sifat darvozalari | ruff, `mypy --strict`, import-linter (6 shartnoma), deptry, pip-audit, gitleaks, qamrov (umumiy ≥ 85%, `models`/`pipeline` ≥ 90%): CI da majburiy |
+| Kod | `src/app/` (src layout), Python 3.13, aiogram 3, SQLAlchemy 2 (async) + SQLite |
+| Docker image | ≈ 768 MB (pandas va scikit-learn runtime'dan olib tashlangan), non-root, health probe, kod `3` bilan o'z-o'zini qayta ishga tushirish |
 | Agentlar modeli | Sonnet 5.5 (qaror #13) |
+| Serverda ishga tushirilganmi | **Yo'q.** Hamma narsa skript, workflow va testlar bilan tayyor; birinchi deploy foydalanuvchida ([RUNBOOK.md](../RUNBOOK.md)) |
 
 ---
 
 ## ✅ Bajarilgan ishlar
 
 ### T1 — Loyiha skeleti (`v0.1.0`)
-- Papka tuzilmasi, `uv`, `pyproject.toml`, Docker (non-root, multi-stage), docker-compose, GitHub Actions CI.
-- Konfiguratsiya: kalitlarsiz ishga tushadi, kalit kerak bo'lgan komponent aniq xato beradi.
-- Loglar: JSON, **maxfiy qiymatlar avtomatik yashiriladi** (token sizishi topilib tuzatilgan).
+- `uv`, `pyproject.toml`, Docker (multi-stage, non-root), docker-compose, GitHub Actions CI, pre-commit, kod sifati darvozalari.
+- Konfiguratsiya kalitlarsiz ishga tushadi; kalit kerak bo'lgan komponent aniq xato beradi. Loglar JSON, maxfiy qiymatlar yashiriladi.
 - Minimal bot: whitelist, faqat shaxsiy chat.
 
-### T2 — Asosiy shartnomalar va ma'lumotlar (`v0.2.0`)
-- **Domen modellari** (o'yin, jamoa, bozor, koeffitsient) — qotirilgan shartnoma.
-- **Baza sxemasi**: 18 jadval, Alembic migratsiyalari (0001–0003).
-- **Tarixiy import**: football-data.co.uk CSV (10 liga × 6 mavsum), idempotent.
-- **Model yadrosi**: de-vig (proporsional/Shin/power), Dixon-Coles, barcha bozorlar (1X2, ikki natija, total, BTTS, Osiyo forasi — chorak chiziqlar bilan), EV, 1/4 Kelly.
-- **Servis shartnomasi** (bot ↔ tizim) + soxta (fake) servis.
+### T2 — Shartnomalar va ma'lumotlar (`v0.2.0`)
+- Domen modellari, baza sxemasi (Alembic), tarixiy import (football-data.co.uk, idempotent), model yadrosi (de-vig, Dixon-Coles, bozorlar, EV, Kelly), servis shartnomasi + soxta servis.
 
-### T3 — Model, backtest, API klient, bot MVP
-- **Statistik model**: bozor modeli (Pinnacle), ansambl, ishonch darajasi (Yuqori/O'rta/Past).
-- **Walk-forward backtest**: kelajak ma'lumotidan foydalanmaslik (leakage) mustaqil tajribalar bilan tasdiqlangan; samarali bozorda soxta ustunlik ko'rsatmaydi.
-- **F3 darvozasi kuchaytirildi** (qaror #11): CLV > 0 (95% CI bilan), faqat to'liq tugagan hold-out mavsum.
-- **API-Football klienti**: limit, retry, kesh, kunlik kvota (30% qo'lda zaxira) — 10 liga yangilash ≈ 27 so'rov (chegara 40).
-- **Futbol adapteri**, jamoalarni manbalararo moslashtirish, lotin/kirill qidiruv, repository qatlami.
-- **Telegram bot MVP** (soxta servis ustida):
-  - asosiy menyu, `/start`, `/yordam`, `/bekor`;
-  - ⚙️ Sozlamalar — 16 maydon, risk profillari, 80%+ ogohlantirishi;
-  - 📊 Tahlil wizardi — sana oralig'i (tugmalar + kalendar + matn), sport, ehtimollik, EV, qamrov (liga/jamoa/o'yin), son, bozorlar, saralash, API sarfi tasdig'i;
-  - `/tahlil 25.10-31.10 futbol 60% Arsenal,Inter` tezkor buyrug'i;
-  - signal kartalari, kunlar bo'yicha guruhlash, sahifalash, ⭐ Sevimlilar bloki;
-  - bir vaqtdagi bosishlardan himoya, tahlil fonda, eskirgan tugmalar to'g'ri ishlanadi.
-- Har bir qism: **kod sharhi + mustaqil QA + tuzatish raundi** o'tkazilgan.
+### T3 — Model, backtest, API klient, bot MVP (`v0.3.0`)
+- Bozor modeli + ansambl + ishonch darajasi; walk-forward backtest (leakage mustaqil tajribalar bilan tasdiqlangan), kuchaytirilgan F3 darvozasi (CLV > 0, 95% CI).
+- API-Football klienti (limit, retry, kesh, kvota), futbol adapteri, jamoalarni moslashtirish, lotin/kirill qidiruv.
+- Bot MVP: menyu, sozlamalar, tahlil wizardi, `/tahlil`, signal kartalari, sahifalash.
 
----
+### T4 — Haqiqiy servislar (`v0.4.0`)
+- Pipeline: kunlik yangilash, tahlil, qayta hisoblash (24 soat / pre-match), natijalarni hisoblash (settle, CLV), APScheduler, `Notifier` porti, `/holat`.
+- Gemini integratsiyasi: promptlar, javob sxemasi, fallback, gallyutsinatsiyadan himoya, etalon eval to'plami, kunlik limit.
 
-## 🔄 Hozir bajarilmoqda
+### T5 — Kengaytmalar va deploy (`v0.5.0`)
+- F7: maxsus tahlil, batafsil karta, sevimlilar, shablonlar (jadvalli), stavkalar va bank (zarar limitlari), hisobot, grafiklar, CSV eksport, retro-tahlil, ekspress.
+- F8: natijalarni qo'lda belgilash, kecha yakuni, post-mortem, saboqlar, segment statistikasi, kalibratsiya, o'rganish halqasi (`shadow` standart), `/ozgarishlar`.
+- F9: server tayyorlash skripti, GHCR + SSH deploy, avtomatik rollback, zaxira/tiklash (avtomatik sinalgan), healthcheck, healthchecks.io, log rotatsiyasi, `RUNBOOK.md`, FSM uchun persistent storage.
+- Korporativ TLS-proksi qo'llab-quvvatlashi (`v0.6.0`, [ADR 0017](adr/0017-tls-trust-configuration.md)).
 
-| Agent | Vazifa |
-|---|---|
-| data-engineer | T3 data tuzatishlari (20 band): yarim tunda kvota, SQLite qulfi, Belgiya play-off o'yinlari, xG byudjeti, jamoa moslashtirish chegarasi, kirill nomlar jadvali va boshqalar |
-| pipeline-engineer | **T4 / F4**: haqiqiy servislar — kunlik yangilash, tahlil, qayta hisoblash, pre-match, natijalarni hisoblash (settle), scheduler, `Notifier` porti |
-| llm-engineer | **T4 / F5**: Gemini integratsiyasi — promptlar, javob sxemasi, fallback, gallyutsinatsiyadan himoya, 20 ta etalon holatli eval to'plami |
+### T6 — Yakuniy integratsiya (jarayonda)
+- Butun kod bazasi sharhi (xavfsizlik va arxitektura/ops) o'tkazildi; topilmalar ikki parallel raundda tuzatilmoqda:
+  - **fix-a** (pipeline/servislar): qarorlar #19–#23 (ochiq stavka, shadow sofligi, void aylanma, cashout, shadow → apply).
+  - **fix-b** (infratuzilma, [ADR 0018](adr/0018-t6-ops-hardening.md)): sirlar (`HEALTHCHECKS_URL`), deploy/CI qattiqlashtirish, zaxira xavfsizligi, alohida `jobs.db`, rejalashtiruvchi bot ulangandan keyin start, ichki qorovul, versiya (`app_started`), `HANDICAP_CONVENTION` majburiy tasdig'i, bog'liqliklarni tozalash, Dependabot va haftalik `pip-audit`.
+- Mustaqil QA va yakuniy hisobot (`docs/YAKUNIY_HISOBOT.md`) tuzatishlar birlashgandan keyin.
 
 ---
 
-## ⏳ Qilinishi kerak bo'lgan ishlar
+## ⏳ Qolgan ishlar
 
-### T4 (davomi)
-- [ ] Pipeline va LLM natijalarini sharh + QA dan o'tkazish, tuzatish, birlashtirish.
-- [ ] **F6.7–F6.9**: botni haqiqiy servisga ulash — 🔄 qayta hisoblash, ⚡ bugungi signallar, `/holat`.
-- [ ] T3 data tuzatishlarini birlashtirish → **`v0.3.0`**; T4 yakunida **`v0.4.0`**.
+### Loyiha tomonida (T6 yopilishi uchun)
+- [ ] fix-a va fix-b ni birlashtirish, mustaqil QA (test-engineer) va qayta sharh (code-reviewer).
+- [ ] `/holat` da build versiyasini ko'rsatish (bot/servis qatlami `app.ops.version.get_version()` ni chaqiradi; [ADR 0018](adr/0018-t6-ops-hardening.md) §4).
+- [ ] `pipeline/retention.py` job'ini rejalashtiruvchiga ulash (pipeline-engineer yozgach).
+- [ ] `v0.6.x` tegi va `docs/YAKUNIY_HISOBOT.md`.
 
-### T5 — Kengaytmalar va deploy
-- [ ] **F7**: 🔍 maxsus tahlil, 📋 batafsil karta, ⭐ sevimlilar va bildirishnomalar, 💾 shablonlar + jadval, 🎟 stavkalar va bank (zarar limitlari), 📈 hisobot + grafiklar + CSV eksport, retro-tahlil, 🧩 ekspress.
-- [ ] **F8**: feedback loop — natijalarni belgilash, kecha yakuni, post-mortem, saboqlar, segment statistikasi, kalibratsiya, `/ozgarishlar`.
-- [ ] **F9**: VPS, CI/CD deploy, zaxira va tiklash sinovi, monitoring, `RUNBOOK.md`, FSM uchun persistent storage.
-
-### T6 — Yakuniy integratsiya
-- [ ] To'liq e2e, barcha qabul mezonlarini qayta tekshirish, butun kod bazasi sharhi.
-- [ ] `docs/YAKUNIY_HISOBOT.md`.
-
-### Sizdan kerak bo'ladigan ishlar (loyiha tayyor bo'lgach)
-1. `.env` ga kalitlar: `TELEGRAM_BOT_TOKEN`, `ADMIN_IDS`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY`.
-2. **F0 tekshiruvi**: `python -m uv run python scripts/probe_api.py` — API imkoniyatlari, Osiyo forasi yozilishi, liga ID lari tasdiqlanadi.
-3. **Haqiqiy backtest (F3 darvozasi)** — korporativ filtrsiz tarmoqda yoki serverda:
-   `scripts/import_history.py` → `scripts/backtest.py` (qaror #7).
-4. Jonli Telegram sinovi — [test_scenarios.md](test_scenarios.md) bo'yicha.
-5. VPS (≈ 2 GB RAM) va deploy ruxsati.
-6. **F10 paper trading** (4–6 hafta, real pulsiz) → F11 production — **faqat sizning qaroringiz bilan**.
+### Sizdan kerak bo'ladigan ishlar (foydalanuvchiga bog'liq, men bajara olmayman)
+1. **Kalitlar:** `TELEGRAM_BOT_TOKEN`, `ADMIN_IDS`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY` (`.env` ga; hech qachon gitga emas).
+2. **F0 probe:** `scripts/probe_api.py` — API imkoniyatlari, liga ID lari va **Osiyo fora yozilishi**. Natijaga qarab `HANDICAP_CONVENTION=home_line|own_line` ni `.env` ga yozing: usiz `APP_SERVICES=real` ishga tushmaydi, birinchi koeffitsientdan keyin o'zgartirib bo'lmaydi.
+3. **Haqiqiy backtest (F3 darvozasi)** — korporativ filtrsiz tarmoqda yoki serverda: `scripts/import_history.py` → `scripts/backtest.py` (qaror #7). Darvozadan o'tmasa real rejimga o'tilmaydi.
+4. **Jonli Telegram sinovi** — [test_scenarios.md](test_scenarios.md) bo'yicha (bu mashinada Telegram firewall bilan bloklangan).
+5. **Server:** VPS (≈ 2 GB RAM), `deploy/bootstrap.sh`, GitHub secret'lari (`SSH_HOST`, `SSH_USER`, `SSH_KNOWN_HOSTS`, `production` environment da `SSH_KEY`), birinchi deploy, reboot va tiklash mashqi ([RUNBOOK.md](../RUNBOOK.md) 3-bo'lim).
+6. **Masofaviy zaxira:** `rclone crypt` remote sozlash ([RUNBOOK.md](../RUNBOOK.md) 8-bo'lim), healthchecks.io check yaratish.
+7. **F10 paper trading** (4–6 hafta, real pulsiz) → F10 darvozasi → F11 production (`v1.0.0`): **faqat sizning qaroringiz bilan**. `LEARNING_MODE=apply` ga o'tish ham odam qarori.
 
 ---
 
@@ -89,18 +74,18 @@
 
 | # | Masala | Ta'siri | Yechim |
 |---|---|---|---|
-| 1 | Korporativ veb-filtr football-data.co.uk ni bloklaydi | Haqiqiy tarixiy backtest bu kompyuterda ishlamaydi | Serverda / boshqa tarmoqda ishga tushirish |
-| 2 | API kalitlari yo'q | API-Football test ma'lumotlari sxema asosida sintetik; jonli bot sinovi qilinmagan | F0 da `probe_api.py` bilan qayta yozib olish |
+| 1 | Korporativ veb-filtr football-data.co.uk ni, firewall Telegram'ni bloklaydi | Haqiqiy backtest va jonli bot bu kompyuterda ishlamaydi | Serverda / boshqa tarmoqda ishga tushirish |
+| 2 | API kalitlari yo'q | API-Football test ma'lumotlari sxema asosida sintetik; jonli sinov qilinmagan | F0 da `probe_api.py` bilan qayta yozib olish |
 | 3 | Model bozordan yaxshiroq ekani isbotlanmagan | Haqiqiy ustunlik faqat haqiqiy ma'lumotda ko'rinadi | F3 darvozasi → F10 paper trading; o'tmasa — bozor modeli rejimi |
-| 4 | Osiyo forasi yozilish konvensiyasi tasdiqlanmagan | Noto'g'ri bo'lsa AH koeffitsientlari teskari saqlanadi | F0 probe birinchi narx saqlanishidan oldin |
-| 5 | Test to'plami katta (≈ 3–6 daqiqa) | CI sekinroq | `slow` belgisi bilan ajratish mumkin |
+| 4 | Osiyo forasi konvensiyasi tasdiqlanmagan | Noto'g'ri bo'lsa AH koeffitsientlari teskari saqlanadi | `HANDICAP_CONVENTION` majburiy tasdiqlanadi; F0 probe birinchi narx saqlanishidan oldin |
+| 5 | Deploy serverda hali sinalmagan | Skriptlar va workflow faqat testlar bilan tasdiqlangan | Birinchi deploy'ni kuzatib turish, RUNBOOK 3.6 tekshiruvlari |
+| 6 | Test to'plami katta (to'liq ≈ 6–17 daqiqa) | Lokal sikl sekin | `pytest -m "not slow"` tezkor; CI da tezkor va sekin ishlar alohida |
 
 ---
 
 ## Asosiy qarorlar (to'liq ro'yxat: [decisions_log.md](decisions_log.md))
-- Bot faqat shaxsiy chatda ishlaydi (#4).
-- Standart sozlamalar = "Balanslangan" profil: 45% / EV 5% / 1.50–3.00 (#8).
-- Stavka narxi = 1xBet, adolatli ehtimollik = Pinnacle (#10).
-- F3 darvozasi statistik jihatdan kuchaytirilgan (#11).
-- Retro: oyna ≤ 31 kun, orqaga ≤ 90 kun (#12).
-- Agentlar Sonnet 5.5 da (#13).
+- Bot faqat shaxsiy chatda ishlaydi (#4); standart sozlamalar "Balanslangan" profil (#8).
+- Stavka narxi = 1xBet, adolatli ehtimollik = Pinnacle (#10); F3 darvozasi statistik kuchaytirilgan (#11).
+- Retro: oyna ≤ 31 kun, orqaga ≤ 90 kun (#12); agentlar Sonnet 5.5 da (#13).
+- Foyda va CLV birinchi tavsiya koeffitsientida (#17); cashout = to'langan pul summasi (#18).
+- T6: ochiq stavkali signal doim yopiladi (#19), `shadow` rejimi sof (#20), void aylanmaga kirmaydi (#21), cashout bitta stavkaga tegishli (#22), `shadow → apply` o'tishi jurnalga yoziladi (#23).

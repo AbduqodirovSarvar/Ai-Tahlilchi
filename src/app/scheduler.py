@@ -15,7 +15,10 @@ Jobs
 
 Reliability
 -----------
-- The job store lives in the application database, so the schedule survives restarts. Starting
+- The job store lives in its own SQLite file (``jobs.db`` next to the application database, see
+  :attr:`app.config.Settings.jobs_db_path`), so the schedule survives restarts. It holds pickles
+  and is rebuilt on start, which is why it is neither backed up nor restored with the data.
+  Starting
   registers a job only when it is absent (or its trigger changed): re-adding with
   ``replace_existing`` would recompute ``next_run_time`` and silently drop a run missed while
   the process was down.
@@ -38,6 +41,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, time
 from pathlib import Path
+from time import monotonic
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -175,7 +179,7 @@ class PipelineJobs:
             logger.exception("heartbeat_status_unreadable", job=name)
             return
         if recorded is not None and not recorded.ok:
-            await self._ping(name, PingKind.FAIL, f"{name}: {recorded.detail or 'failed'}")
+            await self._ping(name, PingKind.FAIL, f"{name}: failed")
         else:
             await self._ping(name, PingKind.SUCCESS, f"{name} ok")
 
@@ -232,17 +236,23 @@ class JobTracker:
 
 _installed: PipelineJobs | None = None
 _tracker = JobTracker()
+_last_tick_at: float | None = None
+"""Monotonic time of the last ``daily-tick`` start: the pulse the watchdog listens to."""
 
 
 def install(jobs: PipelineJobs) -> None:
     """Make ``jobs`` the target of scheduled triggers (call before starting the scheduler)."""
-    global _installed, _tracker  # noqa: PLW0603 - the scheduler can only reference module-level callables
+    global _installed, _tracker, _last_tick_at  # noqa: PLW0603 - the scheduler can only reference module-level callables
     _installed = jobs
     _tracker = JobTracker()
+    _last_tick_at = None
 
 
 async def execute_job(name: str) -> None:
     """Scheduler entrypoint: run job ``name`` on the installed :class:`PipelineJobs`."""
+    global _last_tick_at  # noqa: PLW0603 - module-level state is the only thing a pickled job can reach
+    if name == JOB_DAILY_TICK:
+        _last_tick_at = monotonic()
     if _installed is None:
         logger.error("job_without_runtime", job=name)
         return
@@ -261,6 +271,7 @@ class PipelineScheduler:
         stop_timeout: float = STOP_TIMEOUT_SECONDS,
     ) -> None:
         """Persist the schedule in the SQLite file ``db_path``; cron jobs use ``timezone``."""
+        self._started_at: float | None = None
         install(jobs)
         self._tracker = _tracker
         self._stop_timeout = stop_timeout
@@ -279,8 +290,16 @@ class PipelineScheduler:
         """
         self._scheduler.start(paused=True)
         self._register()
+        self._started_at = monotonic()
         self._scheduler.resume()
         logger.info("scheduler_started", jobs=[job.id for job in self._scheduler.get_jobs()])
+
+    def seconds_since_tick(self) -> float:
+        """Seconds since the last ``daily-tick`` ran (since start before the first one)."""
+        if self._started_at is None:
+            return 0.0
+        latest = max(self._started_at, _last_tick_at or 0.0)
+        return monotonic() - latest
 
     async def stop(self) -> None:
         """Stop ticking, let the running jobs finish (up to a timeout), then shut down."""

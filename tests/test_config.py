@@ -297,3 +297,37 @@ def test_handicap_convention_defaults_to_home_line_and_rejects_typos() -> None:
     assert make_settings(handicap_convention="own_line").handicap_convention == "own_line"
     with pytest.raises(ValidationError):
         make_settings(handicap_convention="wrong")
+
+
+def test_handicap_convention_must_be_explicit_for_real_services() -> None:
+    with pytest.raises(ConfigurationError, match="HANDICAP_CONVENTION is not set"):
+        make_settings().require_explicit_handicap_convention()
+    make_settings(handicap_convention="home_line").require_explicit_handicap_convention()
+    make_settings(handicap_convention="own_line").require_explicit_handicap_convention()
+
+
+def test_handicap_convention_from_the_environment_counts_as_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HANDICAP_CONVENTION", "own_line")
+    Settings(_env_file=None).require_explicit_handicap_convention()  # type: ignore[call-arg]
+    monkeypatch.setenv("HANDICAP_CONVENTION", "")  # `KEY=` means not set
+    with pytest.raises(ConfigurationError):
+        Settings(_env_file=None).require_explicit_handicap_convention()  # type: ignore[call-arg]
+
+
+def test_jobs_database_lives_next_to_the_application_database(tmp_path: Path) -> None:
+    settings = make_settings(db_path=tmp_path / "data" / "app.db")
+    assert settings.jobs_db_path == tmp_path / "data" / "jobs.db"
+
+
+def test_a_leftover_odds_api_key_is_tolerated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ODDS_API_KEY", "left-over-value")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert not hasattr(settings, "odds_api_key")
+
+
+def test_watchdog_limit_is_validated() -> None:
+    assert make_settings().watchdog_stall_minutes == 10.0
+    with pytest.raises(ValidationError):
+        make_settings(watchdog_stall_minutes=0)

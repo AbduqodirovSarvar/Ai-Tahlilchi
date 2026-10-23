@@ -55,9 +55,12 @@ jobs:
           rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
 
   test:
-    name: Tests and coverage
+    # Fast feedback: everything except the `slow` marker, with the coverage gates. Measured on a
+    # developer machine the whole suite takes 6.5 min without and ~17 min with coverage, so the
+    # budget is generous (40 min) and the slow tests run in their own job.
+    name: Tests (fast) and coverage
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,8 +72,8 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install dependencies
         run: uv sync --frozen
-      - name: pytest (overall branch coverage >= 85%)
-        run: uv run pytest
+      - name: pytest -m "not slow" (overall branch coverage >= 85%)
+        run: uv run pytest -m "not slow"
       - name: Per-package coverage (models, pipeline >= 90%)
         run: uv run python scripts/ops/coverage_gate.py
       - name: Upload coverage report
@@ -81,6 +84,26 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 14
+
+  test-slow:
+    # The long-running tests (marker `slow`), without coverage measurement (it multiplies their
+    # runtime and the gates above already cover the code they exercise).
+    name: Tests (slow)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.4"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: pytest -m slow
+        run: uv run pytest -m slow --no-cov
 
   security:
     name: Vulnerabilities and secrets

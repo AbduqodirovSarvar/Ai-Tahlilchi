@@ -169,3 +169,21 @@ def test_main_with_invalid_settings_is_unhealthy(
     assert healthcheck.main([]) == 1
     assert json.loads(capsys.readouterr().out)["healthy"] is False
     healthcheck.get_settings.cache_clear()
+
+
+def test_scheduler_is_read_from_its_own_jobs_file(tmp_path: Path) -> None:
+    app_db = make_db(tmp_path / "app.db")
+    jobs = tmp_path / "jobs.db"
+    make_jobs_table(jobs, NOW + timedelta(seconds=30))
+
+    by_default = run_checks(app_db, expect_scheduler=True, now=NOW)
+    explicit = run_checks(app_db, expect_scheduler=True, now=NOW, jobs_path=jobs)
+
+    assert all(check.ok for check in by_default if check.name == "scheduler")
+    assert all(check.ok for check in explicit if check.name == "scheduler")
+
+
+def test_a_missing_jobs_file_is_unhealthy(tmp_path: Path) -> None:
+    app_db = make_db(tmp_path / "app.db")
+    results = run_checks(app_db, expect_scheduler=True, now=NOW)
+    assert not next(check for check in results if check.name == "scheduler").ok

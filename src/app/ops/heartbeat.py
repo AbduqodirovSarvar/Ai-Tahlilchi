@@ -7,10 +7,12 @@ alert instead of waiting for the grace period).
 
 A ping must never hurt the job it reports on: every network failure is logged and swallowed,
 requests are bounded by a timeout and retried briefly. The URL is a secret (its UUID is the
-credential), so it is never logged; only the outcome is.
+credential), so it is never logged; only the outcome is. The note sent with a ping is a short
+code, never free-form text.
 """
 
 import asyncio
+import re
 from enum import StrEnum
 from typing import Final, Self
 
@@ -25,8 +27,23 @@ logger = get_logger(__name__)
 PING_TIMEOUT_SECONDS: Final = 10.0
 PING_ATTEMPTS: Final = 3
 PING_BACKOFF_SECONDS: Final = 2.0
-MAX_DETAIL_CHARS: Final = 1000
-"""healthchecks.io keeps the first 100 kB of a body; a short note is all that is useful."""
+MAX_DETAIL_CHARS: Final = 80
+"""A short code is all the dashboard needs; exception text never leaves the host."""
+DETAIL_PATTERN: Final = re.compile(r"[A-Za-z0-9_.:\- ]+")
+REDACTED_DETAIL: Final = "detail_withheld"
+
+
+def _safe_detail(detail: str | None) -> str:
+    """The note sent along with a ping: a short code, never free-form (error) text.
+
+    Internal error messages can hold paths, SQL or user data, and healthchecks.io is a third
+    party; anything that is not a plain short code is replaced by a fixed marker.
+    """
+    if not detail:
+        return ""
+    if len(detail) > MAX_DETAIL_CHARS or DETAIL_PATTERN.fullmatch(detail) is None:
+        return REDACTED_DETAIL
+    return detail
 
 
 class PingKind(StrEnum):
@@ -58,7 +75,7 @@ class Heartbeat:
     def from_settings(cls, settings: Settings) -> Self:
         """The heartbeat for ``HEALTHCHECKS_URL`` (disabled when it is not set)."""
         url = settings.healthchecks_url
-        return cls(None if url is None else str(url))
+        return cls(None if url is None else url.get_secret_value())
 
     @property
     def enabled(self) -> bool:
@@ -70,7 +87,7 @@ class Heartbeat:
         if self._url is None:
             return False
         target = self._url + kind.value
-        body = (detail or "")[:MAX_DETAIL_CHARS].encode()
+        body = _safe_detail(detail).encode()
         for attempt in range(self._attempts):
             if attempt:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))

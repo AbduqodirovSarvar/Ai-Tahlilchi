@@ -5,6 +5,7 @@ import io
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 from contextlib import closing
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.ops.sqlite_tool import (
     backup_to_file,
     check_integrity,
     main,
+    query,
     restore,
     verify,
 )
@@ -218,3 +220,94 @@ def test_cli_stdout_and_stdin_streams(tmp_path: Path) -> None:
     )
     assert b"restored" in restored.stderr
     assert names(target) == ["n0", "n1", "n2"]
+
+
+@pytest.fixture
+def forbidden_system_tmp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail loudly if a database copy would be placed in the system temp directory (tmpfs)."""
+    original = tempfile.mkdtemp
+
+    def guarded(
+        suffix: str | None = None,
+        prefix: str | None = None,
+        dir: str | None = None,  # noqa: A002 - mirrors tempfile.mkdtemp
+    ) -> str:
+        if dir is None:
+            msg = "temporary directory requested without dir=: would land in /tmp"
+            raise AssertionError(msg)
+        return original(suffix, prefix, dir)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", guarded)
+
+
+@pytest.mark.usefixtures("forbidden_system_tmp")
+def test_backup_scratch_space_is_next_to_the_database(tmp_path: Path) -> None:
+    (tmp_path / "data").mkdir()
+    source = make_db(tmp_path / "data" / "app.db")
+    archive = backup_bytes(source)
+    assert archive
+    assert not [p for p in source.parent.iterdir() if p.name.startswith(".backup-")]
+
+
+@pytest.mark.usefixtures("forbidden_system_tmp")
+def test_verify_scratch_space_is_the_given_work_dir(tmp_path: Path) -> None:
+    archive = backup_bytes(make_db(tmp_path / "app.db"))
+    work_dir = tmp_path / "volume" / "scratch"
+    assert "abc123" in verify(io.BytesIO(archive), work_dir)
+    assert not list(work_dir.iterdir())
+
+
+def test_restore_keeps_only_the_newest_safety_copies(tmp_path: Path) -> None:
+    live = make_db(tmp_path / "app.db", rows=1)
+    safety_dir = tmp_path / "pre-restore"
+    safety_dir.mkdir()
+    for day in range(1, 9):
+        (safety_dir / f"app-before-restore-2026010{day}T000000Z.db").write_bytes(b"old")
+    other = safety_dir / "notes.txt"
+    other.write_text("keep me")
+
+    restore(live, io.BytesIO(backup_bytes(make_db(tmp_path / "b.db"))))
+
+    kept = sorted(p.name for p in safety_dir.glob("*-before-restore-*.db"))
+    assert len(kept) == 5
+    assert "app-before-restore-20260101T000000Z.db" not in kept
+    assert "app-before-restore-20260108T000000Z.db" in kept
+    assert other.exists()
+
+
+def test_query_prints_tsv_and_cannot_write(tmp_path: Path) -> None:
+    source = make_db(tmp_path / "app.db", rows=3)
+    buffer = io.StringIO()
+
+    assert query(source, "SELECT id, name FROM items ORDER BY id", buffer) == 3
+    assert buffer.getvalue().splitlines() == ["id\tname", "1\tn0", "2\tn1", "3\tn2"]
+
+    with pytest.raises(DataError, match="query failed"):
+        query(source, "DELETE FROM items", io.StringIO())
+    with pytest.raises(DataError, match="query failed"):
+        query(source, "SELECT * FROM missing_table", io.StringIO())
+    assert len(names(source)) == 3
+
+
+def test_query_caps_rows_and_reports_a_missing_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = make_db(tmp_path / "app.db", rows=10)
+    monkeypatch.setattr("app.ops.sqlite_tool.QUERY_MAX_ROWS", 4)
+    assert query(source, "SELECT * FROM items", io.StringIO()) == 4
+    with pytest.raises(DataError, match="does not exist"):
+        query(tmp_path / "none.db", "SELECT 1", io.StringIO())
+
+
+def test_cli_query_and_work_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = make_db(tmp_path / "app.db", rows=2)
+    assert main(["query", "--db", str(source), "SELECT count(*) AS n FROM items"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["n", "2"]
+    assert main(["query", "--db", str(source), "DROP TABLE items"]) == 1
+
+    archive = tmp_path / "a.db.gz"
+    assert main(["backup", "--db", str(source), "--output", str(archive)]) == 0
+    scratch = tmp_path / "fresh" / "scratch"
+    assert main(["verify", "--input", str(archive), "--work-dir", str(scratch)]) == 0
+    assert scratch.is_dir()
+    assert not list(scratch.iterdir())
