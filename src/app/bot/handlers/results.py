@@ -184,16 +184,30 @@ def parse_cashout_units(text: str) -> Decimal:
     try:
         value = Decimal(str(number))
     except InvalidOperation:  # pragma: no cover - parse_number already rejects non-finite
-        raise InputError(texts.RESULT_CASHOUT_RANGE) from None
+        raise InputError(
+            texts.RESULT_CASHOUT_RANGE.format(low=-MAX_CASHOUT_UNITS, high=MAX_CASHOUT_UNITS)
+        ) from None
     if abs(value) > MAX_CASHOUT_UNITS:
-        raise InputError(texts.RESULT_CASHOUT_RANGE)
+        raise InputError(
+            texts.RESULT_CASHOUT_RANGE.format(low=-MAX_CASHOUT_UNITS, high=MAX_CASHOUT_UNITS)
+        )
     return value
+
+
+async def _checked_units(flow: FlowContext, signal_id: int, units: Decimal) -> Decimal:
+    """``units`` if the signal could pay that much: between losing the stake and a full win."""
+    signal = await flow.services.signals.get_signal(flow.user_id, signal_id)
+    odds = Decimal(str(signal.recommended_odds or signal.odds))
+    low, high = -signal.stake_units, signal.stake_units * (odds - 1)
+    if not low <= units <= high:
+        raise InputError(texts.RESULT_CASHOUT_RANGE.format(low=low, high=high))
+    return units
 
 
 async def on_cashout_text(message: Message, flow: FlowContext) -> None:
     """The typed cash-out result: mark the signal, then show what the button sat in."""
     target = await _pending_input(flow)
-    units = parse_cashout_units(message.text or "")
+    units = await _checked_units(flow, target.signal_id, parse_cashout_units(message.text or ""))
     request = ResultMarkRequest(
         signal_id=target.signal_id, mark=ResultMark.CASHOUT, cashout_profit_units=units
     )

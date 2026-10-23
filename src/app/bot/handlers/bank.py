@@ -54,8 +54,6 @@ BANK_COMMAND: Final = "bank"
 LIST_LIMIT: Final = 100
 """Bets read for the overview, lists and totals (the service's own cap)."""
 CASHOUT_KEY: Final = "cashout"
-MAX_CASHOUT_PAYOUT: Final = Decimal(10) ** 12
-"""A payout beyond this is a typo, not a cash-out."""
 
 
 def _message_of(callback: CallbackQuery) -> Message:
@@ -217,15 +215,16 @@ async def _clear_cashout(flow: FlowContext) -> None:
     await flow.state.set_data(data)
 
 
-def _parse_payout(text: str) -> Decimal:
+def _parse_payout(text: str, bet: BetView) -> Decimal:
     """The typed cash-out payout (money the bookmaker paid, zero or more).
 
     Raises:
-        InputError: not a number, negative, or beyond any plausible payout.
+        InputError: not a number, negative, or more than the bet pays when it wins.
     """
     value = parse_money(text, allow_zero=True)
-    if value > MAX_CASHOUT_PAYOUT:
-        raise InputError(texts.BANK_CASHOUT_RANGE)
+    ceiling = bet.stake * Decimal(str(bet.odds_taken))
+    if value > ceiling:
+        raise InputError(texts.BANK_CASHOUT_RANGE.format(ceiling=money(ceiling)))
     return value
 
 
@@ -234,8 +233,8 @@ async def on_cashout_text(message: Message, flow: FlowContext) -> None:
     stored = (await flow.state.get_data()).get(CASHOUT_KEY)
     if not isinstance(stored, dict) or not isinstance(stored.get("bet_id"), int):
         raise StaleDraftError
-    payout = _parse_payout(message.text or "")
     bet = await _open_bet(flow, stored["bet_id"])
+    payout = _parse_payout(message.text or "", bet)
     try:
         await _mark(flow, bet, ResultMark.CASHOUT, payout)
     except ValidationFailedError:

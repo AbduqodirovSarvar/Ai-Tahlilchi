@@ -43,3 +43,7 @@ class DeliveryNotConfirmedError(PipelineError):
     def __init__(self, what: str) -> None:
         """``what`` names the message, e.g. ``daily digest of user 7``."""
         super().__init__(f"{what} was not delivered")
+
+
+class ManualResultError(PipelineError):
+    """A hand-entered result is impossible (a cash-out beyond what the bet could ever pay)."""

@@ -32,7 +32,14 @@ from app.db.repo.records import (
     SignalVersionRecord,
     Thresholds,
 )
-from app.db.schema import FixtureRow, SignalResultRow, SignalRow, SignalVersionRow, utcnow
+from app.db.schema import (
+    FixtureRow,
+    SignalResultRow,
+    SignalRow,
+    SignalVersionRow,
+    UserBetRow,
+    utcnow,
+)
 from app.domain import FixtureStatus
 from app.errors import DataError
 
@@ -309,10 +316,17 @@ async def signals_for_fixtures(
 async def unsettled_signals(
     session: AsyncSession, *, kicked_off_before: datetime
 ) -> list[SignalRecord]:
-    """Recommended, non-retro signals without a result whose fixture has kicked off."""
+    """Non-retro signals without a result whose fixture has kicked off (decision #19).
+
+    Recommended signals, and also never-recommended ones the user bet on (a custom no-value
+    pick): an open bet must always be closed, so its signal is settled like any other.
+    """
+    open_bet = select(UserBetRow.signal_id).where(
+        UserBetRow.outcome.is_(None), UserBetRow.signal_id.is_not(None)
+    )
     return await _load(
         session,
-        SignalRow.recommended_at.is_not(None),
+        or_(SignalRow.recommended_at.is_not(None), SignalRow.id.in_(open_bet)),
         SignalRow.source != SignalSource.RETRO,
         SignalRow.id.not_in(select(SignalResultRow.signal_id)),
         _not_pending_cancellation(),

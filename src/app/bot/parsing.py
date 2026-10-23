@@ -19,6 +19,7 @@ from app.bot.formatters import escape
 from app.domain import Sport
 from app.services.interfaces import (
     MAX_FUTURE_DAYS,
+    MAX_MONEY,
     MAX_ODDS_LIMIT,
     MAX_RETRO_LOOKBACK_DAYS,
     MAX_SCOPE_IDS,
@@ -146,13 +147,16 @@ def parse_count(text: str, low: int, high: int) -> int:
 
 
 def parse_money(text: str, *, allow_zero: bool = False) -> Decimal:
-    """A positive amount (zero too with ``allow_zero``); spaces and ``_`` separate thousands."""
+    """A positive amount up to ``MAX_MONEY`` (zero too with ``allow_zero``).
+
+    Spaces and ``_`` separate thousands.
+    """
     cleaned = re.sub(r"[\s_']", "", text).replace(",", ".")
     try:
         amount = Decimal(cleaned)
     except InvalidOperation:
         raise InputError(texts.PARSE_BAD_MONEY.format(value=_quoted(text))) from None
-    if not amount.is_finite() or amount < 0 or (amount == 0 and not allow_zero):
+    if not amount.is_finite() or not 0 <= amount <= MAX_MONEY or (amount == 0 and not allow_zero):
         raise InputError(texts.PARSE_BAD_MONEY.format(value=_quoted(text)))
     return amount
 

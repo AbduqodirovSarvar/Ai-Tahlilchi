@@ -258,7 +258,7 @@ async def test_cashout_payout_is_the_money_whatever_the_unit_and_the_stake(
     assert settled.profit == Decimal(-50)  # paid 200 for a 250 stake
 
 
-async def test_cashout_pays_the_other_bets_of_the_signal_at_the_same_return(
+async def test_cashout_with_a_payout_leaves_the_other_bets_of_the_signal_open(
     real_bot: RealBot,
 ) -> None:
     rb = real_bot
@@ -273,7 +273,8 @@ async def test_cashout_pays_the_other_bets_of_the_signal_at_the_same_return(
     views = {bet.bet_id: bet for bet in await rb.services.bets.list_bets(ADMIN)}
 
     assert views[cashed.bet_id].profit == Decimal(-50)
-    assert views[other.bet_id].profit == Decimal(-20)  # the same -20% return on 100
+    assert views[other.bet_id].outcome is None  # decision #22: only the cashed bet is closed
+    assert views[other.bet_id].profit is None
 
 
 async def test_cashout_payout_that_is_not_a_non_negative_number_is_refused(

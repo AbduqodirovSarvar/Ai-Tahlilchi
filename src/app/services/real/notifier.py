@@ -18,6 +18,7 @@ from app.pipeline.delivery import (
 )
 from app.pipeline.learning_digest import LearningDelivery
 from app.pipeline.ledger import LedgerKey
+from app.pipeline.redaction import scrub_text
 from app.services.interfaces import (
     AdminAlert,
     AnalysisResult,
@@ -261,4 +262,6 @@ class NotifierDelivery:
 
     async def alert_admin(self, component: str, message: str, at: datetime) -> None:
         """Report a system error to the administrators."""
-        await self._notifier.alert_admin(AdminAlert(component=component, message=message, at=at))
+        await self._notifier.alert_admin(
+            AdminAlert(component=component, message=scrub_text(message), at=at)
+        )

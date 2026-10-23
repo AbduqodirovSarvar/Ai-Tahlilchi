@@ -13,7 +13,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import QueryScope, RiskProfile, SignalSource, SortOrder, WatchKind
-from app.db.repo import UserSettingsRecord, WatchRecord, get_user, get_user_settings, list_watchlist
+from app.db.repo import (
+    UserSettingsRecord,
+    WatchRecord,
+    get_user,
+    get_user_settings,
+    list_watchlist,
+    settled_profit_total,
+)
 from app.domain import MarketType, Sport
 from app.pipeline.provider import AUTOMATIC, Purpose
 from app.pipeline.types import AnalysisRequest, QuietWindow, UserSchedule
@@ -50,6 +57,8 @@ class UserProfile:
     watch_league_ids: frozenset[int]
     watch_team_ids: frozenset[int]
     watches: tuple[WatchRecord, ...] = ()
+    balance: Decimal | None = None
+    """Starting bank plus the profit of every settled bet: what Kelly sizes a stake from."""
 
     @property
     def schedule(self) -> UserSchedule:
@@ -74,11 +83,14 @@ async def load_profile(session: AsyncSession, user_id: int) -> UserProfile:
     user = await get_user(session, user_id)
     stored = await get_user_settings(session, user_id)
     watches = await list_watchlist(session, user_id)
+    bank = None if user is None else user.bank
+    balance = None if bank is None else bank + await settled_profit_total(session, user_id)
     return UserProfile(
         user_id=user_id,
         zone=ZoneInfo(DEFAULT_TIMEZONE if user is None else user.timezone),
         settings=stored or _with_user(DEFAULT_SETTINGS, user_id),
-        bank=None if user is None else user.bank,
+        bank=bank,
+        balance=balance,
         unit=None if user is None else user.unit,
         watch_league_ids=frozenset(w.entity_id for w in watches if w.kind is WatchKind.LEAGUE),
         watch_team_ids=frozenset(w.entity_id for w in watches if w.kind is WatchKind.TEAM),
@@ -136,7 +148,7 @@ def default_request(
         max_signals=s.max_signals,
         sort=SortOrder.EV,
         source=source,
-        bank=profile.bank,
+        bank=profile.balance,
         unit=profile.unit,
         prematch_minutes=s.prematch_minutes,
         purpose=purpose,

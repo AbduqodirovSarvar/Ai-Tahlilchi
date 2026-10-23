@@ -1125,7 +1125,8 @@ class FakeBetService:
     def view(self, bet: _StoredBet) -> BetView:
         """Bet as of now, settled from its signal's result."""
         stored = self._state.signals[bet.signal_id]
-        outcome = self._state.result_of(stored)
+        paid = stored.cashout_payouts.get(bet.bet_id)
+        outcome = ResultMark.CASHOUT if paid is not None else self._state.result_of(stored)
         return BetView(
             bet_id=bet.bet_id,
             signal_id=bet.signal_id,
@@ -1259,17 +1260,39 @@ class FakeResultService:
             raise ValidationFailedError("signal_id", "a retro signal has no result to mark")
         if not stored.fixture.started(self._state.now()):
             raise ValidationFailedError("signal_id", "the match has not started yet")
+        if request.cashout_bet_id is not None and request.cashout_payout is not None:
+            self._cash_out_bet(stored, user_id, request.cashout_bet_id, request.cashout_payout)
+            return self._state.view(stored)
+        if request.cashout_profit_units is not None:
+            self._check_units(stored, request.cashout_profit_units)
         stored.manual_mark = request.mark
         stored.cashout_units = request.cashout_profit_units
         stored.cashout_payouts = {}
-        if request.cashout_bet_id is not None and request.cashout_payout is not None:
-            bet = self._state.bets.get(request.cashout_bet_id)
-            if bet is None or bet.user_id != user_id or bet.signal_id != stored.signal_id:
-                raise NotFoundError("bet", request.cashout_bet_id)
-            profit = request.cashout_payout - bet.stake
-            stored.cashout_payouts[bet.bet_id] = request.cashout_payout
-            stored.cashout_units = self._state.view(stored).stake_units * profit / bet.stake
         return self._state.view(stored)
+
+    def _check_units(self, stored: _StoredSignal, units: Decimal) -> None:
+        """A signal-level cash-out lies between losing the stake and a full win."""
+        view = self._state.view(stored)
+        odds = Decimal(str(view.recommended_odds or view.odds))
+        low, high = -view.stake_units, view.stake_units * (odds - 1)
+        if not low <= units <= high:
+            raise ValidationFailedError("cashout", f"must be within [{low}, {high}]")
+
+    def _cash_out_bet(
+        self, stored: _StoredSignal, user_id: int, bet_id: BetId, payout: Decimal
+    ) -> None:
+        """Decision #22: a payout closes that bet only; the signal follows when none is left."""
+        bet = self._state.bets.get(bet_id)
+        if bet is None or bet.user_id != user_id or bet.signal_id != stored.signal_id:
+            raise NotFoundError("bet", bet_id)
+        if payout > bet.stake * Decimal(str(bet.odds_taken)):
+            raise ValidationFailedError("cashout", "more than the bet pays when it wins")
+        stored.cashout_payouts[bet.bet_id] = payout
+        stake_units = self._state.view(stored).stake_units
+        stored.cashout_units = stake_units * (payout - bet.stake) / bet.stake
+        siblings = [b for b in self._state.bets.values() if b.signal_id == stored.signal_id]
+        if all(b.bet_id in stored.cashout_payouts for b in siblings):
+            stored.manual_mark = ResultMark.CASHOUT
 
     async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None:
         """See :meth:`ResultService.add_note`."""

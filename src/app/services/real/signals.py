@@ -8,6 +8,7 @@ from typing import Final
 
 from app.domain import FixtureStatus
 from app.pipeline import data
+from app.pipeline.errors import ManualResultError
 from app.pipeline.limits import limit_reached, net_loss, week_start
 from app.pipeline.profile import utc_bounds
 from app.pipeline.settle import BetPayout, settle_manually
@@ -157,13 +158,17 @@ class RealResultService:
             raise ValidationFailedError("signal_id", "a retro signal has no result to mark")
         if record.fixture.fixture.kickoff > self._core.now():
             raise ValidationFailedError("signal_id", "the match has not started yet")
-        await settle_manually(
-            self._core.ctx,
-            record,
-            _MANUAL_OUTCOMES[request.mark],
-            cashout_units=request.cashout_profit_units,
-            payout=await self._payout_of(record, request),
-        )
+        payout = await self._payout_of(record, request)
+        try:
+            await settle_manually(
+                self._core.ctx,
+                record,
+                _MANUAL_OUTCOMES[request.mark],
+                cashout_units=request.cashout_profit_units,
+                payout=payout,
+            )
+        except ManualResultError as error:
+            raise ValidationFailedError("cashout", str(error)) from error
         return await RealSignalService(self._core).get_signal(user_id, request.signal_id)
 
     async def _payout_of(
@@ -180,7 +185,12 @@ class RealResultService:
         )
         if bet is None:
             raise NotFoundError("bet", request.cashout_bet_id)
-        return BetPayout(bet_id=bet.id, stake=bet.stake, amount=request.cashout_payout)
+        return BetPayout(
+            bet_id=bet.id,
+            stake=bet.stake,
+            odds_taken=bet.odds_taken,
+            amount=request.cashout_payout,
+        )
 
     async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None:
         """See :meth:`ResultService.add_note`.
@@ -298,10 +308,16 @@ class RealBetService:
 
     async def get_bet(self, user_id: int, bet_id: BetId) -> BetView:
         """See :meth:`BetService.get_bet`."""
-        for bet in await self._bets(user_id, ALL_BETS):
-            if bet.bet_id == bet_id:
-                return bet
-        raise NotFoundError("bet", bet_id)
+        async with self._core.ctx.sessions() as session:
+            bet = await data.get_bet(session, user_id, bet_id)
+            record = (
+                None
+                if bet is None or bet.signal_id is None
+                else await data.get_signal(session, bet.signal_id)
+            )
+        if bet is None or record is None:
+            raise NotFoundError("bet", bet_id)
+        return self._view(bet, record)
 
     async def list_bets(
         self, user_id: int, *, open_only: bool = False, limit: int = 20
@@ -382,7 +398,8 @@ class RealReportService:
         settled = [b for b in bets if b.profit is not None and b.signal_id in period]
         totals = (
             sum((money(b.profit) for b in settled), Decimal(0)),
-            sum((b.stake for b in settled), Decimal(0)),
+            # stake at risk: a void bet returned its stake (decision #21, as in the bank totals)
+            sum((b.stake for b in settled if b.outcome is not data.Outcome.VOID), Decimal(0)),
         )
         return build_report((date_from, date_to), request.group_by, rows, totals)
 

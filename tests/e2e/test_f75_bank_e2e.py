@@ -208,7 +208,10 @@ async def test_cashout_asks_for_the_payout_and_validates(world: World) -> None:
     assert await world.admin.state() == BetFlow.cashout_input.state
     assert "abc" in shown(await world.admin.send("abc"))[0]
     assert "-5" in shown(await world.admin.send("-5"))[0]  # a payout is never negative
-    assert shown(await world.admin.send("1" + "0" * 15)) == [texts.BANK_CASHOUT_RANGE]
+    assert "1" + "0" * 15 in shown(await world.admin.send("1" + "0" * 15))[0]  # beyond MAX_MONEY
+    ceiling = open_bet.stake * Decimal(str(open_bet.odds_taken))
+    over = shown(await world.admin.send(str(ceiling + 1)))
+    assert over == [texts.BANK_CASHOUT_RANGE.format(ceiling=money(ceiling))]
     assert await world.admin.state() == BetFlow.cashout_input.state
 
     methods = await world.admin.send("6 000")

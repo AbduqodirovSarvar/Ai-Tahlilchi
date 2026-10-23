@@ -203,7 +203,7 @@ async def test_cashout_asks_for_units_validates_and_marks(real_bot: RealBot) -> 
     assert "Cashout" in prompt[0]
     assert await admin.state() == ResultFlow.cashout_input.state
     assert "abc" in shown(await admin.send("abc"))[0]  # not a number: asked again
-    assert shown(await admin.send("500")) == [texts.RESULT_CASHOUT_RANGE]
+    assert shown(await admin.send("500")) == [texts.RESULT_CASHOUT_RANGE.format(low=-100, high=100)]
     assert await admin.state() == ResultFlow.cashout_input.state
 
     methods = await admin.send("0.8")

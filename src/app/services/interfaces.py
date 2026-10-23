@@ -67,6 +67,9 @@ MIN_ODDS_LIMIT: Final = 1.01
 MAX_ODDS_LIMIT: Final = 100.0
 PREMATCH_MINUTE_CHOICES: Final = frozenset({30, 60, 90})
 MAX_NOTE_LENGTH: Final = 500
+MAX_MONEY: Final = Decimal(10) ** 12
+"""Largest money amount accepted anywhere (bank, unit, limits, stake, payout): beyond it the
+SQLite text storage and the reports lose meaning (contract v1.9)."""
 MAX_TEMPLATE_NAME_LENGTH: Final = 64
 MIN_EXPRESS_LEGS: Final = 2
 MAX_EXPRESS_LEGS: Final = 4
@@ -108,9 +111,10 @@ def _check_text(value: str, field: str, max_length: int) -> None:
 
 
 def _check_positive(value: Decimal | None, field: str) -> None:
-    """Require ``value`` to be ``None`` or a finite, strictly positive amount."""
+    """Require ``value`` to be ``None`` or a finite amount in ``(0, MAX_MONEY]``."""
     if value is not None:
         _check(value.is_finite() and value > 0, field, f"must be positive (got {value})")
+        _check(value <= MAX_MONEY, field, f"must be at most {MAX_MONEY}")
 
 
 def is_valid_entity_id(value: str) -> bool:
@@ -1319,7 +1323,12 @@ class ResultMarkRequest:
             "required only for cash-outs",
         )
         if self.cashout_profit_units is not None:
-            _check(self.cashout_profit_units.is_finite(), "cashout_profit_units", "not finite")
+            _check(
+                self.cashout_profit_units.is_finite()
+                and abs(self.cashout_profit_units) <= MAX_MONEY,
+                "cashout_profit_units",
+                "not finite or too large",
+            )
         if by_payout:
             _check(
                 self.cashout_bet_id is not None and self.cashout_payout is not None,
@@ -1328,9 +1337,9 @@ class ResultMarkRequest:
             )
         if self.cashout_payout is not None:
             _check(
-                self.cashout_payout.is_finite() and self.cashout_payout >= 0,
+                self.cashout_payout.is_finite() and 0 <= self.cashout_payout <= MAX_MONEY,
                 "cashout_payout",
-                "must be zero or more",
+                f"must be within [0, {MAX_MONEY}]",
             )
 
 

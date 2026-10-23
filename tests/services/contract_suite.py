@@ -1029,6 +1029,7 @@ class ResultContract:
             user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(100))
         )
         await clock.advance_async(SETTLE_DELAY)
+        other_before = await services.bets.get_bet(user_id, other.bet_id)
 
         marked = await services.results.mark_result(
             user_id,
@@ -1040,11 +1041,71 @@ class ResultContract:
             ),
         )
 
-        assert marked.result is ResultMark.CASHOUT
+        assert marked.signal_id == signal.signal_id
         assert (await services.bets.get_bet(user_id, cashed.bet_id)).profit == Decimal(-50)
-        # the other bet on the signal follows at the same return (-20%), not at "-50"
-        assert (await services.bets.get_bet(user_id, other.bet_id)).profit == Decimal(-20)
-        assert (await services.bets.bank_summary(user_id)).totals.cashout == 2
+        # decision #22: only the cashed bet follows the payout, the other keeps its own result
+        assert (await services.bets.get_bet(user_id, other.bet_id)) == other_before
+        assert (await services.bets.bank_summary(user_id)).totals.cashout == 1
+
+    async def test_cashout_of_the_only_bet_settles_the_signal_too(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        bet = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(100))
+        )
+        await clock.advance_async(SETTLE_DELAY)
+
+        marked = await services.results.mark_result(
+            user_id,
+            ResultMarkRequest(
+                signal_id=signal.signal_id,
+                mark=ResultMark.CASHOUT,
+                cashout_bet_id=bet.bet_id,
+                cashout_payout=Decimal(150),
+            ),
+        )
+
+        assert marked.signal_id == signal.signal_id
+        assert (await services.bets.get_bet(user_id, bet.bet_id)).profit == Decimal(50)
+
+    async def test_cashout_beyond_what_the_bet_could_pay_is_refused(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        bet = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(100))
+        )
+        await clock.advance_async(SETTLE_DELAY)
+
+        with pytest.raises(ValidationFailedError):  # a win pays 200 at most
+            await services.results.mark_result(
+                user_id,
+                ResultMarkRequest(
+                    signal_id=signal.signal_id,
+                    mark=ResultMark.CASHOUT,
+                    cashout_bet_id=bet.bet_id,
+                    cashout_payout=Decimal(201),
+                ),
+            )
+
+    async def test_signal_cashout_in_units_stays_within_loss_and_full_win(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        await clock.advance_async(SETTLE_DELAY)
+        ceiling = signal.stake_units * (Decimal(str(signal.odds)) - 1)
+
+        for units in (-signal.stake_units - 1, ceiling + 1):
+            with pytest.raises(ValidationFailedError):
+                await services.results.mark_result(
+                    user_id,
+                    ResultMarkRequest(
+                        signal_id=signal.signal_id,
+                        mark=ResultMark.CASHOUT,
+                        cashout_profit_units=units,
+                    ),
+                )
 
     async def test_cashout_payout_for_a_foreign_or_unknown_bet_is_refused(
         self, services: Services, user_id: int, clock: MutableClock

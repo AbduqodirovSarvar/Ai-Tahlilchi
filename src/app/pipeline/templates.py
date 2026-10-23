@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 from typing import Final
 
 from app.db.enums import DateMode, QueryScope, SignalSource
-from app.db.repo import SavedQueryDraft, SavedQueryRecord, list_saved_queries
+from app.db.repo import SavedQueryDraft, SavedQueryRecord, list_saved_queries, user_ids
 from app.domain import MarketType, Sport
 from app.logging import get_logger
 from app.pipeline.alerts import fail_key
@@ -41,7 +41,6 @@ from app.pipeline.limit_notice import LIMIT_DETAIL, announce_loss_limit
 from app.pipeline.limits import load_loss_status
 from app.pipeline.profile import UserProfile, load_profile, local_moment, utc_bounds
 from app.pipeline.provider import AUTOMATIC
-from app.pipeline.queries import user_ids
 from app.pipeline.types import AnalysisRequest
 
 logger = get_logger(__name__)
@@ -152,7 +151,7 @@ def template_request(
         sort=query.sort,
         include_no_value=query.include_no_value,
         source=SignalSource.CUSTOM if query.include_no_value else SignalSource.ANALYSIS,
-        bank=profile.bank,
+        bank=profile.balance,
         unit=profile.unit,
         prematch_minutes=s.prematch_minutes,
         purpose=AUTOMATIC,

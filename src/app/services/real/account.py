@@ -4,13 +4,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from app.domain import MarketType, Sport, normalize_name
-from app.pipeline import data, queries
+from app.pipeline import data
 from app.pipeline.provider import (
     DEFAULT_DAILY_LIMIT,
     DEFAULT_MANUAL_RESERVE,
     SUPPORTED_SPORT_MARKETS,
 )
-from app.pipeline.queries import league_refs, team_refs
+from app.pipeline.redaction import scrub_text
 from app.pipeline.review import CandidateReviewer, llm_usage
 from app.services.errors import NotFoundError, ValidationFailedError
 from app.services.interfaces import (
@@ -83,7 +83,7 @@ class RealCatalogService:
         """See :meth:`CatalogService.list_leagues` (one entry per competition)."""
         directory = self._core.ctx.leagues
         async with self._core.ctx.sessions() as session:
-            rows = await queries.list_leagues(session, sport)
+            rows = await data.list_leagues(session, sport)
         chosen = {}
         for league_id, league in rows:
             key = directory.canonical(league.ref)
@@ -141,8 +141,8 @@ class RealCatalogService:
             wanted = parse_ids(request.league_ids, "league_ids") | frozenset(
                 profile.settings.leagues
             )
-            leagues = await league_refs(session, wanted)
-            teams = await team_refs(session, parse_ids(request.team_ids, "team_ids"))
+            leagues = await data.league_refs(session, wanted)
+            teams = await data.team_refs(session, parse_ids(request.team_ids, "team_ids"))
         canonical = core.ctx.leagues.canonical
         explicit = bool(request.league_ids or request.team_ids)
         chosen_leagues = {
@@ -331,9 +331,9 @@ class RealWatchlistService:
             raise NotFoundError(target.kind.value, target.entity_id) from None
         async with self._core.ctx.sessions() as session:
             found = (
-                await queries.get_team(session, number)
+                await data.get_team(session, number)
                 if target.kind is WatchKind.TEAM
-                else await queries.get_league(session, number)
+                else await data.get_league(session, number)
             )
         if found is None:
             raise NotFoundError(target.kind.value, target.entity_id)
@@ -346,9 +346,9 @@ class RealWatchlistService:
             items = []
             for record in records:
                 found = (
-                    await queries.get_team(session, record.entity_id)
+                    await data.get_team(session, record.entity_id)
                     if record.kind is data.WatchKind.TEAM
-                    else await queries.get_league(session, record.entity_id)
+                    else await data.get_league(session, record.entity_id)
                 )
                 if found is not None:
                     items.append(_item(record, found[1].name))
@@ -463,7 +463,7 @@ class RealStatusService:
             and self._core.now() - learning.done_at > LEARNING_OVERDUE_AFTER
         )
         errors = tuple(
-            ErrorEntry(at=at, component=component, message=message)
+            ErrorEntry(at=at, component=component, message=scrub_text(message))
             for at, component, message in await ctx.ledger.recent_errors()
         )
         return SystemStatus(
