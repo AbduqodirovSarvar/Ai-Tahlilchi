@@ -132,6 +132,26 @@ def _jobs_block(status: SystemStatus, zone: ZoneInfo) -> list[str]:
     return lines
 
 
+def _learning_block(status: SystemStatus, zone: ZoneInfo) -> list[str]:
+    """Learning mode, the last runs of its jobs and the "missed week" warning (F8.8)."""
+    if status.learning_mode is None:
+        return []
+    lines = [texts.STATUS_LEARNING_HEADER, texts.STATUS_LEARNING_MODE[status.learning_mode.value]]
+    runs = {job.name: job for job in status.jobs}
+    for name, label in texts.STATUS_LEARNING_JOBS.items():
+        job = runs.get(name)
+        when = (
+            texts.STATUS_JOB_NEVER
+            if job is None or job.last_run_at is None
+            else _stamp(job.last_run_at, zone)
+        )
+        mark = "" if job is None else ("✅ " if job.ok else "❌ ")
+        lines.append(texts.STATUS_LEARNING_JOB_LINE.format(mark=mark, name=label, time=when))
+    if status.learning_missed:
+        lines.append(texts.STATUS_LEARNING_MISSED)
+    return lines
+
+
 def _errors_block(status: SystemStatus, zone: ZoneInfo) -> list[str]:
     if not status.recent_errors:
         return [texts.STATUS_ERRORS_NONE]
@@ -150,10 +170,11 @@ def format_status(status: SystemStatus, zone: ZoneInfo, now: datetime, backend: 
         _llm_block(status),
         _refresh_block(status, zone, now),
         _jobs_block(status, zone),
+        _learning_block(status, zone),
         _errors_block(status, zone),
         [texts.STATUS_FOOTER],
     ]
-    return "\n\n".join("\n".join(block) for block in blocks)
+    return "\n\n".join("\n".join(block) for block in blocks if block)
 
 
 # --------------------------------------------------------------------------- bets

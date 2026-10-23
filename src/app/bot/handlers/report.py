@@ -33,7 +33,7 @@ from app.bot.report_ui import (
     report_keyboard,
     segment_label,
 )
-from app.bot.states import ReportFlow
+from app.bot.states import ReportFlow, leave_flow
 from app.services.interfaces import ExportFile, ReportGroup, ReportView
 
 COMMAND_REPORT: Final = "hisobot"
@@ -75,7 +75,7 @@ async def _report(
 
 async def _leave_input(flow: FlowContext) -> None:
     if await flow.state.get_state() == ReportFlow.range_input.state:
-        await flow.state.set_state(None)
+        await leave_flow(flow.state)
 
 
 # --------------------------------------------------------------------------- show
@@ -120,7 +120,7 @@ async def on_range_text(message: Message, flow: FlowContext) -> None:
     if end > today:
         raise InputError(texts.REPORT_RANGE_FUTURE)
     await flow.state.update_data({RANGE_KEY: [start.isoformat(), end.isoformat()]})
-    await flow.state.set_state(None)
+    await leave_flow(flow.state)
     _, text = await _report(flow, PERIOD_CUSTOM, None)
     await send_html(message, text, report_keyboard(PERIOD_CUSTOM, None))
 

@@ -1,12 +1,13 @@
 """Pure parts of ⭐ Sevimlilar (plan §6.7, F7.3): list, item screen and picker keyboards.
 
-Buttons that name a watched entity carry ``crc32(entity_id)`` (8 hex characters) and its kind,
-never the id itself (up to 40 bytes) and never a list position: the entity is looked up in a
-fresh watchlist when the button is pressed, so a list that changed in between can never make
-a tap hit another entry.
+Buttons that name a watched entity carry a 12-hex digest of the id (``entity_key``) and its
+kind, never the id itself (up to 40 bytes) and never a list position: the entity is looked up
+in a fresh watchlist when the button is pressed, so a list that changed in between can never
+make a tap hit another entry. A digest that still matched two entries is treated as unknown
+instead of picking the first. The list is paged (``app.bot.paging``): every entry has a button.
 """
 
-import zlib
+import hashlib
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Final, Self
@@ -19,9 +20,9 @@ from app.bot.custom_ui import CustomOption
 from app.bot.draft import StaleDraftError
 from app.bot.formatters import escape, sport_label
 from app.bot.keyboards import checked_label, markup_of, single_button
+from app.bot.paging import pager_row, paginate
 from app.services.interfaces import WatchItem, WatchKind, WatchNotification
 
-MAX_LISTED_ITEMS: Final = 20
 MAX_PICK_OPTIONS: Final = 20
 KIND_CODES: Final[dict[WatchKind, str]] = {WatchKind.TEAM: "t", WatchKind.LEAGUE: "l"}
 FLAG_CODES: Final[dict[WatchNotification, str]] = {
@@ -29,13 +30,17 @@ FLAG_CODES: Final[dict[WatchNotification, str]] = {
     WatchNotification.ODDS_MOVE: "o",
     WatchNotification.RESULT: "r",
 }
+KEY_BYTES: Final = 6
 PICK_TEAM: Final = "pick_team"
 PICK_LEAGUE: Final = "pick_league"
 
 
 def entity_key(entity_id: str) -> str:
-    """Short stable key of a catalog id for ``callback_data``."""
-    return f"{zlib.crc32(entity_id.encode()):08x}"
+    """Short stable key of a catalog id for ``callback_data`` (48-bit digest, not a crc32).
+
+    A crc32 collision of two catalog ids can be built by hand, a 48-bit blake2b one cannot.
+    """
+    return hashlib.blake2b(entity_id.encode(), digest_size=KEY_BYTES).hexdigest()
 
 
 def kind_of(code: str) -> WatchKind | None:
@@ -51,14 +56,12 @@ def flag_of(code: str) -> WatchNotification | None:
 def find_item(items: Sequence[WatchItem], kind_code: str, key: str) -> WatchItem | None:
     """The watchlist entry a button names, or ``None`` when it is gone."""
     kind = kind_of(kind_code)
-    return next(
-        (
-            item
-            for item in items
-            if item.target.kind is kind and entity_key(item.target.entity_id) == key
-        ),
-        None,
-    )
+    matches = [
+        item
+        for item in items
+        if item.target.kind is kind and entity_key(item.target.entity_id) == key
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _flags_text(item: WatchItem) -> str:
@@ -69,11 +72,11 @@ def _flags_text(item: WatchItem) -> str:
     )
 
 
-def format_watchlist(items: Sequence[WatchItem]) -> str:
-    """The list screen: each entry with its notification switches."""
+def format_watchlist(items: Sequence[WatchItem], page: int = 0) -> str:
+    """The list screen (one page): each entry with its notification switches."""
     if not items:
         return texts.WATCH_EMPTY
-    shown = items[:MAX_LISTED_ITEMS]
+    current = paginate(items, page)
     lines = [texts.WATCH_TITLE.format(count=len(items))]
     lines.extend(
         texts.WATCH_ITEM_LINE.format(
@@ -81,17 +84,16 @@ def format_watchlist(items: Sequence[WatchItem]) -> str:
             name=escape(item.name),
             flags=_flags_text(item),
         )
-        for item in shown
+        for item in current.items
     )
-    if len(items) > len(shown):
-        lines.append(texts.WATCH_MORE.format(count=len(items) - len(shown)))
     lines.append("")
     lines.append(texts.WATCH_FOOTER)
     return "\n".join(lines)
 
 
-def watchlist_keyboard(items: Sequence[WatchItem]) -> InlineKeyboardMarkup:
-    """One button per entry, then the add buttons."""
+def watchlist_keyboard(items: Sequence[WatchItem], page: int = 0) -> InlineKeyboardMarkup:
+    """One button per entry of the page, the pager, then the add buttons."""
+    current = paginate(items, page)
     rows = [
         [
             single_button(
@@ -100,11 +102,15 @@ def watchlist_keyboard(items: Sequence[WatchItem]) -> InlineKeyboardMarkup:
                     action="open",
                     kind=KIND_CODES[item.target.kind],
                     key=entity_key(item.target.entity_id),
+                    page=current.number,
                 ),
             )
         ]
-        for item in items[:MAX_LISTED_ITEMS]
+        for item in current.items
     ]
+    pager = pager_row(current, lambda number: WatchCb(action="list", page=number))
+    if pager:
+        rows.append(pager)
     rows.append(
         [
             single_button(texts.BTN_WATCH_ADD_TEAM, WatchCb(action="add_team")),
@@ -123,13 +129,13 @@ def format_item(item: WatchItem) -> str:
     )
 
 
-def item_keyboard(item: WatchItem) -> InlineKeyboardMarkup:
-    """The notification switches, remove and back."""
+def item_keyboard(item: WatchItem, page: int = 0) -> InlineKeyboardMarkup:
+    """The notification switches, remove and back (to the list page the entry was opened from)."""
     kind, key = KIND_CODES[item.target.kind], entity_key(item.target.entity_id)
     switches = [
         single_button(
             checked_label(texts.WATCH_NOTIFY_LABELS[flag], on=flag in item.notifications),
-            WatchCb(action="notify", kind=kind, key=key, flag=FLAG_CODES[flag]),
+            WatchCb(action="notify", kind=kind, key=key, flag=FLAG_CODES[flag], page=page),
         )
         for flag in WatchNotification
     ]
@@ -137,8 +143,10 @@ def item_keyboard(item: WatchItem) -> InlineKeyboardMarkup:
         [
             switches,
             [
-                single_button(texts.BTN_WATCH_REMOVE, WatchCb(action="remove", kind=kind, key=key)),
-                single_button(texts.BTN_WATCH_BACK, WatchCb(action="list")),
+                single_button(
+                    texts.BTN_WATCH_REMOVE, WatchCb(action="remove", kind=kind, key=key, page=page)
+                ),
+                single_button(texts.BTN_WATCH_BACK, WatchCb(action="list", page=page)),
             ],
         ]
     )

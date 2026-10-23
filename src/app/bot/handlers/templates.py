@@ -30,7 +30,7 @@ from app.bot.messaging import (
 )
 from app.bot.parsing import parse_time
 from app.bot.session import WizardSession
-from app.bot.states import TemplateFlow, drop_draft
+from app.bot.states import TemplateFlow, drop_draft, leave_flow
 from app.bot.template_ui import (
     ScheduleDraft,
     delete_keyboard,
@@ -72,10 +72,14 @@ async def _template(flow: FlowContext, template_id: int) -> TemplateView:
 
 
 # --------------------------------------------------------------------------- list and screen
-async def _show_list(message: Message, flow: FlowContext, notice: str | None = None) -> None:
+async def _show_list(
+    message: Message, flow: FlowContext, notice: str | None = None, page: int = 0
+) -> None:
     views = await flow.services.templates.list_templates(flow.user_id)
-    text = format_templates(views)
-    await edit_html(message, f"{notice}\n\n{text}" if notice else text, templates_keyboard(views))
+    text = format_templates(views, page)
+    await edit_html(
+        message, f"{notice}\n\n{text}" if notice else text, templates_keyboard(views, page)
+    )
 
 
 async def open_templates(message: Message, flow: FlowContext) -> None:
@@ -85,11 +89,11 @@ async def open_templates(message: Message, flow: FlowContext) -> None:
     await send_html(message, format_templates(views), templates_keyboard(views))
 
 
-async def on_list(callback: CallbackQuery, flow: FlowContext) -> None:
-    """⬅️ Shablonlarga."""
+async def on_list(callback: CallbackQuery, callback_data: TplCb, flow: FlowContext) -> None:
+    """⬅️ Shablonlarga, or a page of the list (◀️ ▶️; ``value`` is the page)."""
     await answer_callback(callback)
     await _drop_schedule(flow)
-    await _show_list(_message_of(callback), flow)
+    await _show_list(_message_of(callback), flow, page=callback_data.value)
 
 
 async def on_open(callback: CallbackQuery, callback_data: TplCb, flow: FlowContext) -> None:
@@ -97,7 +101,8 @@ async def on_open(callback: CallbackQuery, callback_data: TplCb, flow: FlowConte
     view = await _template(flow, callback_data.id)
     await answer_callback(callback)
     await _drop_schedule(flow)
-    await edit_html(_message_of(callback), format_template(view), template_keyboard(view))
+    page = callback_data.value
+    await edit_html(_message_of(callback), format_template(view), template_keyboard(view, page))
 
 
 # --------------------------------------------------------------------------- run
@@ -135,7 +140,9 @@ async def on_delete(callback: CallbackQuery, callback_data: TplCb, flow: FlowCon
     view = await _template(flow, callback_data.id)
     await answer_callback(callback)
     text = texts.TPL_DELETE_ASK.format(name=escape(view.name))
-    await edit_html(_message_of(callback), text, delete_keyboard(view.template_id))
+    await edit_html(
+        _message_of(callback), text, delete_keyboard(view.template_id, callback_data.value)
+    )
 
 
 async def on_delete_yes(callback: CallbackQuery, callback_data: TplCb, flow: FlowContext) -> None:
@@ -144,7 +151,7 @@ async def on_delete_yes(callback: CallbackQuery, callback_data: TplCb, flow: Flo
     await flow.services.templates.delete_template(flow.user_id, view.template_id)
     await answer_callback(callback)
     notice = texts.TPL_DELETED.format(name=escape(view.name))
-    await _show_list(_message_of(callback), flow, notice)
+    await _show_list(_message_of(callback), flow, notice, callback_data.value)
 
 
 # --------------------------------------------------------------------------- schedule
@@ -156,7 +163,7 @@ async def _drop_schedule(flow: FlowContext) -> None:
     data = await flow.state.get_data()
     if SCHEDULE_KEY in data or await flow.state.get_state() == TemplateFlow.time_input.state:
         data.pop(SCHEDULE_KEY, None)
-        await flow.state.set_state(None)
+        await leave_flow(flow.state)
         await flow.state.set_data(data)
 
 
@@ -185,7 +192,7 @@ async def on_schedule(callback: CallbackQuery, callback_data: TplCb, flow: FlowC
     message = _message_of(callback)
     await answer_callback(callback)
     draft = ScheduleDraft.starting(view, message.message_id, settings.send_time)
-    await flow.state.set_state(None)
+    await leave_flow(flow.state)
     await _save_schedule_draft(flow, draft)
     await _show_schedule(message, flow, draft)
 
@@ -230,7 +237,7 @@ async def on_time_text(message: Message, flow: FlowContext) -> None:
     view = await _template(flow, draft.template_id)
     zone = (await flow.settings()).timezone
     sent = await send_html(message, format_schedule(view, draft, zone), schedule_keyboard(draft))
-    await flow.state.set_state(None)
+    await leave_flow(flow.state)
     await _save_schedule_draft(flow, replace(draft, message_id=sent.message_id))
 
 

@@ -63,11 +63,6 @@ def test_odds_product_has_no_float_drift_worth_showing() -> None:
     assert abs(Decimal(str(express.combined_odds)) - Decimal("1.4641")) < Decimal("1e-12")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-4: express EV is P*O-1 from win probabilities, so a quarter-line Asian leg "
-    "(half win / half loss, ev != p*odds-1) is mispriced; the exact value is prod(1+ev)-1",
-)
 def test_a_quarter_line_leg_contributes_its_own_ev() -> None:
     quarter = make_signal(
         signal_id=1,

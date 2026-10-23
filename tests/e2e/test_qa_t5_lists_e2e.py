@@ -1,6 +1,7 @@
 """QA (T5 bot): templates, watchlist, callback_data sizes, message splitting and texts."""
 
 import re
+import zlib
 from datetime import time
 
 import pytest
@@ -128,12 +129,21 @@ async def test_following_the_same_team_twice_by_command_keeps_one_entry(real_bot
     assert first and second
 
 
+async def _walk_pages(admin: Client, prefix: str, next_prefix: str) -> list[str]:
+    """Every ``prefix`` button over all pages of the list on the newest message (via ▶️)."""
+    message_id = admin.last_message_id
+    seen: list[str] = []
+    for _ in range(50):
+        seen += [d for t, d in admin.live_buttons(message_id) if d.startswith(prefix)]
+        forward = [d for t, d in admin.live_buttons(message_id) if t == "▶️"]
+        if not forward:
+            return seen
+        await admin.press_data(forward[0], message_id)
+    msg = f"the {next_prefix} pager never ended"
+    raise AssertionError(msg)
+
+
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-7: the watchlist screen shows 20 buttons; entry 21+ can be neither opened "
-    "nor removed from the bot (same for templates)",
-)
 async def test_every_followed_team_can_be_opened_from_the_list(real_bot: RealBot) -> None:
     rb = real_bot
     teams = await _team_names(rb)
@@ -145,17 +155,36 @@ async def test_every_followed_team_can_be_opened_from_the_list(real_bot: RealBot
     admin = rb.client()
 
     await admin.send(texts.MENU_WATCHLIST)
+    opens = await _walk_pages(admin, "wl:open", "wl:list")
 
-    opens = [d for _, d in admin.live_buttons(admin.last_message_id) if d.startswith("wl:open")]
     assert len(opens) == len(teams)
+    assert len(set(opens)) == len(teams)  # every entry has its own button, none repeated
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-7: 25 templates, only the first 20 (by name) get a button, so the rest "
-    "can be neither run, scheduled nor deleted",
-)
+async def test_an_entry_beyond_the_first_pages_can_be_opened_and_removed(
+    real_bot: RealBot,
+) -> None:
+    rb = real_bot
+    teams = await _team_names(rb)
+    for team_id, _ in teams:
+        await rb.services.watchlist.add_watch(
+            ADMIN, WatchTarget(kind=WatchKind.TEAM, entity_id=team_id)
+        )
+    admin = rb.client()
+    await admin.send(texts.MENU_WATCHLIST)
+    opens = await _walk_pages(admin, "wl:open", "wl:list")
+    last_open = opens[-1]  # an entry from the last page (the 21st or later)
+    message_id = admin.last_message_id
+
+    await admin.press_data(last_open, message_id)
+    remove = [d for t, d in admin.live_buttons(message_id) if d.startswith("wl:remove")]
+    await admin.press_data(remove[0], message_id)
+
+    assert len(await rb.services.watchlist.list_watchlist(ADMIN)) == len(teams) - 1
+
+
+@pytest.mark.slow
 async def test_every_saved_template_has_a_button(real_bot: RealBot) -> None:
     rb = real_bot
     for number in range(25):
@@ -165,20 +194,43 @@ async def test_every_saved_template_has_a_button(real_bot: RealBot) -> None:
     admin = rb.client()
 
     await admin.send(texts.MENU_TEMPLATES)
+    opens = await _walk_pages(admin, "tp:open", "tp:list")
 
-    opens = [d for _, d in admin.live_buttons(admin.last_message_id) if d.startswith("tp:open")]
     assert len(opens) == 25
+    assert len(set(opens)) == 25
+
+
+@pytest.mark.slow
+async def test_a_template_on_the_last_page_can_be_opened_and_deleted(real_bot: RealBot) -> None:
+    rb = real_bot
+    for number in range(25):
+        await rb.services.templates.save_template(
+            ADMIN, TemplateDraft(name=f"T{number:02d}", query=QUERY)
+        )
+    admin = rb.client()
+    await admin.send(texts.MENU_TEMPLATES)
+    opens = await _walk_pages(admin, "tp:open", "tp:list")
+    message_id = admin.last_message_id
+
+    await admin.press_data(opens[-1], message_id)
+    ask = [d for t, d in admin.live_buttons(message_id) if d.startswith("tp:delete:")]
+    await admin.press_data(ask[0], message_id)
+    yes = [d for t, d in admin.live_buttons(message_id) if d.startswith("tp:delete_yes")]
+    await admin.press_data(yes[0], message_id)
+
+    assert len(await rb.services.templates.list_templates(ADMIN)) == 24
+    # back on the page the template was deleted from, with a pager still working
+    assert any(t == "◀️" for t, _ in admin.live_buttons(message_id))
 
 
 CRC_COLLISION = ("team:29685295", "team:32060020")
 """Found by a birthday search; crc32 is 32-bit, so a pair appears after ~80k ids."""
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-9: a watchlist button carries crc32(entity_id); two followed ids with the same "
-    "crc32 (about 1 in 4e9 per pair, easy to construct) address the first entry for both",
-)
+def _crc(entity_id: str) -> str:
+    return f"{zlib.crc32(entity_id.encode()):08x}"
+
+
 def test_two_entities_with_the_same_crc_are_told_apart() -> None:
     first_id, second_id = CRC_COLLISION
     items = [
@@ -190,7 +242,8 @@ def test_two_entities_with_the_same_crc_are_told_apart() -> None:
         )
         for entity in (first_id, second_id)
     ]
-    assert entity_key(first_id) == entity_key(second_id)
+    assert _crc(first_id) == _crc(second_id)  # the old key could not tell them apart
+    assert entity_key(first_id) != entity_key(second_id)
 
     found = find_item(items, "t", entity_key(second_id))
 
@@ -226,8 +279,8 @@ def test_the_largest_possible_callback_data_fits_telegrams_64_bytes(data: Callba
 
 
 @pytest.mark.parametrize("entity", ["😀" * 16, "a:b:c" * 12, "é" * 32, "x" * 64, "::::"])
-def test_entity_keys_stay_8_hex_whatever_the_catalog_id_looks_like(entity: str) -> None:
-    assert re.fullmatch(r"[0-9a-f]{8}", entity_key(entity))
+def test_entity_keys_stay_12_hex_whatever_the_catalog_id_looks_like(entity: str) -> None:
+    assert re.fullmatch(r"[0-9a-f]{12}", entity_key(entity))
 
 
 async def test_keyboards_with_hostile_names_keep_every_callback_small_and_texts_valid(
@@ -308,10 +361,6 @@ def test_texts_that_name_a_feature_as_missing_say_so_honestly() -> None:
 
 
 # --------------------------------------------------------------------------- money formatting
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-10: a tiny loss (a cash-out scaled to the stake) shows as '-0' on the bank screen",
-)
 def test_a_loss_smaller_than_a_cent_is_shown_as_plain_zero() -> None:
     from decimal import Decimal  # noqa: PLC0415
 

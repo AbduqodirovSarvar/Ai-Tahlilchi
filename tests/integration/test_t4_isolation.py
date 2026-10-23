@@ -177,7 +177,7 @@ async def test_ids_in_a_batch_that_belong_to_someone_else_are_skipped_silently(
 async def test_lists_and_aggregates_only_ever_contain_the_callers_own_rows(world: World) -> None:
     services = world.services
     own = await services.signals.list_signals(B, DateSpec.today(), include_hidden=True)
-    exported = (await services.reports.export(B)).content.decode()
+    exported = (await services.reports.export(B)).content.decode("utf-8-sig")
 
     assert [s.signal_id for s in own] == [world.b_signal]
     assert await services.bets.list_bets(B, limit=100) == ()

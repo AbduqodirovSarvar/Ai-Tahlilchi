@@ -4,6 +4,9 @@ The card message is edited in place, so there is exactly one message per signal 
 button of the detail card always leads back to it.
 """
 
+from collections.abc import Callable
+from datetime import datetime
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
@@ -36,7 +39,11 @@ async def on_detail(
 
 
 async def on_back_to_card(
-    callback: CallbackQuery, callback_data: CardCb, services: Services, user_id: int
+    callback: CallbackQuery,
+    callback_data: CardCb,
+    services: Services,
+    user_id: int,
+    clock: Callable[[], datetime],
 ) -> None:
     """⬅️ on the detail card: the signal card again, with today's numbers."""
     message = callback_message(callback)
@@ -48,7 +55,9 @@ async def on_back_to_card(
     if signal.state is SignalState.HIDDEN:
         await edit_html(message, format_hidden_card(signal))
         return
-    await edit_html(message, format_signal_card(signal, zone), keyboards.signal_keyboard(signal))
+    await edit_html(
+        message, format_signal_card(signal, zone), keyboards.signal_keyboard(signal, clock())
+    )
 
 
 def create_router() -> Router:

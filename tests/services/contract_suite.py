@@ -453,7 +453,7 @@ class RecommendationContract:
         again = next(s for s in strict.signals if s.signal_id == signal.signal_id)
         assert again.recommended_at == signal.recommended_at
         assert not again.no_value
-        exported = (await services.reports.export(user_id)).content.decode()
+        exported = (await services.reports.export(user_id)).content.decode("utf-8-sig")
         assert f"\n{signal.signal_id}," in exported
 
     async def test_no_value_selection_is_recommended_only_when_a_query_passes_it(
@@ -572,7 +572,9 @@ async def _no_value_candidate(
 
 
 async def _exported_ids(services: Services, user_id: int) -> set[int]:
-    lines = (await services.reports.export(user_id)).content.decode().strip().splitlines()
+    lines = (
+        (await services.reports.export(user_id)).content.decode("utf-8-sig").strip().splitlines()
+    )
     return {int(line.split(",", 1)[0]) for line in lines[1:]}
 
 
@@ -951,6 +953,44 @@ class BetContract:
         assert bet.outcome == settled.result
         assert (bet.profit is None) == (settled.result is None)
 
+    async def test_get_bet_returns_exactly_the_users_bet(
+        self, services: Services, user_id: int
+    ) -> None:
+        signal = (await analyze_week(services, user_id)).signals[0]
+        bet = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, stake=Decimal(5))
+        )
+
+        assert await services.bets.get_bet(user_id, bet.bet_id) == bet
+        with pytest.raises(NotFoundError):
+            await services.bets.get_bet(OTHER_USER, bet.bet_id)  # another user's bet
+        with pytest.raises(NotFoundError):
+            await services.bets.get_bet(user_id, bet.bet_id + 10_000)
+
+    async def test_bank_totals_count_every_settled_bet_not_only_a_page(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        for _ in range(105):  # more than list_bets can return
+            await services.bets.place_bet(
+                user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(1))
+            )
+        await clock.advance_async(SETTLE_DELAY)
+        await services.results.mark_result(
+            user_id, ResultMarkRequest(signal_id=signal.signal_id, mark=ResultMark.WON)
+        )
+
+        bank = await services.bets.bank_summary(user_id)
+
+        assert bank.totals.settled == 105
+        assert bank.totals.won == 105
+        (one,) = await services.bets.list_bets(user_id, limit=1)
+        assert one.profit is not None
+        assert bank.totals.profit == one.profit * 105  # every bet is identical
+        assert bank.totals.staked == Decimal(105)
+        assert bank.totals.yield_rate == pytest.approx(float(one.profit))
+        assert bank.open_bets == 0
+
 
 class ResultContract:
     async def test_pending_and_manual_marks(
@@ -973,6 +1013,55 @@ class ResultContract:
         assert target.signal_id not in {
             s.signal_id for s in await services.results.pending_results(user_id)
         }
+
+    async def test_cashout_payout_makes_the_bet_profit_payout_minus_stake(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        settings = await services.settings.get_settings(user_id)
+        await services.settings.update_settings(
+            user_id, replace(settings, bank=Decimal(10_000), unit=Decimal(100))
+        )
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        cashed = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(250))
+        )
+        other = await services.bets.place_bet(
+            user_id, BetDraft(signal_id=signal.signal_id, odds_taken=2.0, stake=Decimal(100))
+        )
+        await clock.advance_async(SETTLE_DELAY)
+
+        marked = await services.results.mark_result(
+            user_id,
+            ResultMarkRequest(
+                signal_id=signal.signal_id,
+                mark=ResultMark.CASHOUT,
+                cashout_bet_id=cashed.bet_id,
+                cashout_payout=Decimal(200),
+            ),
+        )
+
+        assert marked.result is ResultMark.CASHOUT
+        assert (await services.bets.get_bet(user_id, cashed.bet_id)).profit == Decimal(-50)
+        # the other bet on the signal follows at the same return (-20%), not at "-50"
+        assert (await services.bets.get_bet(user_id, other.bet_id)).profit == Decimal(-20)
+        assert (await services.bets.bank_summary(user_id)).totals.cashout == 2
+
+    async def test_cashout_payout_for_a_foreign_or_unknown_bet_is_refused(
+        self, services: Services, user_id: int, clock: MutableClock
+    ) -> None:
+        signal = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals[0]
+        await clock.advance_async(SETTLE_DELAY)
+
+        with pytest.raises(NotFoundError):
+            await services.results.mark_result(
+                user_id,
+                ResultMarkRequest(
+                    signal_id=signal.signal_id,
+                    mark=ResultMark.CASHOUT,
+                    cashout_bet_id=424_242,
+                    cashout_payout=Decimal(10),
+                ),
+            )
 
     async def test_future_signals_cannot_be_marked(self, services: Services, user_id: int) -> None:
         signal = (await analyze_week(services, user_id)).signals[0]
@@ -1059,7 +1148,7 @@ class ReportContract:
     async def test_export_is_csv(self, services: Services, user_id: int) -> None:
         result = await analyze_week(services, user_id)
         exported = await services.reports.export(user_id)
-        lines = exported.content.decode("utf-8").strip().splitlines()
+        lines = exported.content.decode("utf-8-sig").strip().splitlines()
         assert exported.filename.endswith(".csv")
         assert lines[0].startswith("signal_id,")
         assert len(lines) == 1 + len(result.signals)
@@ -1070,7 +1159,7 @@ class ExportBetsContract:
         self, services: Services, user_id: int
     ) -> None:
         empty = await services.reports.export_bets(user_id)
-        assert empty.content.decode("utf-8").strip().splitlines() == [
+        assert empty.content.decode("utf-8-sig").strip().splitlines() == [
             "bet_id,signal_id,fixture,market,line,selection,odds_taken,stake,placed_at,outcome,profit"
         ]
         signals = (await analyze_week(services, user_id, dates=DateSpec.next_days(3))).signals
@@ -1080,7 +1169,7 @@ class ExportBetsContract:
             )
 
         exported = await services.reports.export_bets(user_id)
-        lines = exported.content.decode("utf-8").strip().splitlines()
+        lines = exported.content.decode("utf-8-sig").strip().splitlines()
 
         assert exported.filename == "bets.csv"
         assert exported.media_type == "text/csv"

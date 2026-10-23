@@ -26,6 +26,7 @@ from app.services.interfaces import (
     FixturePage,
     JobStatus,
     LeagueOption,
+    LearningMode,
     LlmQuota,
     RiskProfile,
     ScopeKind,
@@ -52,8 +53,11 @@ from app.services.real.core import (
     settings_record,
     settings_view,
 )
+from app.services.real.learning import mode_of
 
 SEARCH_DAYS: Final = 366
+LEARNING_OVERDUE_AFTER: Final = timedelta(days=8)
+"""A weekly review that last ran longer ago than this (a week plus a day of grace) is overdue."""
 
 
 class RealCatalogService:
@@ -450,6 +454,14 @@ class RealStatusService:
             for name, entry in sorted(runs.items())
         )
         refresh = runs.get("refresh")
+        learning = runs.get("learning")
+        mode = mode_of(self._core)
+        missed = (
+            mode is not LearningMode.OFF
+            and learning is not None
+            and learning.done_at is not None
+            and self._core.now() - learning.done_at > LEARNING_OVERDUE_AFTER
+        )
         errors = tuple(
             ErrorEntry(at=at, component=component, message=message)
             for at, component, message in await ctx.ledger.recent_errors()
@@ -460,6 +472,8 @@ class RealStatusService:
             jobs=jobs,
             recent_errors=errors,
             llm=_llm_quota(ctx.reviewer),
+            learning_mode=mode,
+            learning_missed=missed,
         )
 
     async def _stored_quotas(self) -> list[ApiQuota]:

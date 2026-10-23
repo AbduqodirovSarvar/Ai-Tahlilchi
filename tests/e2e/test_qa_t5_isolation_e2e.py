@@ -184,8 +184,8 @@ async def test_the_other_users_exports_and_reports_hold_only_their_own_rows(
     csv_signals = await rb.services.reports.export(SECOND)
     report = await intruder.send("/hisobot")
 
-    assert csv_bets.content.decode().strip().count("\n") == 0  # header only
-    assert csv_signals.content.decode().strip().count("\n") == 0
+    assert csv_bets.content.decode("utf-8-sig").strip().count("\n") == 0  # header only
+    assert csv_signals.content.decode("utf-8-sig").strip().count("\n") == 0
     assert str(SECRET_STAKE) not in "\n".join(shown(report))
     assert texts.REPORT_EMPTY in "\n".join(shown(report))
 

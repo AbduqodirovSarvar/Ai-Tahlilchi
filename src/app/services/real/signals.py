@@ -10,7 +10,7 @@ from app.domain import FixtureStatus
 from app.pipeline import data
 from app.pipeline.limits import limit_reached, net_loss, week_start
 from app.pipeline.profile import utc_bounds
-from app.pipeline.settle import settle_manually
+from app.pipeline.settle import BetPayout, settle_manually
 from app.services.errors import (
     NotFoundError,
     ValidationFailedError,
@@ -41,6 +41,7 @@ from app.services.real.analysis import window_of
 from app.services.real.core import Core, money, require_signal, to_view
 from app.services.report_math import (
     SignalOutcome,
+    bank_totals,
     bets_export_file,
     build_report,
     day_summary,
@@ -161,8 +162,25 @@ class RealResultService:
             record,
             _MANUAL_OUTCOMES[request.mark],
             cashout_units=request.cashout_profit_units,
+            payout=await self._payout_of(record, request),
         )
         return await RealSignalService(self._core).get_signal(user_id, request.signal_id)
+
+    async def _payout_of(
+        self, record: data.SignalRecord, request: ResultMarkRequest
+    ) -> BetPayout | None:
+        """The money cash-out of one of the user's own bets on ``record``, if the mark has one."""
+        if request.cashout_bet_id is None or request.cashout_payout is None:
+            return None
+        async with self._core.ctx.sessions() as session:
+            bets = await data.bets_for_signal(session, record.id)
+        bet = next(
+            (b for b in bets if b.id == request.cashout_bet_id and b.user_id == record.user_id),
+            None,
+        )
+        if bet is None:
+            raise NotFoundError("bet", request.cashout_bet_id)
+        return BetPayout(bet_id=bet.id, stake=bet.stake, amount=request.cashout_payout)
 
     async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None:
         """See :meth:`ResultService.add_note`.
@@ -278,6 +296,13 @@ class RealBetService:
         """Every bet of the user, newest first (the CSV export; not part of the protocol)."""
         return await self._bets(user_id, ALL_BETS)
 
+    async def get_bet(self, user_id: int, bet_id: BetId) -> BetView:
+        """See :meth:`BetService.get_bet`."""
+        for bet in await self._bets(user_id, ALL_BETS):
+            if bet.bet_id == bet_id:
+                return bet
+        raise NotFoundError("bet", bet_id)
+
     async def list_bets(
         self, user_id: int, *, open_only: bool = False, limit: int = 20
     ) -> tuple[BetView, ...]:
@@ -314,6 +339,10 @@ class RealBetService:
                 Decimal(0),
             ),
             open_bets=sum(1 for bet in bets if bet.outcome is None),
+            totals=bank_totals(
+                (None if b.outcome is None else ResultMark(b.outcome.value), b.stake, b.profit)
+                for b in bets
+            ),
             history=_history(profile.bank, by_day),
             loss_today=loss_today,
             loss_this_week=loss_week,

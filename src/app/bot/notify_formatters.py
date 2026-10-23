@@ -12,6 +12,7 @@ from app.bot import texts
 from app.bot.formatters import (
     clock,
     escape,
+    format_loss_limit,
     odds,
     percent,
     selection_label,
@@ -183,13 +184,29 @@ def format_yesterday(summary: DaySummary) -> str:
 
 
 def format_digest_title(digest: DailyDigest) -> str:
-    """Title and yesterday's tally of the morning message."""
-    lines = [
-        texts.DIGEST_TITLE.format(weekday=weekday_name(digest.day), day=short_date(digest.day))
-    ]
-    if digest.yesterday is not None:
+    """Title of the morning message and, for the morning digest only, yesterday's tally.
+
+    A scheduled template is titled with its own name and has no "yesterday" block.
+    """
+    weekday, day = weekday_name(digest.day), short_date(digest.day)
+    if digest.template_name is not None:
+        title = texts.DIGEST_TEMPLATE_TITLE.format(
+            name=escape(digest.template_name), weekday=weekday, day=day
+        )
+    else:
+        title = texts.DIGEST_TITLE.format(weekday=weekday, day=day)
+    lines = [title]
+    if digest.yesterday is not None and digest.template_name is None:
         lines.append(format_yesterday(digest.yesterday))
     return "\n".join(lines)
+
+
+def format_limit_digest(digest: DailyDigest) -> str | None:
+    """The single "Zarar limitiga yetildi" message that replaces a digest; ``None`` if no limit."""
+    if digest.loss_limit is None:
+        return None
+    notice = format_loss_limit(digest.loss_limit, texts.DIGEST_LOSS_LIMIT)
+    return "\n".join([format_digest_title(digest), notice])
 
 
 def format_recalc_batch(batch: RecalcBatch, zone: ZoneInfo) -> str:

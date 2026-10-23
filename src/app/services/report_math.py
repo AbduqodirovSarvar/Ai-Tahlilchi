@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Final
 
 from app.services.interfaces import (
+    BankTotals,
     BetView,
     CalibrationBucket,
     DaySummary,
@@ -60,6 +61,25 @@ def profit_units(view: SignalView, cashout_units: Decimal | None) -> Decimal | N
         ResultMark.VOID: Decimal(0),
     }
     return by_mark[view.result]
+
+
+def bank_totals(bets: Iterable[tuple[ResultMark | None, Decimal, Decimal | None]]) -> BankTotals:
+    """Tally of settled bets from ``(outcome, stake, profit)`` rows; open bets are skipped.
+
+    One definition for the fake and the real service so the bank screen never recounts.
+    """
+    settled = [(mark, stake, profit) for mark, stake, profit in bets if mark is not None]
+    at_risk = [stake for mark, stake, _ in settled if mark is not ResultMark.VOID]
+    marks = [mark for mark, _, _ in settled]
+    return BankTotals(
+        settled=len(settled),
+        won=sum(mark in _WINS for mark in marks),
+        lost=sum(mark in _LOSSES for mark in marks),
+        void=marks.count(ResultMark.VOID),
+        cashout=marks.count(ResultMark.CASHOUT),
+        profit=sum((profit or Decimal(0) for _, _, profit in settled), Decimal(0)),
+        staked=sum(at_risk, Decimal(0)),
+    )
 
 
 def day_summary(day_rows: Sequence[SignalOutcome], day: date) -> DaySummary:
@@ -212,6 +232,20 @@ EXPORT_HEADER: Final = (
 )
 
 
+_FORMULA_PREFIXES: Final = ("=", "+", "-", "@", "\t", "\r")
+CSV_ENCODING: Final = "utf-8-sig"
+"""UTF-8 with a BOM: Excel otherwise reads Cyrillic and Uzbek apostrophes as Windows-1252."""
+
+
+def safe_cell(text: str) -> str:
+    """Neutralise a text cell a spreadsheet would run as a formula (CSV injection).
+
+    League and team names come from a provider; a name like ``=HYPERLINK(...)`` must open as
+    text. Only text columns go through here: numbers and dates stay numeric.
+    """
+    return f"'{text}" if text.startswith(_FORMULA_PREFIXES) else text
+
+
 def export_row(row: SignalOutcome) -> tuple[object, ...]:
     """One CSV line of a recommended signal and its settlement."""
     view = row.view
@@ -219,9 +253,9 @@ def export_row(row: SignalOutcome) -> tuple[object, ...]:
         view.signal_id,
         view.kickoff.isoformat(),
         view.sport.value,
-        view.league,
-        view.home_team,
-        view.away_team,
+        safe_cell(view.league),
+        safe_cell(view.home_team),
+        safe_cell(view.away_team),
         view.market.type.value,
         "" if view.market.line is None else view.market.line,
         view.selection.value,
@@ -244,7 +278,7 @@ def export_file(rows: Iterable[SignalOutcome]) -> ExportFile:
     writer.writerow(EXPORT_HEADER)
     for row in rows:
         writer.writerow(export_row(row))
-    return ExportFile(filename="signals.csv", content=buffer.getvalue().encode("utf-8"))
+    return ExportFile(filename="signals.csv", content=buffer.getvalue().encode(CSV_ENCODING))
 
 
 BETS_EXPORT_HEADER: Final = (
@@ -272,7 +306,7 @@ def bets_export_file(bets: Iterable[BetView]) -> ExportFile:
             (
                 bet.bet_id,
                 "" if bet.signal_id is None else bet.signal_id,
-                bet.fixture_label,
+                safe_cell(bet.fixture_label),
                 bet.market.type.value,
                 "" if bet.market.line is None else bet.market.line,
                 bet.selection.value,
@@ -283,4 +317,4 @@ def bets_export_file(bets: Iterable[BetView]) -> ExportFile:
                 "" if bet.profit is None else bet.profit,
             )
         )
-    return ExportFile(filename="bets.csv", content=buffer.getvalue().encode("utf-8"))
+    return ExportFile(filename="bets.csv", content=buffer.getvalue().encode(CSV_ENCODING))

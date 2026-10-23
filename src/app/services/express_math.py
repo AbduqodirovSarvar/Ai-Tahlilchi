@@ -2,8 +2,10 @@
 
 A single definition of the rules: how many legs, which picks may be combined and how the
 combined probability, odds and EV are computed. Legs of different matches are independent,
-so probabilities and odds multiply; two picks of one match are correlated (a 1X2 win and
-"over 2.5" move together) and are refused instead of being priced as if they were independent.
+so probabilities and odds multiply and the EV compounds (``prod(1 + ev_i) - 1``, exact for
+quarter-line Asian legs too, where ``p * odds - 1`` is not the leg's EV); two picks of one
+match are correlated (a 1X2 win and "over 2.5" move together) and are refused instead of
+being priced as if they were independent.
 """
 
 import math
@@ -73,10 +75,11 @@ def evaluate(views: Sequence[SignalView], now: datetime) -> ExpressView:
                 selection=view.selection,
                 odds=view.odds,
                 probability=view.probability,
+                fair_odds=view.fair_odds,
             )
             for view in views
         ),
         combined_odds=odds,
         combined_probability=probability,
-        ev=probability * odds - 1.0,
+        ev=math.prod(1.0 + view.ev for view in views) - 1.0,
     )

@@ -100,6 +100,20 @@ _REFERENCE_ODDS: Final = 2.0
 
 
 @dataclass(frozen=True, slots=True)
+class BetPayout:
+    """What the bookmaker paid out for one of the user's bets (a money cash-out)."""
+
+    bet_id: int
+    stake: Decimal
+    amount: Decimal
+
+    @property
+    def profit(self) -> Decimal:
+        """Money won (or lost) by cashing out: payout minus stake."""
+        return self.amount - self.stake
+
+
+@dataclass(frozen=True, slots=True)
 class SettleReport:
     """Counts of one settlement run."""
 
@@ -297,12 +311,16 @@ async def _store(
     record: SignalRecord,
     result: SignalResultRecord,
     settlement: Settlement | None = None,
+    payout: BetPayout | None = None,
 ) -> SignalResultRecord:
     """Persist the result and settle the user's bets on the signal in one transaction."""
     async with ctx.sessions.begin() as session:
         stored = await settle_signal(session, result)
         for bet in await bets_for_signal(session, record.id):
-            profit = _bet_profit(bet.stake, bet.odds_taken, stored, record, settlement)
+            if payout is not None and bet.id == payout.bet_id:
+                profit = payout.profit  # exact money, not a rescaled ratio
+            else:
+                profit = _bet_profit(bet.stake, bet.odds_taken, stored, record, settlement)
             await settle_bet(
                 session,
                 bet.id,
@@ -456,20 +474,26 @@ async def settle_manually(
     outcome: Outcome,
     *,
     cashout_units: Decimal | None = None,
+    payout: BetPayout | None = None,
 ) -> SignalResultRecord:
     """The user's own result (win, loss, void or cash-out) for ``record`` and its bets.
 
     A manual result replaces an automatic one and is never overwritten by a later automatic
-    settlement (``settle_signal``). Bets follow: cash-outs scale the realised units to the
-    bet's stake, void returns the stake.
+    settlement (``settle_signal``). Bets follow: a cash-out in units scales to each bet's
+    stake; a money ``payout`` closes that bet at exactly ``payout - stake`` and gives the
+    signal the same return on its recommended stake (other bets scale by that ratio); void
+    returns the stake.
     """
     stake = record.stake_units
     odds = record.first_odds
+    cashout = cashout_units or Decimal(0)
+    if payout is not None:
+        cashout = stake * payout.profit / payout.stake
     profit = {
         Outcome.WIN: profit_of(stake, odds, Settlement.WIN),
         Outcome.LOSS: profit_of(stake, odds, Settlement.LOSS),
         Outcome.VOID: Decimal(0),
-        Outcome.CASHOUT: cashout_units or Decimal(0),
+        Outcome.CASHOUT: cashout,
     }[outcome]
     result = SignalResultRecord(
         signal_id=record.id,
@@ -481,4 +505,4 @@ async def settle_manually(
         user_note=None,
         settled_at=ctx.clock(),
     )
-    return await _store(ctx, record, result)
+    return await _store(ctx, record, result, payout=payout)

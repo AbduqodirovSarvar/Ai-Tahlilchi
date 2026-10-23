@@ -27,7 +27,7 @@ def legs(count: int, **overrides: object) -> list[SignalView]:
 @given(st.lists(st.tuples(probabilities, odds_values), min_size=2, max_size=4))
 def test_combined_numbers_are_the_products(pairs: list[tuple[float, float]]) -> None:
     views = [
-        make_signal(i, fixture_id=f"fx{i}", probability=p, odds=o)
+        make_signal(i, fixture_id=f"fx{i}", probability=p, odds=o, ev=p * o - 1.0)
         for i, (p, o) in enumerate(pairs, start=1)
     ]
 
@@ -38,6 +38,30 @@ def test_combined_numbers_are_the_products(pairs: list[tuple[float, float]]) -> 
     assert express.combined_probability <= min(p for p, _ in pairs) + 1e-12
     assert express.combined_odds == pytest.approx(math.prod(o for _, o in pairs))
     assert express.ev == pytest.approx(probability * express.combined_odds - 1)
+
+
+@given(st.lists(st.floats(min_value=-0.5, max_value=0.5), min_size=2, max_size=4))
+def test_express_ev_compounds_the_legs_own_ev(evs: list[float]) -> None:
+    """Quarter-line Asian legs: p * odds - 1 is not the leg's EV, prod(1 + ev) - 1 is."""
+    views = [
+        make_signal(i, fixture_id=f"fx{i}", probability=0.5, odds=2.0, ev=ev)
+        for i, ev in enumerate(evs, start=1)
+    ]
+
+    express = evaluate(views, NOW)
+
+    assert express.ev == pytest.approx(math.prod(1.0 + ev for ev in evs) - 1.0)
+
+
+def test_express_fair_odds_multiply_the_legs_fair_odds() -> None:
+    views = [
+        make_signal(1, fixture_id="fx1", probability=0.5, odds=2.0, ev=-0.1, zero_ev_odds=2.2),
+        make_signal(2, fixture_id="fx2", probability=0.5, odds=2.0, ev=0.0, zero_ev_odds=2.0),
+    ]
+
+    express = evaluate(views, NOW)
+
+    assert express.fair_odds == pytest.approx(2.2 * 2.0)
 
 
 def test_three_seventy_percent_picks_make_a_34_percent_express() -> None:

@@ -62,6 +62,13 @@ class CustomFlow(StatesGroup):
     running = State()
 
 
+class ResultFlow(StatesGroup):
+    """🏁 Natijalar: waiting for a typed cash-out result or a note."""
+
+    cashout_input = State()
+    note_input = State()
+
+
 class WatchFlow(StatesGroup):
     """⭐ Sevimlilar: waiting for a team name to add."""
 
@@ -90,6 +97,23 @@ class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 
     value_input = State()
+
+
+RUNNING_STATES: frozenset[str] = frozenset(
+    state.state for state in (AnalysisFlow.running, CustomFlow.running) if state.state is not None
+)
+"""States that guard a background analysis: screens of other features must not clear them."""
+
+
+async def leave_flow(state: FSMContext) -> None:
+    """End a side flow (watchlist, settings, templates...) without touching a running analysis.
+
+    A plain ``set_state(None)`` would drop the "already running" guard of a 🔍/📊 analysis
+    that is still working in the background (QA F-5). ``/start`` and ``/bekor`` still reset
+    everything, as the way out of a stuck state.
+    """
+    if await state.get_state() not in RUNNING_STATES:
+        await state.set_state(None)
 
 
 async def load_draft(state: FSMContext) -> WizardDraft:

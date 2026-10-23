@@ -67,25 +67,7 @@ OTHER_ENTRIES = [
 ]
 
 
-CLEARS_RUNNING = {texts.MENU_WATCHLIST, texts.MENU_SETTINGS, "/kuzat"}
-"""Entries that reset the FSM state and so drop the 'running' guard (QA F-5)."""
-
-
-def _entries(clearing: bool) -> list[object]:
-    return [
-        pytest.param(
-            entry,
-            marks=pytest.mark.xfail(
-                strict=True, reason="QA F-5: this entry resets the FSM state of a running analysis"
-            ),
-        )
-        if clearing and entry in CLEARS_RUNNING
-        else entry
-        for entry in OTHER_ENTRIES
-    ]
-
-
-@pytest.mark.parametrize("entry", _entries(clearing=True))
+@pytest.mark.parametrize("entry", OTHER_ENTRIES)
 async def test_opening_another_screen_does_not_end_the_running_analysis_guard(
     slow_admin: tuple[Client, Services], entry: str
 ) -> None:
@@ -110,7 +92,7 @@ async def test_opening_another_screen_does_not_end_the_running_analysis_guard(
     assert answers(again)[0].text == texts.ALREADY_RUNNING
 
 
-@pytest.mark.parametrize("entry", _entries(clearing=True))
+@pytest.mark.parametrize("entry", OTHER_ENTRIES)
 async def test_opening_another_screen_keeps_the_custom_analysis_running_state(
     slow_admin: tuple[Client, Services], entry: str
 ) -> None:
@@ -189,12 +171,6 @@ async def test_a_flow_survives_a_restart_with_the_persistent_storage(
     await second.dispatcher.storage.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-1: the persistent FSM keeps 'running' after a restart although the job died; "
-    "🔍 Maxsus tahlil then answers 'already running' for good (nothing clears it but "
-    "another flow's reset)",
-)
 async def test_a_dead_custom_run_does_not_lock_the_menu_after_a_restart(
     tmp_path: Path,
     bot: Bot,
@@ -233,7 +209,7 @@ async def test_a_dead_wizard_run_is_recoverable_from_the_menu(
     old = await second.press_data(start, message_id)
     fresh = await second.send(texts.MENU_ANALYSIS)
 
-    assert answers(old)[0].text == texts.ALREADY_RUNNING  # the stale ▶️ is blocked (safe)
+    assert answers(old)[0].text == texts.STALE_BUTTON  # the restart cleared "running": stale, safe
     assert "Sana oralig'i" in "\n".join(shown(fresh))
     assert await second.state() == "AnalysisFlow:dates"
     await second.dispatcher.storage.close()

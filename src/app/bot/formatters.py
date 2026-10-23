@@ -32,6 +32,7 @@ from app.services.interfaces import (
     MIN_SEARCH_LENGTH,
     AnalysisResult,
     DateWindow,
+    LossLimitNotice,
     ResultMark,
     SignalSource,
     SignalState,
@@ -40,6 +41,7 @@ from app.services.interfaces import (
     Verdict,
 )
 
+CENT: Final = Decimal("0.01")
 TELEGRAM_TEXT_LIMIT: Final = 4096
 MAX_NOTE_CHARS: Final = 600
 """LLM notes are cut so one card always fits a message comfortably."""
@@ -89,7 +91,10 @@ def money(value: Decimal | None) -> str:
     """Amount with thousands separated by spaces, or "kiritilmagan"."""
     if value is None:
         return texts.NOT_SET
-    return f"{value:,.2f}".replace(",", " ").removesuffix(".00")
+    rounded = value.quantize(CENT)
+    if not rounded:
+        return "0"  # a loss below one cent must not read "-0"
+    return f"{rounded:,.2f}".replace(",", " ").removesuffix(".00")
 
 
 def clock(value: time) -> str:
@@ -320,6 +325,15 @@ def day_header(group: DayGroup, *, continued: bool = False) -> str:
     )
 
 
+def format_loss_limit(notice: LossLimitNotice, template: str) -> str:
+    """The reached loss limit rendered with ``template`` (digest notice or analysis banner)."""
+    return template.format(
+        period=texts.LOSS_LIMIT_PERIODS[notice.period.value],
+        limit=money(notice.limit),
+        loss=money(notice.loss),
+    )
+
+
 def format_results_summary(result: AnalysisResult) -> str:
     """Header of an analysis result, with shortfall/failure/retro notes or the empty state."""
     window = window_label(result.window)
@@ -344,6 +358,8 @@ def format_results_summary(result: AnalysisResult) -> str:
         )
     if result.failed_fixtures:
         lines.append(texts.RESULTS_FAILED.format(count=result.failed_fixtures))
+    if result.loss_limit is not None and not result.retro:
+        lines.append(format_loss_limit(result.loss_limit, texts.RESULTS_LOSS_LIMIT))
     lines.extend(price_lines(result))
     return "\n".join(lines)
 

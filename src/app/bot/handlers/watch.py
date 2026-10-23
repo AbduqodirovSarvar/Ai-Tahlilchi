@@ -22,7 +22,7 @@ from app.bot.formatters import escape
 from app.bot.handlers.filters import TYPED_INPUT
 from app.bot.keyboards import markup_of, single_button
 from app.bot.messaging import answer_callback, callback_message, edit_html, send_html
-from app.bot.states import WatchFlow
+from app.bot.states import WatchFlow, leave_flow
 from app.bot.watch_ui import (
     MAX_PICK_OPTIONS,
     PICK_LEAGUE,
@@ -60,7 +60,10 @@ CARD_LEAGUE: Final = "l"
 # --------------------------------------------------------------------------- storage
 async def _save(flow: FlowContext, draft: WatchDraft, *, waiting: bool = False) -> None:
     await flow.state.update_data({WATCH_KEY: draft.to_data()})
-    await flow.state.set_state(WatchFlow.team_query if waiting else None)
+    if waiting:
+        await flow.state.set_state(WatchFlow.team_query)
+    else:
+        await leave_flow(flow.state)
 
 
 async def _load(flow: FlowContext) -> WatchDraft:
@@ -69,10 +72,16 @@ async def _load(flow: FlowContext) -> WatchDraft:
 
 
 async def _leave(flow: FlowContext) -> None:
-    """Forget the add flow (the list screen is shown instead)."""
+    """Forget the add flow (the list screen is shown instead).
+
+    Only the watchlist's own state is cleared: opening ⭐ while an analysis runs must not wipe
+    the "already running" guard of that analysis (QA F-5).
+    """
     data = await flow.state.get_data()
     data.pop(WATCH_KEY, None)
-    await flow.state.set_state(None)
+    state = await flow.state.get_state()
+    if state is not None and state.startswith(f"{WatchFlow.__name__}:"):
+        await leave_flow(flow.state)
     await flow.state.set_data(data)
 
 
@@ -84,10 +93,14 @@ def _message_of(callback: CallbackQuery) -> Message:
 
 
 # --------------------------------------------------------------------------- list
-async def _show_list(message: Message, flow: FlowContext, *, notice: str | None = None) -> None:
+async def _show_list(
+    message: Message, flow: FlowContext, *, page: int = 0, notice: str | None = None
+) -> None:
     items = await flow.services.watchlist.list_watchlist(flow.user_id)
-    text = format_watchlist(items)
-    await edit_html(message, f"{notice}\n\n{text}" if notice else text, watchlist_keyboard(items))
+    text = format_watchlist(items, page)
+    await edit_html(
+        message, f"{notice}\n\n{text}" if notice else text, watchlist_keyboard(items, page)
+    )
 
 
 async def open_watchlist(message: Message, flow: FlowContext) -> None:
@@ -97,11 +110,11 @@ async def open_watchlist(message: Message, flow: FlowContext) -> None:
     await send_html(message, format_watchlist(items), watchlist_keyboard(items))
 
 
-async def on_list(callback: CallbackQuery, flow: FlowContext) -> None:
-    """⬅️ Sevimlilarga."""
+async def on_list(callback: CallbackQuery, callback_data: WatchCb, flow: FlowContext) -> None:
+    """⬅️ Sevimlilarga, or a page of the list (◀️ ▶️)."""
     await answer_callback(callback)
     await _leave(flow)
-    await _show_list(_message_of(callback), flow)
+    await _show_list(_message_of(callback), flow, page=callback_data.page)
 
 
 async def _item(callback: CallbackQuery, data: WatchCb, flow: FlowContext) -> WatchItem | None:
@@ -120,7 +133,9 @@ async def on_open(callback: CallbackQuery, callback_data: WatchCb, flow: FlowCon
     if item is None:
         return
     await answer_callback(callback)
-    await edit_html(_message_of(callback), format_item(item), item_keyboard(item))
+    await edit_html(
+        _message_of(callback), format_item(item), item_keyboard(item, callback_data.page)
+    )
 
 
 async def on_notify(callback: CallbackQuery, callback_data: WatchCb, flow: FlowContext) -> None:
@@ -134,7 +149,8 @@ async def on_notify(callback: CallbackQuery, callback_data: WatchCb, flow: FlowC
         flow.user_id, item.target, frozenset(chosen)
     )
     await answer_callback(callback, texts.WATCH_STORED)
-    await edit_html(_message_of(callback), format_item(saved), item_keyboard(saved))
+    page = callback_data.page
+    await edit_html(_message_of(callback), format_item(saved), item_keyboard(saved, page))
 
 
 async def on_remove(callback: CallbackQuery, callback_data: WatchCb, flow: FlowContext) -> None:
@@ -145,7 +161,7 @@ async def on_remove(callback: CallbackQuery, callback_data: WatchCb, flow: FlowC
     await flow.services.watchlist.remove_watch(flow.user_id, item.target)
     await answer_callback(callback)
     notice = texts.WATCH_REMOVED.format(name=escape(item.name))
-    await _show_list(_message_of(callback), flow, notice=notice)
+    await _show_list(_message_of(callback), flow, page=callback_data.page, notice=notice)
 
 
 # --------------------------------------------------------------------------- adding
@@ -244,21 +260,22 @@ async def on_kuzat(message: Message, command: CommandObject, flow: FlowContext) 
 
 
 # --------------------------------------------------------------------------- from a card
-async def _card_options(flow: FlowContext, signal: SignalView) -> dict[str, CustomOption]:
-    """The catalog entries behind a card: its two teams and its league (if resolvable)."""
-    found: dict[str, CustomOption] = {}
-    for code, name in ((CARD_HOME, signal.home_team), (CARD_AWAY, signal.away_team)):
-        teams = await flow.services.catalog.search_teams(name, sport=signal.sport, limit=TEAM_HITS)
-        match = next((team for team in teams if team.name.casefold() == name.casefold()), None)
-        if match is not None:
-            found[code] = CustomOption(match.team_id, match.name, match.sport.value, match.name)
-    leagues = await flow.services.catalog.list_leagues(signal.sport)
-    league = next((x for x in leagues if x.name.casefold() == signal.league.casefold()), None)
-    if league is not None:
-        found[CARD_LEAGUE] = CustomOption(
-            league.league_id, league.name, league.sport.value, league.name
-        )
-    return found
+def _card_options(signal: SignalView) -> dict[str, CustomOption]:
+    """The catalog entries behind a card: its two teams and its league.
+
+    The card carries the catalog ids (contract v1.7), so nothing is searched by name; a card
+    from a source without ids simply offers fewer choices.
+    """
+    candidates = (
+        (CARD_HOME, signal.home_team_id, signal.home_team),
+        (CARD_AWAY, signal.away_team_id, signal.away_team),
+        (CARD_LEAGUE, signal.league_id, signal.league),
+    )
+    return {
+        code: CustomOption(entity_id, name, signal.sport.value, name)
+        for code, entity_id, name in candidates
+        if entity_id
+    }
 
 
 def _card_keyboard(
@@ -283,7 +300,7 @@ async def _followed_ids(flow: FlowContext) -> set[str]:
 async def on_card_watch(callback: CallbackQuery, callback_data: CardCb, flow: FlowContext) -> None:
     """⭐ on a card: offer its two teams and its league."""
     signal = await flow.services.signals.get_signal(flow.user_id, callback_data.signal_id)
-    options = await _card_options(flow, signal)
+    options = _card_options(signal)
     if not options:
         names = f"{signal.home_team}, {signal.away_team}"
         await answer_callback(callback, texts.WATCH_CARD_UNKNOWN.format(names=names), alert=True)
@@ -304,7 +321,7 @@ async def on_card_choice(
     if not callback_data.key.isdigit():
         raise StaleDraftError
     signal = await flow.services.signals.get_signal(flow.user_id, int(callback_data.key))
-    options = await _card_options(flow, signal)
+    options = _card_options(signal)
     option = options.get(callback_data.kind)
     if option is None:
         raise StaleDraftError

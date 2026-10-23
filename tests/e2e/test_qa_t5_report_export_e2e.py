@@ -47,7 +47,7 @@ HOSTILE = (
 
 
 def _rows(content: bytes) -> list[list[str]]:
-    return list(csv.reader(io.StringIO(content.decode("utf-8"))))
+    return list(csv.reader(io.StringIO(content.decode("utf-8-sig"))))
 
 
 def _outcome(**overrides: object) -> SignalOutcome:
@@ -73,11 +73,6 @@ def _bet(label: str) -> BetView:
 
 
 # --------------------------------------------------------------------------- CSV
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-3: provider-supplied names (league, teams, fixture label) go into the CSV "
-    "unescaped, so a name starting with = + - @ runs as a formula in Excel/Sheets",
-)
 @pytest.mark.parametrize("payload", HOSTILE)
 def test_signals_csv_neutralises_formula_cells(payload: str) -> None:
     file = export_file([_outcome(league=payload, home_team=payload, away_team=payload)])
@@ -87,10 +82,6 @@ def test_signals_csv_neutralises_formula_cells(payload: str) -> None:
     assert not any(cell.startswith(FORMULA_STARTS) for cell in texty)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-3: same as the signals file, for the bets file's fixture column",
-)
 @pytest.mark.parametrize("payload", HOSTILE)
 def test_bets_csv_neutralises_formula_cells(payload: str) -> None:
     file = bets_export_file([_bet(payload)])
@@ -122,7 +113,7 @@ def test_csv_keeps_numbers_numeric_and_round_trips_awkward_text() -> None:
 def test_csv_is_utf8_with_the_uzbek_apostrophes_intact() -> None:
     file = export_file([_outcome(league="O'zbekiston Superligasi", home_team="Bunyodkor")])
 
-    assert "O'zbekiston Superligasi" in file.content.decode("utf-8")
+    assert "O'zbekiston Superligasi" in file.content.decode("utf-8-sig")
     assert file.filename == "signals.csv"
 
 
@@ -297,11 +288,6 @@ def test_every_chart_is_a_png_and_raises_no_font_warning_for_our_own_texts() -> 
     assert all(png.startswith(b"\x89PNG") and len(png) > 2_000 for png in pngs)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-8: a league name with a TeX-like '$..$' goes to matplotlib as mathtext and "
-    "raises, so the whole chart (and the button) fails with the generic error",
-)
 def test_a_league_name_with_dollar_signs_still_draws() -> None:
     charts.segments_chart(_segments(["Cup $\\bad$ final"]), "Yield")
 

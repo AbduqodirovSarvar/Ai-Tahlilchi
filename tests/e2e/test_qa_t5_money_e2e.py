@@ -218,8 +218,12 @@ async def test_marking_a_signal_settles_every_bet_on_it_and_the_screen_says_so(
     assert views[high.bet_id].profit == Decimal(15)  # 30 * (1.5 - 1), at ITS own odds
 
 
-# --------------------------------------------------------------------------- cashout units
-async def test_cashout_of_a_default_stake_bet_is_units_times_the_unit(real_bot: RealBot) -> None:
+# --------------------------------------------------------------------------- cashout payout
+# Orchestrator decision #18: the user types the money the bookmaker paid out; the bet's profit
+# is exactly payout - stake, whatever the unit and the recommended stake are.
+async def test_cashout_of_a_default_stake_bet_is_the_payout_minus_the_stake(
+    real_bot: RealBot,
+) -> None:
     rb = real_bot
     await rb.settings(bank=Decimal(1000), unit=Decimal(100))
     signal = (await rb.signals())[0]
@@ -230,19 +234,16 @@ async def test_cashout_of_a_default_stake_bet_is_units_times_the_unit(real_bot: 
     admin = rb.client()
 
     await _press_mark(admin, bet.bet_id, "c")
-    await admin.send("0.8")
+    await admin.send("180")
 
     (settled,) = await rb.services.bets.list_bets(ADMIN)
     assert settled.outcome is ResultMark.CASHOUT
     assert settled.profit == Decimal(80)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-2: the cash-out prompt says 'unit' but a bet with a custom stake gets "
-    "stake * units / signal.stake_units, not units * the user's unit",
-)
-async def test_cashout_units_mean_the_users_unit_whatever_the_stake(real_bot: RealBot) -> None:
+async def test_cashout_payout_is_the_money_whatever_the_unit_and_the_stake(
+    real_bot: RealBot,
+) -> None:
     rb = real_bot
     await rb.settings(bank=Decimal(1000), unit=Decimal(100))
     signal = (await rb.signals())[0]
@@ -250,11 +251,47 @@ async def test_cashout_units_mean_the_users_unit_whatever_the_stake(real_bot: Re
     rb.finish_matches()
     admin = rb.client()
     await _press_mark(admin, bet.bet_id, "c")
-    await admin.send("0.8")
+    await admin.send("200")
 
     (settled,) = await rb.services.bets.list_bets(ADMIN)
 
-    assert settled.profit == Decimal(80)  # "+0.8 unit" of a 100 unit
+    assert settled.profit == Decimal(-50)  # paid 200 for a 250 stake
+
+
+async def test_cashout_pays_the_other_bets_of_the_signal_at_the_same_return(
+    real_bot: RealBot,
+) -> None:
+    rb = real_bot
+    await rb.settings(bank=Decimal(1000), unit=Decimal(100))
+    signal = (await rb.signals())[0]
+    cashed, other = await rb.bet(signal, 250), await rb.bet(signal, 100)
+    rb.finish_matches()
+    admin = rb.client()
+    await _press_mark(admin, cashed.bet_id, "c")
+    await admin.send("200")
+
+    views = {bet.bet_id: bet for bet in await rb.services.bets.list_bets(ADMIN)}
+
+    assert views[cashed.bet_id].profit == Decimal(-50)
+    assert views[other.bet_id].profit == Decimal(-20)  # the same -20% return on 100
+
+
+async def test_cashout_payout_that_is_not_a_non_negative_number_is_refused(
+    real_bot: RealBot,
+) -> None:
+    rb = real_bot
+    await rb.settings(bank=Decimal(1000), unit=Decimal(100))
+    signal = (await rb.signals())[0]
+    bet = await rb.bet(signal, 100)
+    rb.finish_matches()
+    admin = rb.client()
+    await _press_mark(admin, bet.bet_id, "c")
+
+    for typed in ("-5", "abc", "1e400"):
+        await admin.send(typed)
+
+    (still_open,) = await rb.services.bets.list_bets(ADMIN)
+    assert still_open.outcome is None
 
 
 # --------------------------------------------------------------------------- idempotency, size
@@ -270,11 +307,6 @@ async def test_two_simultaneous_taps_on_the_bet_prompt_record_one_bet(real_bot: 
     assert len(await rb.services.bets.list_bets(ADMIN)) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA F-6: the overview totals only the latest 100 bets (LIST_LIMIT) while the balance "
-    "counts all of them, and the text does not say so (BANK_RECENT is never used)",
-)
 async def test_overview_profit_line_covers_every_bet_not_just_the_latest_hundred(
     real_bot: RealBot,
 ) -> None:

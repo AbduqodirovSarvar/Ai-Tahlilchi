@@ -34,11 +34,16 @@ PERCENT: Final = 100
 MAX_X_LABELS: Final = 10
 
 
+def _plain(text: str) -> str:
+    """Escape ``$`` so matplotlib draws provider names literally instead of as mathtext."""
+    return text.replace("$", r"\$")
+
+
 def _frame(title: str) -> tuple[Figure, Axes]:
     """A figure on the light surface with a title and a quiet grid."""
     figure = Figure(figsize=FIGSIZE, dpi=DPI, facecolor=SURFACE)
     axes = figure.add_subplot(111, facecolor=SURFACE)
-    axes.set_title(title, color=INK, fontsize=13, loc="left", pad=12)
+    axes.set_title(_plain(title), color=INK, fontsize=13, loc="left", pad=12)
     axes.grid(True, color=GRID, linewidth=0.8)
     axes.set_axisbelow(True)
     for side in ("top", "right"):
@@ -159,7 +164,7 @@ def segments_chart(segments: Sequence[SegmentStat], title: str) -> bytes:
         msg = "a segments chart needs at least one slice"
         raise ValueError(msg)
     figure, axes = _frame(title)
-    names = [segment.key for segment in segments]
+    names = [_plain(segment.key) for segment in segments]
     values = [(segment.yield_rate or 0.0) * PERCENT for segment in segments]
     colors = [GOOD if value >= 0 else BAD for value in values]
     axes.barh(names, values, color=colors, height=BAR_WIDTH)

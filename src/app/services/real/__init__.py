@@ -19,6 +19,7 @@ from app.services.real.account import (
 )
 from app.services.real.analysis import RealAnalysisService
 from app.services.real.core import Core
+from app.services.real.learning import RealLearningService
 from app.services.real.notifier import LogOnlyNotifier, NotifierDelivery
 from app.services.real.signals import (
     RealBetService,
@@ -52,5 +53,6 @@ def create_real_services(ctx: PipelineContext, notifier: Notifier | None = None)
         reports=RealReportService(core),
         status=RealStatusService(core),
         express=RealExpressService(core),
+        learning=RealLearningService(core),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

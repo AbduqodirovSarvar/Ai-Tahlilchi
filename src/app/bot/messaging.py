@@ -96,14 +96,34 @@ async def send_html(message: Message, text: str, markup: Markup | None = None) -
 async def edit_html(
     message: Message, text: str, markup: InlineKeyboardMarkup | None = None
 ) -> None:
-    """Edit a bot message in place; "message is not modified" (double tap) is ignored."""
+    """Edit a bot message in place; "message is not modified" (double tap) is ignored.
+
+    A text longer than one message is never cut: the first part replaces the message and the
+    rest follows as new messages, the keyboard on the last one.
+    """
+    parts = split_message(text)
     try:
         await message.edit_text(
-            split_message(text)[0], parse_mode=ParseMode.HTML, reply_markup=markup
+            parts[0], parse_mode=ParseMode.HTML, reply_markup=markup if len(parts) == 1 else None
         )
     except TelegramBadRequest as error:
         if "not modified" not in error.message:
             raise
+    for position, part in enumerate(parts[1:], start=1):
+        last = position == len(parts) - 1
+        await message.answer(part, parse_mode=ParseMode.HTML, reply_markup=markup if last else None)
+
+
+async def send_html_to(
+    bot: Bot, chat_id: int, text: str, markup: InlineKeyboardMarkup | None = None
+) -> None:
+    """Send ``text`` (HTML) to a chat without an incoming message (start-up notices)."""
+    parts = split_message(text)
+    for position, part in enumerate(parts):
+        last = position == len(parts) - 1
+        await bot.send_message(
+            chat_id, part, parse_mode=ParseMode.HTML, reply_markup=markup if last else None
+        )
 
 
 async def drop_keyboard(bot: Bot, chat_id: int, message_id: int | None) -> None:

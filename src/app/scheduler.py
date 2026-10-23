@@ -54,6 +54,7 @@ from app.pipeline.context import PipelineContext
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import Delivery
 from app.pipeline.learning import run_learning
+from app.pipeline.learning_digest import announce_learning
 from app.pipeline.lessons import run_lessons
 from app.pipeline.postmortem import run_postmortems
 from app.pipeline.prematch import run_due_recalcs
@@ -116,7 +117,7 @@ class PipelineJobs:
             JOB_REFRESH: lambda: refresh(ctx),
             JOB_DAILY_TICK: lambda: run_due_digests(ctx, delivery),
             JOB_RECALC_TICK: self._recalc_tick,
-            JOB_LEARNING: lambda: run_learning(ctx),
+            JOB_LEARNING: self._learning,
             JOB_TEMPLATE_TICK: lambda: run_due_templates(ctx, delivery),
             JOB_FEEDBACK: self._feedback,
             JOB_LESSONS: lambda: run_lessons(ctx),
@@ -126,6 +127,20 @@ class PipelineJobs:
         """Due 24 h / pre-match recalculations, and the retry of a refresh that was incomplete."""
         await run_due_recalcs(self._ctx, self._delivery)
         await refresh(self._ctx, retry_only=True)
+
+    async def _learning(self) -> None:
+        """The weekly review, recorded for ``/holat``, then the "what the model learned" message.
+
+        The message is built from the journal, so repeating this call after a crash between the
+        review and the messages still tells the users that were missed.
+        """
+        report = await run_learning(self._ctx)
+        if not report.skipped:
+            detail = f"signals={report.signals} changes={len(report.changes)}"
+            await self._ctx.ledger.record_run(
+                JOB_LEARNING, ok=True, detail=detail, now=self._ctx.clock()
+            )
+        await announce_learning(self._ctx, self._delivery)
 
     async def _feedback(self) -> None:
         """Explain the new losses, then rebuild the lessons if there is new evidence."""

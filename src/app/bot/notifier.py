@@ -32,19 +32,23 @@ from app.bot.formatters import (
     result_page,
     split_message,
 )
+from app.bot.learning_ui import format_summary
 from app.bot.notify_formatters import (
     format_admin_alert,
     format_cancelled,
     format_digest_title,
+    format_limit_digest,
     format_settled,
     format_update,
     format_watch_event,
 )
+from app.bot.result_buttons import card_result_rows
 from app.logging import get_logger
 from app.services.interfaces import (
     AdminAlert,
     DailyDigest,
     DeliveryKey,
+    LearningSummary,
     MessageRef,
     SettingsService,
     SettledNotice,
@@ -159,6 +163,12 @@ class TelegramNotifier:
         """Announce the result (won / lost) with the profit in units."""
         return await self._guarded(key, self._settled(user_id, notice))
 
+    async def send_learning_summary(
+        self, user_id: int, summary: LearningSummary, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """The weekly "what the model learned" message."""
+        return await self._guarded(key, self._learning(user_id, summary))
+
     async def alert_admin(self, alert: AdminAlert) -> None:
         """Tell every administrator; one unreachable admin does not stop the others."""
         for admin_id in sorted(self._admin_ids):
@@ -170,6 +180,9 @@ class TelegramNotifier:
 
     # ------------------------------------------------------------------ message builders
     async def _daily(self, user_id: int, digest: DailyDigest) -> MessageRef | None:
+        limit_text = format_limit_digest(digest)
+        if limit_text is not None:  # one notice instead of an empty "0 signal" digest
+            return await self._send(user_id, limit_text)
         zone = await self._zone(user_id)
         result = digest.result
         header = f"{format_digest_title(digest)}\n{format_results_summary(result)}"
@@ -201,8 +214,13 @@ class TelegramNotifier:
     ) -> MessageRef | None:
         return await self._send(user_id, format_cancelled(cancelled), reply_to=reply_to)
 
+    async def _learning(self, user_id: int, summary: LearningSummary) -> MessageRef | None:
+        zone = await self._zone(user_id)
+        return await self._send(user_id, format_summary(summary, zone))
+
     async def _settled(self, user_id: int, notice: SettledNotice) -> MessageRef | None:
-        return await self._send(user_id, format_settled(notice))
+        rows = card_result_rows(notice.signal.signal_id)
+        return await self._send(user_id, format_settled(notice), keyboards.markup_of(rows))
 
     async def _watch(self, user_id: int, event: WatchlistEvent) -> MessageRef | None:
         zone = await self._zone(user_id)
