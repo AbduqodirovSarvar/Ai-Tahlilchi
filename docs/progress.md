@@ -94,6 +94,7 @@
 - [x] F7.6 Hisobot va eksport: davrlar (7/30/hammasi/o'zim), kesimlar, kalibratsiya jadvali, grafik PNG, `/eksport` (signals.csv + bets.csv, shartnoma v1.6)
 - [x] F7.7 Retro-tahlil: Kecha / O'tgan hafta tugmalari va kalit so'zlari, o'tish ulushi, 90/31 kun qoidalari xabari
 - [x] F7.8 Ekspress tuzuvchi: `/ekspress` va bugungi signallar ostidagi tugma, `ExpressService` (shartnoma v1.6), 34% ogohlantirishi
+- [x] F7 tuzatishlari (T5 QA F-1..F-10, bot-engineer, 2026-10-23): cashout = to'langan summa (F-2, qaror #18), CSV in'eksiya + BOM (F-3), ekspress EV `Π(1+ev)−1` (F-4), sevimlilar/shablonlar sahifalash (F-7), restartdan keyin "running" tiklanadi (F-1), yon oqimlar ishlayotgan tahlil himoyasini o'chirmaydi (F-5), bank jami hisobi servisdan (F-6), grafikda `$` (F-8), 48-bit tugma kaliti (F-9), "-0" yo'q (F-10); `ValidationFailed` sababi va `edit_html` kesilishi. Qat'iy xfail testlar olib tashlandi ([ADR 0016](adr/0016-t5-bot-fix-and-f8-ui.md))
 - [x] F8.3 Post-mortem: `pipeline/postmortem.py` (kunlik `feedback` job, bir tanlov — bitta chaqiruv, N/run byudjet, LLM yo'q bo'lsa keyinga, idempotent), prompt `postmortem.v2` (T5 pipeline; [ADR 0015](adr/0015-feedback-loop-pipeline.md))
 - [x] F8.4 Saboqlar: `pipeline/lessons.py` (post-mortemlardan qayta qurish, ≥ 2 turli o'yin bilan `active`, 90 kunda `expired`, shablon matn, haftalik `lessons` job) (T5 pipeline; ADR 0015)
 - [x] F8.5 `segment_stats` (T5: `models/segments.py`, `pipeline/learning.py`, Alembic 0008, ADR 0013). T5 fix: 99.5% oraliq + BH FDR + ketma-ket 2 run, sinov davri oynasi, `LEARNING_MODE=shadow` standart, Alembic 0009 (ADR 0013 qo'shimchasi)
@@ -108,9 +109,9 @@
 - [x] F9.7 `RUNBOOK.md` (o'zbekcha) va README deploy bo'limi; bot FSM uchun `SqliteStorage` (`fsm.db`, restartdan keyin wizard saqlanadi)
 
 ## T6 — Yakuniy integratsiya
-- [ ] F8.1 Natijalarni qo'lda belgilash
-- [x] F8.2 "Kecha yakuni" bloki: ma'lumot (`DailyDigest.yesterday`: mahalliy kun, retro/begona hisobga olinmaydi, signal/✅/❌/void/kutilmoqda/unit/CLV) tekshirildi va chegaraviy testlar bilan qotirildi (T5 pipeline); bot bloki F6.8 da mavjud
-- [ ] F8.8 `/ozgarishlar` jurnali
+- [x] F8.1 Natijalarni qo'lda belgilash: kartada `[✅ O'tdi] [❌ O'tmadi] [↩️ Void] [💸 Cashout] [💬 Izoh]` (o'yin boshlangach, natijali kartada tuzatish sifatida), `/natijalar` (bir bosishli, sahifalangan), qo'lda belgi API natijasidan ustun; izoh oddiy matn, escape. Bot-engineer, T5 bot fix ([ADR 0016](adr/0016-t5-bot-fix-and-f8-ui.md) §7)
+- [x] F8.2 "Kecha yakuni" bloki: ma'lumot (`DailyDigest.yesterday`: mahalliy kun, retro/begona hisobga olinmaydi, signal/✅/❌/void/kutilmoqda/unit/CLV) tekshirildi va chegaraviy testlar bilan qotirildi (T5 pipeline); bot bloki F6.8 da mavjud; T5 bot fix: shablon nomi sarlavhasi, "Zarar limitiga yetildi" xabari, qo'lda tahlil banneri, kartadagi ⭐ id bo'yicha (ADR 0016 §8)
+- [x] F8.8 `/ozgarishlar` jurnali (kuzatuv/qo'llangan farqi, sahifalash, tasdiqli qaytarish, STALE tushuntirishi), haftalik "model nimani o'rgandi" xabari (`Notifier.send_learning_summary`, scheduler hook), `/holat` da rejim va "hafta yo'qolgan" ogohlantirishi ([ADR 0016](adr/0016-t5-bot-fix-and-f8-ui.md) §9)
 - [ ] To'liq e2e va qabul mezonlarini qayta tekshirish (test-engineer)
 - [ ] Butun kod bazasi sharhi (code-reviewer)
 - [ ] Production deploy va zaxiradan tiklash sinovi (infra-engineer)

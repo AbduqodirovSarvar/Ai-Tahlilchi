@@ -6,6 +6,8 @@
 - **Muhit:** Windows 11, Python 3.13, aiogram 3. Tarmoq yo'q. Yangi e2e testlar **haqiqiy dispatcher** (whitelist, rate limit, xato middleware, barcha routerlar) orqali va ikki xil servis bilan ishlaydi: tez `FakeServices` va **HAQIQIY pipeline servislari** (`tests/e2e/real_world.py` — `test_real_contract.py` dagi seeded SQLite + boshqariladigan soat). Haqiqiy rejimda avtomatik hisob-kitob o'chirilgan: natijalar faqat qo'lda belgilanadi, shuning uchun har bir stavkaning natijasi oldindan ma'lum.
 - **Doira:** `git diff 63c8035..HEAD -- src/app/bot src/app/services tests/bot tests/e2e` ning T5 bot qismi. Ishlab chiqarish kodi (`src/`) **o'zgartirilmadi**; xatolar `xfail(strict=True)` testlari bilan qayd etildi.
 
+> **Yangilanish (2026-10-23, bot-engineer):** F-1..F-10 va kuzatuvlar (`ValidationFailed` sababi, `edit_html` kesilishi) tuzatildi, qat'iy `xfail` testlar olib tashlandi. Qaror va oqibatlar: [ADR 0016](../adr/0016-t5-bot-fix-and-f8-ui.md); cashout qarori #18.
+
 ## Yakuniy xulosa
 
 ### ✅ Darvozadan o'tadi (shartli) — "Merge mumkin"
