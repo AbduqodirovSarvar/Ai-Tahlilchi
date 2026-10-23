@@ -12,6 +12,7 @@ from app.pipeline.delivery import (
     UNDELIVERABLE_REFERENCE,
     CancelDelivery,
     DailyDelivery,
+    DigestProgress,
     SettledDelivery,
     UpdateDelivery,
     WatchDelivery,
@@ -27,6 +28,7 @@ from app.services.interfaces import (
     DateWindow,
     DaySummary,
     DeliveryKey,
+    DigestResume,
     FixtureOption,
     LearningMode,
     LearningSummary,
@@ -146,6 +148,26 @@ def _decode(text: str | None) -> MessageRef | None:
     return MessageRef(int(chat), int(message))
 
 
+class _ProgressAdapter:
+    """The pipeline's string-based digest progress seen through the service contract."""
+
+    def __init__(self, progress: DigestProgress) -> None:
+        self._progress = progress
+
+    async def resume(self) -> DigestResume:
+        """The stored header reference and handled card positions."""
+        header, handled = await self._progress.resume()
+        return DigestResume(_decode(header), handled)
+
+    async def header_sent(self, header: MessageRef) -> None:
+        """Remember the digest's first message."""
+        await self._progress.header_sent(_encode(header) or "")
+
+    async def part_handled(self, position: int) -> None:
+        """Remember a delivered or permanently rejected card."""
+        await self._progress.part_handled(position)
+
+
 class NotifierDelivery:
     """The pipeline's :class:`~app.pipeline.delivery.Delivery` backed by a :class:`Notifier`."""
 
@@ -177,6 +199,7 @@ class NotifierDelivery:
             yesterday=await self._yesterday(user_id, message),
             template_name=message.label,
             loss_limit=loss_limit_notice(message.loss_limit),
+            progress=None if message.progress is None else _ProgressAdapter(message.progress),
         )
         sent = await self._notifier.send_daily_digest(user_id, digest, key=_key(key))
         return _reference(self._notifier, user_id, sent)

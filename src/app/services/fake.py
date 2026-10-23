@@ -138,6 +138,8 @@ FAKE_LLM_REQUESTS: Final = 12
 FAKE_LLM_REQUEST_LIMIT: Final = 250
 FAKE_LLM_TOKENS: Final = 48_000
 FAKE_LLM_TOKEN_LIMIT: Final = 500_000
+FAKE_BUILD: Final = "0.0.0-sample (fake)"
+"""The build label the sample services report in ``/holat``."""
 CACHE_TTL: Final = timedelta(minutes=10)
 """The same provider data is not requested again within this period (plan §9)."""
 RECALC_REQUESTS: Final = 1
@@ -1405,6 +1407,7 @@ class FakeSystemStatusService:
             llm=llm,
             learning_mode=self._state.learning.mode,
             learning_missed=self._state.learning.missed,
+            build=FAKE_BUILD,
         )
 
 

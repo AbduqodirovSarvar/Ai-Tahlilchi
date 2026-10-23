@@ -165,7 +165,11 @@ def _errors_block(status: SystemStatus, zone: ZoneInfo) -> list[str]:
 def format_status(status: SystemStatus, zone: ZoneInfo, now: datetime, backend: str) -> str:
     """The ``/holat`` message: mode, API quota, data freshness, jobs and recent errors."""
     blocks = [
-        [texts.STATUS_TITLE, texts.STATUS_MODE.get(backend, escape(backend))],
+        [
+            texts.STATUS_TITLE,
+            texts.STATUS_MODE.get(backend, escape(backend)),
+            *([texts.STATUS_BUILD.format(build=escape(status.build))] if status.build else []),
+        ],
         _quota_block(status),
         _llm_block(status),
         _refresh_block(status, zone, now),

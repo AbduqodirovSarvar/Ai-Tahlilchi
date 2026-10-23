@@ -6,7 +6,9 @@ Two things are kept in the ledger so a retry is cheap and a later update can rep
   after a failed delivery re-sends the same message instead of re-running the analysis and the
   LLM review;
 - the *message reference* of each recommended signal in it (job ``msg``), so a pre-match update
-  is a reply to the message that announced the signal.
+  is a reply to the message that announced the signal;
+- the *delivery progress* (job ``daily.progress``): the header's reference and which cards were
+  already sent, so a retry or a restart sends only what is missing (T6-F-1, T6-F-4).
 """
 
 import json
@@ -24,6 +26,7 @@ logger = get_logger(__name__)
 
 MESSAGE_JOB: Final = "msg"
 OUTCOME_JOB: Final = "daily.outcome"
+PROGRESS_JOB: Final = "daily.progress"
 
 
 def message_key(user_id: int, signal_id: int) -> LedgerKey:
@@ -35,12 +38,67 @@ async def remember_announcement(
     ctx: PipelineContext, user_id: int, outcome: AnalysisOutcome, reference: str
 ) -> None:
     """Remember ``reference`` as the message that announced every recommended signal."""
-    now = ctx.clock()
-    for card in outcome.cards:
-        if card.record.recommended_at is not None:
-            await ctx.ledger.complete(
-                message_key(user_id, card.record.id), now=now, detail=reference
-            )
+    await ctx.ledger.complete_many(_announcements(user_id, outcome, reference), now=ctx.clock())
+
+
+def _announcements(
+    user_id: int, outcome: AnalysisOutcome, reference: str
+) -> list[tuple[LedgerKey, str | None]]:
+    return [
+        (message_key(user_id, card.record.id), reference)
+        for card in outcome.cards
+        if card.record.recommended_at is not None
+    ]
+
+
+class LedgerDigestProgress:
+    """Delivery progress of one digest, kept in the ledger (see the module docstring).
+
+    One writer per key (the claim holder), so the state is read once and each change is a
+    single-statement write. :meth:`header_sent` stores the header together with the cards'
+    message references in ONE statement: a crash cannot leave one without the other.
+    """
+
+    def __init__(
+        self, ctx: PipelineContext, key: LedgerKey, user_id: int, outcome: AnalysisOutcome
+    ) -> None:
+        """Track the delivery of ``outcome`` under the digest ``key`` of ``user_id``."""
+        self._ctx = ctx
+        self._user_id = user_id
+        self._outcome = outcome
+        self._key = LedgerKey(PROGRESS_JOB, key.day, key.user_id, f"{key.job}:{key.subject}")
+        self._header: str | None = None
+        self._handled: set[int] = set()
+
+    async def resume(self) -> tuple[str | None, frozenset[int]]:
+        """The header reference and handled positions stored by earlier attempts."""
+        entry = await self._ctx.ledger.get(self._key)
+        if entry is not None and entry.detail:
+            try:
+                data = json.loads(entry.detail)
+                self._header = data["header"]
+                self._handled = {int(position) for position in data["handled"]}
+            except (KeyError, TypeError, ValueError):  # damaged: resend rather than lose cards
+                logger.warning("digest_progress_unreadable", user_id=self._user_id)
+                self._header, self._handled = None, set()
+        return self._header, frozenset(self._handled)
+
+    async def header_sent(self, reference: str) -> None:
+        """Store the header and the message reference of every recommended card at once."""
+        self._header = reference
+        entries = [
+            (self._key, self._encoded()),
+            *_announcements(self._user_id, self._outcome, reference),
+        ]
+        await self._ctx.ledger.complete_many(entries, now=self._ctx.clock())
+
+    async def part_handled(self, position: int) -> None:
+        """Store that the message at ``position`` needs no further attempt."""
+        self._handled.add(position)
+        await self._ctx.ledger.complete_many([(self._key, self._encoded())], now=self._ctx.clock())
+
+    def _encoded(self) -> str:
+        return json.dumps({"header": self._header, "handled": sorted(self._handled)})
 
 
 def _outcome_key(key: LedgerKey) -> LedgerKey:

@@ -303,7 +303,11 @@ async def open_week(  # noqa: PLR0913 - one switch per thing a test may vary
 
 def jobs(week: Week) -> PipelineJobs:
     """The scheduler's own job wrapper over this installation (errors recorded, never raised)."""
-    return PipelineJobs(week.ctx, week.system.delivery)
+    return PipelineJobs(week.ctx, week.system.delivery, sleep=_no_sleep)
+
+
+async def _no_sleep(_seconds: float) -> None:
+    """The failure back-off of the job wrapper is not waited out in tests."""
 
 
 async def tick(week: Week, minutes: int, *, step: int = 30) -> None:

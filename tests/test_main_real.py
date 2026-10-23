@@ -51,9 +51,9 @@ async def test_the_scheduler_starts_after_the_bot_is_attached_and_in_its_own_fil
     real_create = main_module.create_real_services
     real_start = PipelineScheduler.start
 
-    def spy_create(ctx: Any, notifier: Any = None) -> Any:
+    def spy_create(ctx: Any, notifier: Any = None, *, build: str = "") -> Any:
         seen["notifier"] = notifier
-        return real_create(ctx, notifier=notifier)
+        return real_create(ctx, notifier=notifier, build=build)
 
     def spy_start(self: PipelineScheduler) -> None:
         seen["events"].append(("scheduler_start", seen["notifier"]._bot is not None))

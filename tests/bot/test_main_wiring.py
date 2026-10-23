@@ -22,9 +22,9 @@ async def test_run_real_wires_the_telegram_notifier(
     seen: dict[str, Any] = {}
     real_create = main_module.create_real_services
 
-    def spy_create(ctx: Any, notifier: Notifier | None = None) -> Any:
-        seen["notifier"] = notifier
-        return real_create(ctx, notifier=notifier)
+    def spy_create(ctx: Any, notifier: Notifier | None = None, *, build: str = "") -> Any:
+        seen["notifier"], seen["build"] = notifier, build
+        return real_create(ctx, notifier=notifier, build=build)
 
     async def poll(
         dispatcher: Dispatcher, token: str, admins: frozenset[int], _s: Settings
@@ -48,6 +48,7 @@ async def test_run_real_wires_the_telegram_notifier(
     notifier = seen["notifier"]
     assert isinstance(notifier, TelegramNotifier)
     assert seen["dispatcher"]["backend"] == "real"
+    assert seen["build"]  # the running build reaches /holat (label of app.ops.version)
     ref = await notifier.send_result_settled(1, SettledNotice(signal=make_signal()), key=key())
     assert ref is not None
     assert len(session.requests) == 1

@@ -13,6 +13,8 @@ before/after numbers readable next to the original.
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -21,12 +23,15 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import (
     TelegramAPIError,
     TelegramForbiddenError,
+    TelegramNetworkError,
     TelegramRetryAfter,
+    TelegramServerError,
 )
 from aiogram.types import InlineKeyboardMarkup, ReplyParameters
 
 from app.bot import keyboards
 from app.bot.formatters import (
+    PageItem,
     format_results_summary,
     format_signal_card,
     result_page,
@@ -48,6 +53,8 @@ from app.services.interfaces import (
     AdminAlert,
     DailyDigest,
     DeliveryKey,
+    DigestProgress,
+    DigestResume,
     LearningSummary,
     MessageRef,
     SettingsService,
@@ -66,6 +73,26 @@ SEND_ATTEMPTS: Final = 2
 BLOCKED_TTL_SECONDS: Final = 24 * 60 * 60
 """A user who blocked the bot is skipped for this long, then tried again (they may have
 unblocked it). Within the period the pipeline is told not to retry (contract v1.6)."""
+
+
+class _Failure(Enum):
+    """Why a message did not go out: ``REJECTED`` will never work, ``TRANSIENT`` may later."""
+
+    NONE = auto()
+    REJECTED = auto()
+    TRANSIENT = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _Sent:
+    """Outcome of one logical message: its first part's reference and how it failed, if it did."""
+
+    ref: MessageRef | None
+    failure: _Failure = _Failure.NONE
+
+
+_TRANSIENT_ERRORS: Final = (TelegramNetworkError, TelegramServerError)
+"""Telegram errors worth retrying later (a persistent 429 is handled separately)."""
 
 type Sleep = Callable[[float], Awaitable[None]]
 type Monotonic = Callable[[], float]
@@ -185,21 +212,61 @@ class TelegramNotifier:
             return await self._send(user_id, limit_text)
         zone = await self._zone(user_id)
         result = digest.result
-        header = f"{format_digest_title(digest)}\n{format_results_summary(result)}"
-        markup = (
-            keyboards.recalc_day_keyboard(digest.day)
-            if result.signals and not result.retro
-            else None
-        )
-        first = await self._send(user_id, header, markup)
-        if first is None:
-            return None
+        progress = digest.progress
+        resume = await progress.resume() if progress else DigestResume()
+        header = resume.header
+        if header is None:
+            text = f"{format_digest_title(digest)}\n{format_results_summary(result)}"
+            markup = (
+                keyboards.recalc_day_keyboard(digest.day)
+                if result.signals and not result.retro
+                else None
+            )
+            header = await self._send(user_id, text, markup)
+            if header is None:
+                return None
+            if progress:
+                await progress.header_sent(header)
         page = result_page(result.signals, zone, 0, max(len(result.signals), 1))
-        for item in page:
-            card_markup = None if item.signal is None else keyboards.signal_keyboard(item.signal)
-            if await self._send(user_id, item.text, card_markup) is None:
-                break
-        return first
+        complete = await self._send_cards(user_id, page, resume.handled, progress)
+        return header if complete else None
+
+    async def _send_cards(
+        self,
+        user_id: int,
+        page: tuple[PageItem, ...],
+        handled: frozenset[int],
+        progress: DigestProgress | None,
+    ) -> bool:
+        """Send every message of ``page`` not yet handled; ``True`` when none needs a retry.
+
+        A rejected card (400) is logged with its signal id and skipped, so it cannot hide the
+        cards after it. A transient failure (a 429 that persists, network, 5xx) leaves that
+        card undelivered but the loop goes on; the digest then counts as "not delivered" and
+        the pipeline retries later, sending only the cards still missing (T6-F-1). A user who
+        blocked the bot ends the loop at once (no retry).
+        """
+        complete = True
+        for position, item in enumerate(page):
+            if position in handled:
+                continue
+            markup = None if item.signal is None else keyboards.signal_keyboard(item.signal)
+            sent = await self._send_detailed(user_id, item.text, markup)
+            if sent.failure is _Failure.TRANSIENT:
+                if self.is_undeliverable(user_id):
+                    return True  # blocked: nothing more can be done, a retry would be futile
+                complete = False
+                continue
+            if sent.failure is _Failure.REJECTED:
+                logger.warning(
+                    "notify_card_rejected",
+                    user_id=user_id,
+                    signal_id=None if item.signal is None else item.signal.signal_id,
+                    position=position,
+                )
+            if progress:
+                await progress.part_handled(position)
+        return complete
 
     async def _update(
         self, user_id: int, update: SignalUpdate, reply_to: MessageRef | None
@@ -271,28 +338,38 @@ class TelegramNotifier:
         ``None`` only when nothing was delivered. If a later part fails the earlier ones
         stay delivered and their reference is still returned.
         """
+        return (await self._send_detailed(user_id, text, markup, reply_to)).ref
+
+    async def _send_detailed(
+        self,
+        user_id: int,
+        text: str,
+        markup: InlineKeyboardMarkup | None = None,
+        reply_to: MessageRef | None = None,
+    ) -> _Sent:
+        """Like :meth:`_send`, but says whether a failure is worth retrying later."""
         bot = self._bot
         if bot is None:
             logger.warning("notify_without_bot", user_id=user_id)
-            return None
+            return _Sent(None, _Failure.TRANSIENT)
         if self.is_undeliverable(user_id):
             logger.debug("notify_skipped_blocked_user", user_id=user_id)
-            return None
+            return _Sent(None, _Failure.TRANSIENT)
         parts = split_message(text)
         first: MessageRef | None = None
         for position, part in enumerate(parts):
             last = position == len(parts) - 1
-            ref = await self._send_part(
+            sent = await self._send_part(
                 bot,
                 user_id,
                 part,
                 markup=markup if last else None,
                 reply_to=reply_to if position == 0 else None,
             )
-            if ref is None:
-                return first
-            first = first or ref
-        return first
+            if sent.ref is None:
+                return _Sent(first, sent.failure)
+            first = first or sent.ref
+        return _Sent(first)
 
     async def _send_part(
         self,
@@ -302,7 +379,7 @@ class TelegramNotifier:
         *,
         markup: InlineKeyboardMarkup | None,
         reply_to: MessageRef | None,
-    ) -> MessageRef | None:
+    ) -> _Sent:
         """One ``sendMessage`` with a single retry after flood control."""
         reply = (
             None
@@ -321,15 +398,16 @@ class TelegramNotifier:
             except TelegramRetryAfter as error:
                 if attempt == SEND_ATTEMPTS or error.retry_after > MAX_RETRY_AFTER_SECONDS:
                     logger.warning("notify_flood_control", user_id=user_id, wait=error.retry_after)
-                    return None
+                    return _Sent(None, _Failure.TRANSIENT)
                 await self._sleep(float(error.retry_after))
             except TelegramForbiddenError:
                 logger.info("notify_user_blocked_bot", user_id=user_id)
                 self._blocked_until[user_id] = self._monotonic() + BLOCKED_TTL_SECONDS
-                return None
+                return _Sent(None, _Failure.TRANSIENT)
             except TelegramAPIError as error:
                 logger.warning("notify_rejected", user_id=user_id, error=error.message)
-                return None
+                transient = isinstance(error, _TRANSIENT_ERRORS)
+                return _Sent(None, _Failure.TRANSIENT if transient else _Failure.REJECTED)
             else:
-                return MessageRef(message.chat.id, message.message_id)
-        return None  # pragma: no cover - the loop always returns
+                return _Sent(MessageRef(message.chat.id, message.message_id))
+        return _Sent(None, _Failure.TRANSIENT)  # pragma: no cover - the loop always returns

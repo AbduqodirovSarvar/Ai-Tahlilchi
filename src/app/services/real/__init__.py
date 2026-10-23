@@ -38,8 +38,13 @@ class RealSystem:
     delivery: Delivery
 
 
-def create_real_services(ctx: PipelineContext, notifier: Notifier | None = None) -> RealSystem:
-    """Wire every real service over ``ctx``; without a ``notifier`` messages are only logged."""
+def create_real_services(
+    ctx: PipelineContext, notifier: Notifier | None = None, *, build: str = ""
+) -> RealSystem:
+    """Wire every real service over ``ctx``; without a ``notifier`` messages are only logged.
+
+    ``build`` is the label of the running build, shown by ``/holat``.
+    """
     core = Core(ctx)
     services = Services(
         analysis=RealAnalysisService(core),
@@ -51,7 +56,7 @@ def create_real_services(ctx: PipelineContext, notifier: Notifier | None = None)
         bets=RealBetService(core),
         results=RealResultService(core),
         reports=RealReportService(core),
-        status=RealStatusService(core),
+        status=RealStatusService(core, build=build),
         express=RealExpressService(core),
         learning=RealLearningService(core),
     )

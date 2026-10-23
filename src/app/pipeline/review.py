@@ -31,7 +31,10 @@ from app.logging import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_REVIEW_TIMEOUT: Final = 30.0
-"""Seconds one review of a whole batch may take before the signals go out unreviewed."""
+"""Seconds ONE batch (one LLM request of up to ``MAX_CANDIDATES`` candidates) may take."""
+DEFAULT_REVIEW_TOTAL_TIMEOUT: Final = 90.0
+"""Seconds all the batches of one analysis may take together; the signals of the batches that
+did not finish go out unreviewed, the numbers (probability, EV) never depend on a review."""
 
 type ReviewKey = tuple[int, Market, Selection]
 """``(fixture database id, market, selection)`` identifies a candidate within one batch."""
@@ -223,20 +226,36 @@ async def review_safely(
     candidates: Sequence[ReviewCandidate],
     *,
     limit_seconds: float = DEFAULT_REVIEW_TIMEOUT,
+    total_seconds: float = DEFAULT_REVIEW_TOTAL_TIMEOUT,
 ) -> Mapping[ReviewKey, Review]:
-    """The reviewer's answer, or no reviews when it fails or takes longer than ``limit_seconds``.
+    """The reviewer's answers, batch by batch; a batch that fails or is too slow costs only itself.
 
-    Cancellation is never swallowed: a cancelled analysis stops here too.
+    Every batch of :data:`MAX_CANDIDATES` gets its own ``limit_seconds``, so 20 candidates in two
+    batches do not fail together (T6-F-6); ``total_seconds`` caps the whole analysis. Reviews
+    already collected are kept when a later batch or the total limit gives out. Cancellation is
+    never swallowed: a cancelled analysis stops here too.
     """
-    if not candidates:
-        return {}
+    reviews: dict[ReviewKey, Review] = {}
+    try:
+        async with asyncio.timeout(total_seconds):
+            for batch in itertools.batched(candidates, MAX_CANDIDATES, strict=False):
+                reviews.update(await _review_batch(reviewer, batch, limit_seconds))
+    except TimeoutError:
+        logger.warning("review_total_timed_out", kept=len(reviews), total_seconds=total_seconds)
+    return reviews
+
+
+async def _review_batch(
+    reviewer: CandidateReviewer, batch: Sequence[ReviewCandidate], limit_seconds: float
+) -> Mapping[ReviewKey, Review]:
+    """One batch's reviews, or none when it fails or takes longer than ``limit_seconds``."""
     try:
         async with asyncio.timeout(limit_seconds):
-            return await reviewer.review(candidates)
+            return await reviewer.review(batch)
     except TimeoutError:
-        logger.warning("review_timed_out", candidates=len(candidates), limit_seconds=limit_seconds)
+        logger.warning("review_timed_out", candidates=len(batch), limit_seconds=limit_seconds)
     except Exception as error:  # an LLM failure must never lose the signals
-        logger.warning("review_failed", candidates=len(candidates), error=repr(error))
+        logger.warning("review_failed", candidates=len(batch), error=repr(error))
     return {}
 
 

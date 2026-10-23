@@ -14,6 +14,7 @@ Secrets are kept out of logs in three layers:
 """
 
 import logging
+import re
 import sys
 from collections.abc import Iterable
 from typing import Final
@@ -32,6 +33,26 @@ MIN_SCRUBBED_SECRET_LENGTH: Final = 8
 # carry a credential (healthchecks.io ping path, Telegram bot token), so they stay at WARNING
 # whatever the application level is. Application code logs the outcome of its calls itself.
 QUIET_LIBRARY_LOGGERS: Final = ("httpx", "httpcore", "urllib3", "google_genai", "aiohttp.client")
+
+BODY_SUMMARY_LIMIT: Final = 300
+"""Longest piece of a third-party response body that may reach a log line."""
+_HTML_BLOCKS: Final = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+_HTML_TAGS: Final = re.compile(r"<[^>]*>")
+_WHITESPACE: Final = re.compile(r"\s+")
+
+
+def summarise_body(body: object, limit: int = BODY_SUMMARY_LIMIT) -> str:
+    """A short single-line summary of a response body for logs (HTML tags stripped).
+
+    A firewall or proxy answers with a whole HTML page where JSON was expected; logging it
+    verbatim made a 38 KB line on every restart (T6-F-5).
+    """
+    text = _HTML_TAGS.sub(" ", _HTML_BLOCKS.sub(" ", str(body)))
+    text = _WHITESPACE.sub(" ", text).strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... (+{len(text) - limit} chars)"
+
 
 _SENSITIVE_KEYS: Final = frozenset(
     {"token", "secret", "password", "api_key", "apikey", "authorization"}

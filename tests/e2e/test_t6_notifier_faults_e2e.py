@@ -9,7 +9,7 @@ exactly once (or, for a blocked user, nothing at all and no retry storm).
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, override
 
 import pytest
@@ -23,6 +23,7 @@ from aiogram.exceptions import (
 )
 from aiogram.methods import SendMessage, TelegramMethod
 
+from app.pipeline.ledger import LedgerKey
 from app.scheduler import JOB_RECALC_TICK, JOB_REFRESH, JOB_SETTLE
 from app.services.interfaces import (
     AdminAlert,
@@ -61,6 +62,7 @@ class FaultSession(RecordingSession):
         super().__init__()
         self.kind: str | None = None
         self.fail_numbers: set[int] = set()
+        self.fail_kinds: dict[int, str] = {}
         self.calls = 0
         self.failures = 0
 
@@ -70,9 +72,10 @@ class FaultSession(RecordingSession):
     ) -> Any:
         if isinstance(method, SendMessage):
             self.calls += 1
-            if self.kind is not None or self.calls in self.fail_numbers:
+            numbered = self.fail_kinds.pop(self.calls, None)
+            if self.kind is not None or self.calls in self.fail_numbers or numbered is not None:
                 self.failures += 1
-                raise FAULTS[self.kind or "bad_request"](method)
+                raise FAULTS[numbered or self.kind or "bad_request"](method)
         return await super().make_request(bot, method, timeout)
 
 
@@ -149,7 +152,28 @@ async def test_one_flood_wait_is_slept_through_and_the_digest_still_arrives_once
     assert len(cards(w)) == 10
 
 
-async def test_the_pipeline_gives_up_after_five_failures_and_tells_the_admin_not_crashes(
+async def test_a_three_hour_telegram_outage_still_delivers_the_digest_once(
+    history_template,
+    tmp_path,
+    fault_bot,
+    fault_session,  # type: ignore[no-untyped-def]
+) -> None:
+    """T6-F-7: five attempts in ~15 minutes used to end the day's digest in a short outage."""
+    async with open_week(history_template, tmp_path, fault_bot, fault_session) as w:
+        await w.settings(USER, **PERMISSIVE)
+        await jobs(w).run(JOB_REFRESH)
+        fault_session.kind = "server"
+        await tick(w, 60 * 3)  # three hours of 5xx
+        assert digests(w) == []
+        fault_session.kind = None
+        await tick(w, 60 * 2)  # the next scheduled attempt finds Telegram back
+        assert len(digests(w)) == 1
+        assert len(cards(w)) == 10
+        errors = await w.ctx.ledger.recent_errors()
+        assert not any("gave up" in str(e) for e in errors)
+
+
+async def test_the_pipeline_gives_up_after_the_delivery_schedule_and_tells_the_admin_not_crashes(
     history_template,
     tmp_path,
     fault_bot,
@@ -163,7 +187,7 @@ async def test_the_pipeline_gives_up_after_five_failures_and_tells_the_admin_not
             await tick(w, 30)
         fault_session.kind = None
         await tick(w, 60 * 2)
-        # five attempts spent, the key is exhausted: no digest today even after recovery ...
+        # ten attempts spent, the key is exhausted: no digest today even after recovery ...
         assert digests(w) == []
         errors = await w.ctx.ledger.recent_errors()
         assert any("daily" in str(e) for e in errors)
@@ -172,13 +196,8 @@ async def test_the_pipeline_gives_up_after_five_failures_and_tells_the_admin_not
             assert db.execute("SELECT count(*) FROM signals").fetchone()[0] == 10
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T6 finding: TelegramNotifier._daily breaks out of the card loop at the first card "
-    "Telegram rejects, so one bad card hides every later signal of the digest and the digest "
-    "is still recorded as delivered (src/app/bot/notifier.py _daily: `break`)",
-)
-async def test_the_remaining_cards_are_still_sent_when_one_card_is_rejected(
+# requests: 1 = digest header, 2 = day header, 3.. = the ten cards (request 3 + k is card k)
+async def test_a_rejected_card_is_skipped_and_the_others_still_arrive(
     history_template,
     tmp_path,
     fault_bot,
@@ -187,10 +206,41 @@ async def test_the_remaining_cards_are_still_sent_when_one_card_is_rejected(
     async with open_week(history_template, tmp_path, fault_bot, fault_session) as w:
         await w.settings(USER, **PERMISSIVE)
         await jobs(w).run(JOB_REFRESH)
-        # requests: 1 = digest header, 2 = day header, 3.. = cards; card #2 (request 4) is rejected
-        fault_session.fail_numbers = {4}
+        fault_session.fail_kinds = {3: "bad_request"}  # the first card is refused for good
         await tick(w, 30)
         assert len(cards(w)) == 9  # ten cards minus the rejected one
+        assert len(digests(w)) == 1
+        sent = fault_session.calls
+        await tick(w, 60 * 3)  # the digest counts as delivered: no retry, nothing repeated
+        assert fault_session.calls == sent
+        assert len(cards(w)) == 9
+
+
+async def test_a_card_that_fails_for_now_is_sent_later_without_repeating_the_others(
+    history_template,
+    tmp_path,
+    fault_bot,
+    fault_session,  # type: ignore[no-untyped-def]
+) -> None:
+    async with open_week(history_template, tmp_path, fault_bot, fault_session) as w:
+        await w.settings(USER, **PERMISSIVE)
+        await jobs(w).run(JOB_REFRESH)
+        # a persistent 429 on card 2 (no second request: the wait is too long), a network error on
+        # card 6
+        # and one on the last card (10)
+        fault_session.fail_kinds = {4: "flood_long", 8: "network", 12: "network"}
+        await tick(w, 30)
+        assert len(digests(w)) == 1
+        assert len(cards(w)) == 7  # 10 minus the three that failed
+        await tick(w, 60 * 3)  # the retry sends only the missing cards
+        assert len(digests(w)) == 1
+        names = [m.text.splitlines()[0] for m in cards(w)]
+        assert len(names) == 10
+        assert len(set(names)) == 10, names  # no card twice
+        assert await w.ctx.ledger.is_done(LedgerKey("daily", date(2026, 10, 21), USER, "digest"))
+        await tick(w, 60 * 6)  # and then nothing more of the digest (pre-match updates differ)
+        assert len(digests(w)) == 1
+        assert len(cards(w)) == 10
 
 
 @pytest.mark.parametrize("kind", sorted(FAULTS))

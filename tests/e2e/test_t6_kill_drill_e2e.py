@@ -6,9 +6,10 @@ digest run. At boundary ``n`` the "process" dies (a ``BaseException`` that the p
 no cleanup code gets to run, like a real ``kill -9``). The restart is a new engine, context,
 notifier and dispatcher over the same files; the ticks then run until nothing changes.
 
-Contract being verified (ADR 0008, "at least once, deduplicated by key"): the digest is never
-lost, signals are never duplicated, and a repeated digest happens only when the death came
-after something was already sent (documented at-least-once).
+Contract being verified (ADR 0008 and 0019, "at least once, deduplicated by key"): the digest is
+never lost, signals are never duplicated, and a repeat is at most ONE message (the one in flight
+when the process died: the progress mark of a message is one statement plus one commit, so each
+of the ~11 messages has a two-boundary window that cannot be closed without risking loss).
 """
 
 from collections import Counter
@@ -189,9 +190,12 @@ async def test_killing_the_process_at_every_boundary_never_loses_or_duplicates_s
         # never a second copy of a signal, never a changed one
         assert outcome.signals == baseline.signals, (n, outcome.died_at)
         assert outcome.versions == {1}, (n, outcome.died_at)
-        # at most one repeat of the digest (documented at-least-once)
+        # at most ONE message of the digest is sent twice: the one in flight when the process
+        # died (per-message progress marks, T6-F-4); never the whole digest again
         assert outcome.digests <= 2, (n, outcome.died_at)
         assert max(outcome.cards.values()) <= 2, (n, outcome.died_at)
+        extra = outcome.digests - 1 + sum(count - 1 for count in outcome.cards.values())
+        assert extra <= 1, (n, outcome.died_at, extra)
 
     repeated = [r for r in rows if r.digests > 1 or max(r.cards.values()) > 1]
     emit(

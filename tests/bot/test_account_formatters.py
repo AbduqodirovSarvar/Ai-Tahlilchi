@@ -289,3 +289,17 @@ def test_naive_free_dates_use_the_users_zone() -> None:
     text = format_bets(bank(), (make_bet(placed_at=late),), TASHKENT)
 
     assert "· 23.10" in text
+
+
+def test_status_shows_the_build_when_known() -> None:
+    text = format_status(make_status(build="1.0.0-rc1 (abc123)"), TASHKENT, NOW, "real")
+
+    assert "🏷 Versiya: <b>1.0.0-rc1 (abc123)</b>" in text
+    assert text.index("Versiya") < text.index("API limitlari")
+
+
+def test_status_escapes_the_build_and_hides_the_line_when_unknown() -> None:
+    assert "Versiya: <b>&lt;x&gt;</b>" in format_status(
+        make_status(build="<x>"), TASHKENT, NOW, "real"
+    )
+    assert "Versiya" not in format_status(make_status(), TASHKENT, NOW, "real")

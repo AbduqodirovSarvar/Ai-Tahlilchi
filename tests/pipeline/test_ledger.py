@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.pipeline.ledger import (
     DEFAULT_LEASE,
+    DELIVERY_BACKOFFS,
+    DELIVERY_MAX_ATTEMPTS,
     KEY_RETENTION,
     MAX_ATTEMPTS,
     MAX_KEPT_ERRORS,
@@ -159,3 +161,47 @@ async def test_only_the_newest_errors_are_kept(ledger: Ledger) -> None:
     ]
     assert len(await ledger.recent_errors(limit=1000)) == MAX_KEPT_ERRORS
     assert errors[0][1] == "refresh"
+
+
+def test_the_delivery_schedule_spans_about_six_hours() -> None:
+    minutes = [wait.total_seconds() / 60 for wait in DELIVERY_BACKOFFS]
+    assert minutes == [1, 2, 4, 8, 15, 30, 60, 120, 120]
+    assert sum(minutes) == 360  # six hours from the first failure to the last attempt
+    assert len(minutes) + 1 == DELIVERY_MAX_ATTEMPTS
+    assert [backoff(n, delivery=True).total_seconds() / 60 for n in (1, 5, 9, 40)] == [
+        1,
+        15,
+        120,
+        120,
+    ]
+    assert backoff(0, delivery=True) == DELIVERY_BACKOFFS[0]
+
+
+async def test_a_delivery_key_is_retried_for_hours_before_it_is_given_up(ledger: Ledger) -> None:
+    now = NOW
+    for attempt in range(1, DELIVERY_MAX_ATTEMPTS + 1):
+        assert await ledger.claim(KEY, now=now)
+        failure = await ledger.fail(KEY, now=now, delivery=True)
+        assert failure.attempts == attempt
+        assert failure.exhausted is (attempt == DELIVERY_MAX_ATTEMPTS)
+        if failure.retry_after is not None:
+            assert failure.retry_after == now + backoff(attempt, delivery=True)
+            assert not await ledger.claim(KEY, now=failure.retry_after - timedelta(seconds=1))
+            now = failure.retry_after
+    assert now - NOW == timedelta(hours=6)
+    assert not await ledger.claim(KEY, now=now + timedelta(days=1))  # exhausted for good
+
+
+async def test_complete_many_writes_all_keys_in_one_go_and_overwrites(ledger: Ledger) -> None:
+    other = LedgerKey("msg", KEY.day, KEY.user_id, "signal:2")
+    await ledger.complete(other, now=NOW, detail="old")
+
+    await ledger.complete_many([(KEY, "a"), (other, "new")], now=NOW + timedelta(minutes=1))
+    await ledger.complete_many([], now=NOW)  # nothing to write is not an error
+
+    first, second = await ledger.get(KEY), await ledger.get(other)
+    assert first is not None
+    assert second is not None
+    assert (first.status, first.detail) == ("done", "a")
+    assert (second.status, second.detail) == ("done", "new")
+    assert not await ledger.claim(KEY, now=NOW + timedelta(days=1))  # a done key stays done

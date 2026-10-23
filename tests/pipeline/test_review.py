@@ -45,6 +45,20 @@ class SlowReviewer:
         return {}
 
 
+class ScriptedBatches:
+    """Answers each batch after its own delay; remembers how often it was asked."""
+
+    def __init__(self, delays: Sequence[float]) -> None:
+        self.delays = list(delays)
+        self.calls = 0
+
+    async def review(self, candidates: Sequence[ReviewCandidate]) -> dict[ReviewKey, Review]:
+        delay = self.delays[self.calls]
+        self.calls += 1
+        await asyncio.sleep(delay)
+        return {c.key: Review(verdict=LlmVerdict.CONFIRM, note=None) for c in candidates}
+
+
 class BrokenReviewer:
     async def review(self, candidates: Sequence[ReviewCandidate]) -> dict[ReviewKey, Review]:
         raise RuntimeError(len(candidates))
@@ -96,6 +110,52 @@ async def test_nothing_to_review_is_not_a_call() -> None:
 
 async def test_a_slow_reviewer_times_out_without_losing_anything() -> None:
     assert await review_safely(SlowReviewer(), [candidate()], limit_seconds=0.01) == {}
+
+
+async def test_a_slow_second_batch_does_not_take_the_first_batchs_reviews_with_it() -> None:
+    reviewer = ScriptedBatches([0.0, 5.0])
+    candidates = [candidate(number) for number in range(MAX_CANDIDATES + 2)]
+
+    reviews = await review_safely(reviewer, candidates, limit_seconds=0.05, total_seconds=10)
+
+    assert reviewer.calls == 2
+    assert {key[0] for key in reviews} == set(range(MAX_CANDIDATES))  # the first batch only
+
+
+async def test_each_batch_gets_its_own_time_limit() -> None:
+    reviewer = ScriptedBatches([0.04, 0.04])  # together slower than one limit, each within it
+    candidates = [candidate(number) for number in range(MAX_CANDIDATES + 2)]
+
+    reviews = await review_safely(reviewer, candidates, limit_seconds=0.06, total_seconds=10)
+
+    assert len(reviews) == len(candidates)
+
+
+async def test_the_total_limit_stops_the_remaining_batches_and_keeps_what_was_collected() -> None:
+    reviewer = ScriptedBatches([0.0, 0.5, 0.5])
+    candidates = [candidate(number) for number in range(2 * MAX_CANDIDATES + 1)]
+
+    reviews = await review_safely(reviewer, candidates, limit_seconds=2, total_seconds=0.2)
+
+    assert {key[0] for key in reviews} == set(range(MAX_CANDIDATES))
+    assert reviewer.calls == 2  # the third batch was never started
+
+
+async def test_a_failing_batch_costs_only_itself() -> None:
+    class FailsOnce:
+        calls = 0
+
+        async def review(self, candidates: Sequence[ReviewCandidate]) -> dict[ReviewKey, Review]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("first batch")
+            return {c.key: Review(verdict=LlmVerdict.CAUTION, note=None) for c in candidates}
+
+    candidates = [candidate(number) for number in range(MAX_CANDIDATES + 1)]
+
+    reviews = await review_safely(FailsOnce(), candidates)
+
+    assert list(reviews) == [candidates[-1].key]
 
 
 async def test_a_broken_reviewer_is_ignored() -> None:

@@ -3,15 +3,15 @@
 > Qoidalar: [agentlar_rejasi.md, 3-bo'lim](../agentlar_rejasi.md). Qotirilgan shartnomaga **faqat yangi narsa qo'shiladi**; buzuvchi o'zgarish orkestr ruxsati bilan va barcha foydalanuvchi agentlar yangilangandan keyin.
 > Har bir o'zgarish pastdagi "O'zgarishlar jurnali"ga yoziladi.
 
-**Umumiy holat (2026-10-23, T6):** 1–2 (domen, `SportAdapter`) — **frozen v1** (orkestr tasdiqlagan, 2026-10-21). 3 (baza sxemasi va repository) — **v1.7, Alembic `0009`**: frozen v1 + qo'shimchalar v1.1–v1.7. 4 (servis shartnomasi) — **v1.8**; 5 (soxta servis) — **v1.8**: frozen v1 + qo'shimchalar v1.1–v1.8; v1.5–v1.8 orkestr ko'rib chiqishini kutadi. 6 (model API) — **v1.3**: frozen v1 + qo'shimchalar v1.1–v1.3. 7 (LLM API) — **v1.2, frozen** (v1 taklifi T4 da yozilgan; keyingi qo'shimchalar v1.1–v1.2).
+**Umumiy holat (2026-10-23, T6):** 1–2 (domen, `SportAdapter`) — **frozen v1** (orkestr tasdiqlagan, 2026-10-21). 3 (baza sxemasi va repository) — **v1.7, Alembic `0009`**: frozen v1 + qo'shimchalar v1.1–v1.7. 4 (servis shartnomasi) — **v1.10**; 5 (soxta servis) — **v1.10**: frozen v1 + qo'shimchalar v1.1–v1.10; v1.5–v1.10 orkestr ko'rib chiqishini kutadi. 6 (model API) — **v1.3**: frozen v1 + qo'shimchalar v1.1–v1.3. 7 (LLM API) — **v1.2, frozen** (v1 taklifi T4 da yozilgan; keyingi qo'shimchalar v1.1–v1.2).
 
 | # | Shartnoma | Fayl | Egasi | Foydalanuvchilar | Holat |
 |---|---|---|---|---|---|
 | 1 | Domen modellari | `src/app/domain/*.py` | data-engineer | hamma | qotirilgan (v1) |
 | 2 | Sport adapteri | `src/app/sports/base.py` (`SportAdapter`) | data-engineer | pipeline, quant | qotirilgan (v1) |
 | 3 | Baza sxemasi va repository | `src/app/db/schema.py`, `src/app/db/repo/` | data-engineer | pipeline (bot/servislar DTO orqali) | qotirilgan (v1), qo'shimchalar v1.7 gacha (Alembic `0009`) |
-| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.8 gacha |
-| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.8 gacha |
+| 4 | Servis shartnomasi | `src/app/services/interfaces.py`, `src/app/services/errors.py` | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.10 gacha |
+| 5 | Soxta servis | `src/app/services/fake.py` (`create_fake_services`, `FakeAnalysisService`, ...) | pipeline-engineer | bot | frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.10 gacha |
 | 6 | Model API si | `src/app/models/__init__.py` | quant-modeler | pipeline | frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.3 gacha |
 | 7 | LLM API si | `src/app/llm/service.py`, `src/app/clients/gemini.py` | llm-engineer | pipeline | frozen, v1.2 |
 
@@ -161,7 +161,7 @@ Barcha funksiyalar `async`, birinchi argument `AsyncSession`, **chaqiruvchining 
 - `app.sports.football.FootballAdapter(client, *, catalog, identity, purpose, clock)` — `SportAdapter` + `with_expected_goals(results)`, `fetch_injuries(fixture)`, `fetch_lineups(fixture)`, `for_purpose(MANUAL)`, `with_identity(IdentityMap)`. Jamoa moslash: `app.sports.team_matching.match_teams(...) -> TeamMatchReport`, `IdentityMap.from_report(report, LeagueCatalog())`.
 
 ## 4. Servis shartnomasi — `src/app/services/interfaces.py`
-**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.1–v1.8 (v1.2 dan keyingilari orkestr ko'rib chiqishini kutadi) · **Versiya:** 1.8 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.1–v1.10 (v1.2 dan keyingilari orkestr ko'rib chiqishini kutadi) · **Versiya:** 1.10 · **Egasi:** pipeline-engineer · Qarorlar: [ADR 0004](adr/0004-service-contract.md) · **Import:** `from app.services.interfaces import ...`, `from app.services.errors import ...`
 
 Bot tizim bilan **faqat** shu modul orqali gaplashadi (domen qiymat turlari `Sport`, `Market`, `MarketType`, `Selection` ham ishlatiladi). Barcha DTO lar `@dataclass(frozen=True, slots=True)`; noto'g'ri kiritma konstruktorda `ValidationFailedError` beradi (noto'g'ri so'rov obyekti umuman yaratilmaydi). Barcha metodlar `async`.
 
@@ -398,10 +398,26 @@ Xatti-harakat o'zgarishi: `/eksport` CSV matn ustunlarida (liga, jamoalar, o'yin
 | `pipeline.redaction.scrub_text`, `register_secrets` | funksiyalar | Xato matnlaridan maxfiy ma'lumotni tozalash (ledger, admin ogohlantirishi, `/holat`) |
 | `pipeline.errors.ManualResultError` | xato | Mumkin bo'lmagan qo'lda natija (cashout chegaradan tashqarida) |
 
+**v1.10 qo'shimchalari (T6 fix C, faqat qo'shish; [ADR 0019](adr/0019-t6-fix-round-c.md))**
+
+| Nom | Turi | Ma'nosi |
+|---|---|---|
+| `SystemStatus.build: str = ""` | maydon | Ishlayotgan build yorlig'i (`/holat` da "Versiya: ..."). Real servis uchun `main.py` beradi (`create_real_services(..., build=)`, `app.ops.version.get_version().label`); soxta servis qat'iy `FAKE_BUILD` |
+| `DigestResume`, `DigestProgress` (port), `DailyDigest.progress` | DTO / port / maydon | Ko'p xabarli kunlik xabar jarayoni: `resume()` (sarlavha havolasi + qayta yuborish kerak bo'lmagan pozitsiyalar), `header_sent(ref)`, `part_handled(position)`. Ixtiyoriy: `None` bo'lsa notifier eski xatti-harakat bilan ishlaydi; `compare=False` |
+| `Notifier.send_daily_digest` xatti-harakati | o'zgarish | Doimiy rad etilgan karta (4xx) o'tkazib yuboriladi va signal id si bilan loglanadi; vaqtincha xato (429/tarmoq/5xx) bo'lgan karta qolsa `None` ("yetkazilmadi") qaytadi va qayta urinishda faqat yetishmaydiganlari yuboriladi. Bloklangan foydalanuvchida tsikl to'xtaydi (eski xatti-harakat) |
+| `pipeline.delivery.DigestProgress`, `DailyDelivery.progress` | port / maydon | Yuqoridagining pipeline (satr havolali) ko'rinishi; `services.real.notifier` ularni xizmat DTO siga o'giradi |
+| `Ledger.complete_many`, `Ledger.fail(..., delivery=)`, `ledger.DELIVERY_BACKOFFS`, `DELIVERY_MAX_ATTEMPTS`, `backoff(n, delivery=)` | funksiyalar / konstantalar | Bir tranzaksiyali ommaviy yozuv; yetkazish kalitlari uchun 1,2,4,8,15,30,60,120,120 daqiqa (10 urinish) |
+| `digest_store.LedgerDigestProgress`, ledger ishi `daily.progress` | sinf / kalit | Jarayonni ledger'da saqlash (yosh bo'yicha tozalanadi) |
+| `db.repo.get_signals_by_ids` | funksiya | Signallar id lar bo'yicha, 500 tadan paketlab (N+1 siz) |
+| `review_safely(..., limit_seconds=, total_seconds=)`, `PipelineConfig.review_timeout/review_total_timeout` | sozlama | Vaqt chegarasi paket boshiga (30 s) va butun tahlilga (90 s) |
+| `scheduler.JOB_RETENTION` (`retention`, yakshanba 04:00), `PipelineJobs(sleep=)`, `FAILURE_BACKOFF_SECONDS` | job / sozlama | `JOB_NAMES` 9 ta; yozib bo'lmaydigan xato job o'ramidan chiqmaydi |
+| `Settings.ingest_extra_bookmakers` (`INGEST_EXTRA_BOOKMAKERS`) | sozlama | → `PipelineConfig.extra_bookmakers` |
+| `app.logging.summarise_body` | funksiya | Uchinchi tomon javob tanasining qisqa, HTML-tegsiz ko'rinishi (loglar uchun) |
+
 `app.pipeline.queries` (re-export) va `daily.next_send_after` olib tashlandi: o'qishlar `app.db.repo` dan.
 
 ## 5. Soxta servis — `src/app/services/fake.py`
-**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.1–v1.8 (fake va real servis shartnoma testlari bir xil) · **Versiya:** 1.8 · **Egasi:** pipeline-engineer
+**Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.1–v1.10 (fake va real servis shartnoma testlari bir xil) · **Versiya:** 1.10 · **Egasi:** pipeline-engineer
 
 - `create_fake_services(*, clock: Clock = system_clock) -> Services` — barcha protokollarning bitta umumiy xotira holati ustidagi soxta amalga oshirilishi (`FakeAnalysisService`, `FakeSignalService`, `FakeCatalogService`, `FakeSettingsService`, `FakeTemplateService`, `FakeWatchlistService`, `FakeBetService`, `FakeResultService`, `FakeReportService`, `FakeSystemStatusService`). `Clock = Callable[[], datetime]` (UTC).
 - Ma'lumot: hash asosida **deterministik** (tasodif yo'q): APL, La Liga, Seriya A, Bundesliga (futbol) va KHL (xokkey, `experimental=True`), soat bo'yicha "bugun" dan 7 kun oldin — 14 kun keyin, har kuni har ligada bitta o'yin; bozorlar 1X2, ikki natija, Total 2.5, BTTS, Fora −0.5 (xokkey: 1X2, Total 5.5). Tugagan o'yinlarning ~15% ida natija "API dan kelmagan" (`/natijalar` uchun).
@@ -496,6 +512,7 @@ LLM qadami **hech qachon istisno ko'tarmaydi** va pipeline'ni to'xtatmaydi: o'ch
 | 2026-10-22 | 3. Baza sxemasi (3.1), 4. Servis shartnomasi, 7. LLM API | v1.7 (T5 pipeline, faqat qo'shish): `SignalView.home_team_id/away_team_id/league_id`, `LimitPeriod`/`LossLimitNotice`, `DailyDigest.template_name/loss_limit`, `AnalysisResult.loss_limit`; `FixtureRecord` katalog id lari, `db.repo.feedback`, `bets_settled_between`; `PostmortemInput.original_*`, prompt `postmortem.v2`; zarar limiti va jadvalli shablon qoidalari ([ADR 0015](adr/0015-feedback-loop-pipeline.md)) | pipeline-engineer | orkestr (T5 pipeline topshirig'i) |
 | 2026-10-23 | 4. Servis shartnomasi, 5. Soxta servis | v1.8 (T5 bot fix, faqat qo'shish): cashout = to'langan pul summasi (`ResultMarkRequest.cashout_bet_id/cashout_payout`, qaror #18), `BetService.get_bet`, `BankTotals`/`BankView.totals`, ekspress EV `prod(1+ev)-1` + `ExpressLeg.fair_odds`, `LearningService`/`Services.learning`/`LearningChangeView`/`LearningPage`/`LearningSummary`/`LearningMode`/`RollbackOutcome`, `Notifier.send_learning_summary`, `SystemStatus.learning_mode/learning_missed`; `report_math.safe_cell` + CSV BOM ([ADR 0016](adr/0016-t5-bot-fix-and-f8-ui.md)) | bot-engineer | orkestr ko'rib chiqadi |
 | 2026-10-23 | 3. Baza (repo), 4. Servis shartnomasi, 5. Soxta servis | v1.9 (T6 fix A, faqat qo'shish; v1.8 dagi cashout "boshqa stavkalar" qoidasi #22 bilan almashtirildi): `MAX_MONEY`, cashout chegaralari, ochiq stavkali signal settlement (#19), aylanma = xavf ostidagi stavka (#21), Kelly balansdan, `db.repo.get_bet`/`signal_has_bets`/`settled_profit_total`, kesh chegaralari va `PayloadShape`, bukmeker filtri, `retention`, `promote_shadow_state`, `redaction` ([ADR 0018](adr/0018-t6-fix-round-a.md)) | pipeline-engineer | orkestr qarorlari #19–#23 |
+| 2026-10-23 | 4. Servis shartnomasi, 5. Soxta servis | v1.10 (T6 fix C, faqat qo'shish): `SystemStatus.build`, `DigestResume`/`DigestProgress`/`DailyDigest.progress` (kartalar bo'yicha yetkazish jarayoni), kartani doimiy rad etish/vaqtincha xato qoidasi, yetkazish kalitlari uchun 6 soatlik qayta urinish jadvali, `Ledger.complete_many`, `db.repo.get_signals_by_ids`, sharh vaqt chegarasi paket boshiga, `retention` job, `INGEST_EXTRA_BOOKMAKERS` ([ADR 0019](adr/0019-t6-fix-round-c.md)) | bot-engineer / pipeline-engineer | orkestr ko'rib chiqadi |
 | 2026-10-22 | 6. Model API, 3. Baza sxemasi | v1.2 (T5, faqat qo'shimcha): `models.segments` (shrinkage, bootstrap CI, `segment_action`), `models.calibration` (isotonic, walk-forward, darvoza, versiya/rollback); Alembic `0008` (`signals.p_raw`, `segment_stats.state_since/hold_until`, `calibration_versions.passed_gate`, `learning_changes`); repo `learning`; pipeline `learning`/`overlay`, `JOB_LEARNING` ([ADR 0013](adr/0013-learning-loop-math.md)) | quant-modeler | orkestr (T5 topshirig'i) |
 | 2026-10-22 | 4. Servis shartnomasi, 5. Soxta servis | v1.2 (T4, faqat qo'shish): `Notifier` porti va DTO lari, `DeliveryKey`, `ServiceUnavailableError`, `BusyError`, `recalc_window`/`recalc_signals`, `get_signals`, `BetDraft.client_token`, bank semantikasi, `DateWindow.ensure_allowed`/`ensure_within_lookback`, `FakeNotifier`; `_fake_metrics` → `report_math` ([ADR 0008](adr/0008-pipeline-and-real-services.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
 | 2026-10-22 | 7. LLM API | v1.1 (T4 fix round, faqat qo'shimcha): `note_suspicious` bayrog'i; `GeminiError.attempts/usage`; `BudgetSnapshot.logical_requests`, `JournalEntry.attempts/estimated`, `LlmBudget.reserve/settle/release`; `inputs.MAX_NOTE_CHARS` -> `MAX_USER_NOTE_CHARS`; izoh/`reason` HTML-escape qoidasi; gap boshidagi nom tekshiruvi; golden 27 holat ([ADR 0009](adr/0009-llm-integration.md), tuzatish raundi) | llm-engineer | orkestr (T4 fix round topshirig'i) |

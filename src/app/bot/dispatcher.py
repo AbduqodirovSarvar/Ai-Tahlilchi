@@ -92,7 +92,12 @@ def build_dispatcher(
         jobs=jobs,
     )
     dispatcher.shutdown.register(jobs.cancel_all)
+    # aiogram registers its FSM middleware (which takes the per-user isolation lock and never
+    # releases the lock object) before ours. Move it behind the whitelist so a stranger is
+    # dropped before it can leave anything in the process (T6-F-8).
+    dispatcher.update.outer_middleware.unregister(dispatcher.fsm)
     dispatcher.update.outer_middleware(WhitelistMiddleware(admin_ids))
+    dispatcher.update.outer_middleware(dispatcher.fsm)
     dispatcher.update.outer_middleware(UserContextMiddleware())
     dispatcher.update.outer_middleware(rate_limit or RateLimitMiddleware())
     dispatcher.message.middleware(ErrorMiddleware())

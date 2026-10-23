@@ -23,6 +23,27 @@ from app.pipeline.recalc import RecalcResult
 from app.pipeline.types import AnalysisOutcome, SignalCard
 
 
+class DigestProgress(Protocol):
+    """Where a multi-message digest remembers how far its delivery got (T6-F-1, T6-F-4).
+
+    The delivery calls :meth:`header_sent` once after the first message and
+    :meth:`part_handled` after each later one (sent, or rejected for good), so a retry or a
+    restart resends at most the message that was in flight.
+    """
+
+    async def resume(self) -> tuple[str | None, frozenset[int]]:
+        """``(header reference, positions already handled)`` from earlier attempts."""
+        ...
+
+    async def header_sent(self, reference: str) -> None:
+        """The first message went out (remembered together with the cards' references)."""
+        ...
+
+    async def part_handled(self, position: int) -> None:
+        """The message at ``position`` was sent or permanently rejected."""
+        ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DailyDelivery:
     """The morning digest: the user's analysis of ``day`` (their local date).
@@ -36,6 +57,7 @@ class DailyDelivery:
     outcome: AnalysisOutcome
     label: str | None = None
     loss_limit: LossStatus | None = None
+    progress: DigestProgress | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

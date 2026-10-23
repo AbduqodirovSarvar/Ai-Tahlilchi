@@ -8,6 +8,8 @@ Jobs
 - ``feedback``: 08:45 every day, after the results are in: post-mortems of the new losses and the
   lessons built from them (F8.3, F8.4); ``lessons``: 09:30 every Monday, the lesson maintenance
   (confirmation and expiry sweep);
+- ``retention``: 04:00 every Sunday, prunes old intermediate price snapshots (the quietest hour,
+  before anyone's morning digest);
 - ``daily-tick``, ``template-tick`` and ``recalc-tick``: every minute. The tick *decides* what is
   due: each user's digest at their own ``send_time`` in their own time zone, each scheduled
   template at its weekdays and local time (changes of settings apply at once, no per-user job
@@ -63,6 +65,7 @@ from app.pipeline.lessons import run_lessons
 from app.pipeline.postmortem import run_postmortems
 from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.refresh import refresh
+from app.pipeline.retention import run_retention
 from app.pipeline.settle import run_settlement
 from app.pipeline.templates import run_due_templates
 
@@ -75,10 +78,15 @@ LEARNING_WEEKDAY: Final = "mon"
 FEEDBACK_AT: Final = time(8, 45)
 """Post-mortems run after the settlement (08:00) and the refresh (08:30) of the same morning."""
 LESSONS_AT: Final = time(9, 30)
+RETENTION_AT: Final = time(4, 0)
+RETENTION_WEEKDAY: Final = "sun"
 REFRESH_AT: Final = time(8, 30)
 DAILY_GRACE_SECONDS: Final = 6 * 3600
 TICK_GRACE_SECONDS: Final = 60
 TICK_SECONDS: Final = 60
+FAILURE_BACKOFF_SECONDS: Final = 5.0
+"""Pause after a failure that could not even be recorded (the database is locked): the next
+tick finds it settled instead of hammering it."""
 STOP_TIMEOUT_SECONDS: Final = 60.0
 """How long :meth:`PipelineScheduler.stop` lets running jobs finish before cancelling them."""
 JOB_SETTLE: Final = "settle"
@@ -89,6 +97,7 @@ JOB_LEARNING: Final = "learning"
 JOB_TEMPLATE_TICK: Final = "template-tick"
 JOB_FEEDBACK: Final = "feedback"
 JOB_LESSONS: Final = "lessons"
+JOB_RETENTION: Final = "retention"
 JOB_NAMES: Final = (
     JOB_SETTLE,
     JOB_REFRESH,
@@ -98,6 +107,7 @@ JOB_NAMES: Final = (
     JOB_LEARNING,
     JOB_FEEDBACK,
     JOB_LESSONS,
+    JOB_RETENTION,
 )
 HEARTBEAT_JOBS: Final = (JOB_SETTLE, JOB_REFRESH)
 """The daily cycle: after each of these ends well, the dead-man's switch is pinged."""
@@ -107,15 +117,22 @@ class PipelineJobs:
     """The work behind each job name, with uniform error handling."""
 
     def __init__(
-        self, ctx: PipelineContext, delivery: Delivery, *, heartbeat: Heartbeat | None = None
+        self,
+        ctx: PipelineContext,
+        delivery: Delivery,
+        *,
+        heartbeat: Heartbeat | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Run the jobs on ``ctx``; messages go through ``delivery``.
 
-        ``heartbeat`` (the dead-man's switch) is pinged after each daily-cycle job.
+        ``heartbeat`` (the dead-man's switch) is pinged after each daily-cycle job; ``sleep``
+        is injectable so tests do not wait out :data:`FAILURE_BACKOFF_SECONDS`.
         """
         self._ctx = ctx
         self._delivery = delivery
         self._heartbeat = heartbeat
+        self._sleep = sleep
         self._work: dict[str, Callable[[], Awaitable[object]]] = {
             JOB_SETTLE: lambda: run_settlement(ctx, delivery),
             JOB_REFRESH: lambda: refresh(ctx),
@@ -125,6 +142,7 @@ class PipelineJobs:
             JOB_TEMPLATE_TICK: lambda: run_due_templates(ctx, delivery),
             JOB_FEEDBACK: self._feedback,
             JOB_LESSONS: lambda: run_lessons(ctx),
+            JOB_RETENTION: self._retention,
         }
 
     async def _recalc_tick(self) -> None:
@@ -146,6 +164,14 @@ class PipelineJobs:
             )
         await announce_learning(self._ctx, self._delivery)
 
+    async def _retention(self) -> None:
+        """The weekly pruning of old price snapshots, recorded for ``/holat``."""
+        report = await run_retention(self._ctx)
+        if not report.skipped:
+            await self._ctx.ledger.record_run(
+                JOB_RETENTION, ok=True, detail=f"deleted={report.deleted}", now=self._ctx.clock()
+            )
+
     async def _feedback(self) -> None:
         """Explain the new losses, then rebuild the lessons if there is new evidence."""
         report = await run_postmortems(self._ctx)
@@ -157,16 +183,34 @@ class PipelineJobs:
         try:
             await self._work[name]()
         except Exception as error:
-            now = self._ctx.clock()
             logger.exception("job_failed", job=name)
+            await self._record_failure(name, error)
+            await self._ping(name, PingKind.FAIL, f"{name}: {type(error).__name__}")
+        else:
+            await self._ping_after_run(name)
+
+    async def _record_failure(self, name: str, error: Exception) -> None:
+        """Record a failed run for ``/holat`` and alert; never raises (T6-F-2).
+
+        The record goes to the same database that may be the reason for the failure (locked):
+        then the failure is only logged (``job_failed_unrecorded``), the job backs off briefly
+        and the next tick retries, so the scheduler is never taken down by its own bookkeeping.
+        """
+        try:
+            now = self._ctx.clock()
             await self._ctx.ledger.record_run(name, ok=False, detail=str(error)[:200], now=now)
             await self._ctx.ledger.record_error(name, str(error), now=now)
             await alert_throttled(
                 self._ctx, self._delivery, name, f"{type(error).__name__}: {error}"
             )
-            await self._ping(name, PingKind.FAIL, f"{name}: {type(error).__name__}")
-        else:
-            await self._ping_after_run(name)
+        except Exception as recording_error:
+            logger.error(
+                "job_failed_unrecorded",
+                job=name,
+                error=repr(error),
+                recording_error=repr(recording_error),
+            )
+            await self._sleep(FAILURE_BACKOFF_SECONDS)
 
     async def _ping_after_run(self, name: str) -> None:
         """Ping success when the run ended well, ``/fail`` when it recorded a failure."""
@@ -355,6 +399,16 @@ class PipelineScheduler:
                     day_of_week=LEARNING_WEEKDAY,
                     hour=LESSONS_AT.hour,
                     minute=LESSONS_AT.minute,
+                    timezone=self._timezone,
+                ),
+                DAILY_GRACE_SECONDS,
+            ),
+            (
+                JOB_RETENTION,
+                CronTrigger(
+                    day_of_week=RETENTION_WEEKDAY,
+                    hour=RETENTION_AT.hour,
+                    minute=RETENTION_AT.minute,
                     timezone=self._timezone,
                 ),
                 DAILY_GRACE_SECONDS,

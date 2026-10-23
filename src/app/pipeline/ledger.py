@@ -21,11 +21,13 @@ be taken *before* any network call (ADR 0007) and tests control time. The table 
 for a database that was never migrated (``CREATE TABLE IF NOT EXISTS``).
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Final, cast
 
 from sqlalchemy import ColumnElement, Table, and_, delete, insert, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -51,9 +53,19 @@ MAX_ATTEMPTS: Final = 5
 RETRY_BASE: Final = timedelta(minutes=1)
 RETRY_CAP: Final = timedelta(minutes=30)
 """Backoff after failure ``n`` is ``RETRY_BASE * 2 ** (n - 1)``, at most ``RETRY_CAP``."""
+DELIVERY_BACKOFFS: Final = tuple(
+    timedelta(minutes=minutes) for minutes in (1, 2, 4, 8, 15, 30, 60, 120, 120)
+)
+"""Waits after the 1st, 2nd, ... failure of a *delivery* key (a message to a user, T6-F-7).
+
+A Telegram outage of an hour or two must not cost the user the whole day's digest, so the
+schedule spans ~6 hours (the digest's catch-up window, ``PipelineConfig.daily_catch_up``,
+is 12 hours: a retry beyond it is never made anyway). The next failure after the last wait
+exhausts the key."""
+DELIVERY_MAX_ATTEMPTS: Final = len(DELIVERY_BACKOFFS) + 1
 KEY_RETENTION: Final = timedelta(days=35)
 """Per-day keys and message references older than this are forgotten."""
-PURGED_STAMP_JOBS: Final = ("query", "msg", "daily.outcome", "notified")
+PURGED_STAMP_JOBS: Final = ("query", "msg", "daily.outcome", "daily.progress", "notified")
 """Jobs whose entries are not per-day but expire by age (``done_at``)."""
 _SUBJECT_LENGTH: Final = LEDGER_SUBJECT_LENGTH
 
@@ -102,8 +114,10 @@ class Failure:
     exhausted: bool
 
 
-def backoff(attempts: int) -> timedelta:
-    """Wait before attempt ``attempts + 1`` (exponential, capped)."""
+def backoff(attempts: int, *, delivery: bool = False) -> timedelta:
+    """Wait before attempt ``attempts + 1``: exponential and capped, or the delivery schedule."""
+    if delivery:
+        return DELIVERY_BACKOFFS[min(max(attempts, 1), len(DELIVERY_BACKOFFS)) - 1]
     steps = 1 << max(attempts - 1, 0)
     return min(RETRY_BASE * steps, RETRY_CAP)
 
@@ -213,17 +227,56 @@ class Ledger:
         """Mark ``key`` done for good (inserting it when it was never claimed)."""
         await self._finish(key, STATUS_DONE, now, detail)
 
-    async def fail(self, key: LedgerKey, *, now: datetime, detail: str | None = None) -> Failure:
+    async def complete_many(
+        self, entries: Sequence[tuple[LedgerKey, str | None]], *, now: datetime
+    ) -> None:
+        """Mark every key done in ONE statement and transaction (all or nothing).
+
+        For bookkeeping that must not be torn by a crash, e.g. the message references of all
+        cards of a digest.
+        """
+        if not entries:
+            return
+        rows = [
+            {
+                "job": key.job,
+                "day": key.day,
+                "user_id": key.user_id,
+                "subject": key.subject,
+                "status": STATUS_DONE,
+                "claimed_at": now,
+                "done_at": now,
+                "detail": detail,
+            }
+            for key, detail in entries
+        ]
+        statement = sqlite_insert(ledger_table).values(rows)
+        statement = statement.on_conflict_do_update(
+            index_elements=["job", "day", "user_id", "subject"],
+            set_={
+                "status": STATUS_DONE,
+                "done_at": now,
+                "detail": statement.excluded.detail,
+                "retry_after": None,
+            },
+        )
+        async with self._sessions.begin() as session:
+            await session.execute(statement)
+
+    async def fail(
+        self, key: LedgerKey, *, now: datetime, detail: str | None = None, delivery: bool = False
+    ) -> Failure:
         """Record a failed attempt of ``key``: retry after a backoff, or give up for good.
 
         The attempt count survives restarts; the ``n``-th failure waits ``backoff(n)``, and
-        the :data:`MAX_ATTEMPTS`-th makes the key ``exhausted`` (never claimable again).
+        the :data:`MAX_ATTEMPTS`-th makes the key ``exhausted`` (never claimable again). A
+        ``delivery`` key (a message to a user) follows the longer :data:`DELIVERY_BACKOFFS`.
         """
         async with self._sessions.begin() as session:
             row = (await session.execute(select(ledger_table).where(*_where(key)))).first()
             attempts = (0 if row is None else _entry(row).attempts) + 1
-            exhausted = attempts >= MAX_ATTEMPTS
-            retry_after = None if exhausted else now + backoff(attempts)
+            exhausted = attempts >= (DELIVERY_MAX_ATTEMPTS if delivery else MAX_ATTEMPTS)
+            retry_after = None if exhausted else now + backoff(attempts, delivery=delivery)
             values = {
                 "status": STATUS_EXHAUSTED if exhausted else STATUS_FAILED,
                 "done_at": now,

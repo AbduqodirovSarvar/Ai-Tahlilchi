@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # How many units a recommendation stakes: one flat unit, or a capped quarter Kelly of the
     # user's bank (falls back to flat for a user without a bank and unit).
     staking_mode: StakingModeName = "flat"
+    # Bookmakers stored besides Pinnacle and the user's own (comma-separated, e.g.
+    # "bet365,unibet"); empty by default: every extra one multiplies the odds history (ADR 0018).
+    ingest_extra_bookmakers: Annotated[frozenset[str], NoDecode] = frozenset()
     # The weekly learning loop: "off" does nothing, "shadow" (default) computes and journals what it
     # would change without touching any analysis, "apply" also lets segment rules and the
     # calibration steer analysis. Switching to "apply" is a human decision (ADR 0013).
@@ -112,6 +115,15 @@ class Settings(BaseSettings):
             return frozenset({value})
         if isinstance(value, str):
             parts = [part.strip() for part in value.split(",")]
+            return frozenset(part for part in parts if part)
+        return value
+
+    @field_validator("ingest_extra_bookmakers", mode="before")
+    @classmethod
+    def _parse_extra_bookmakers(cls, value: object) -> object:
+        """Accept ``INGEST_EXTRA_BOOKMAKERS=bet365, Unibet`` (names are matched lower-case)."""
+        if isinstance(value, str):
+            parts = [part.strip().lower() for part in value.split(",")]
             return frozenset(part for part in parts if part)
         return value
 

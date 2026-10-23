@@ -15,7 +15,7 @@ from typing import Final
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.exceptions import TelegramUnauthorizedError
+from aiogram.exceptions import ClientDecodeError, TelegramUnauthorizedError
 from aiogram.utils.token import TokenValidationError
 
 from app.bot.dispatcher import build_dispatcher
@@ -25,10 +25,11 @@ from app.bot.recovery import recover_running_analyses
 from app.bot.storage import SqliteStorage, fsm_db_path
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
-from app.logging import configure_logging, get_logger
+from app.logging import configure_logging, get_logger, summarise_body
 from app.ops.heartbeat import Heartbeat
 from app.ops.version import get_version
 from app.ops.watchdog import EXIT_STALLED, SchedulerStalledError, Watchdog
+from app.pipeline.redaction import register_secrets
 from app.pipeline.runtime import open_runtime
 from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
@@ -69,7 +70,8 @@ async def connect_bot(token: str) -> Bot:
     """Create the bot and prove the token is accepted by Telegram before polling.
 
     Raises:
-        ConfigurationError: the token is malformed or rejected by Telegram.
+        ConfigurationError: the token is malformed or rejected by Telegram, or something in
+            the network (a firewall page instead of JSON) stands between us and Telegram.
     """
     try:
         bot = Bot(token=token, session=build_bot_session())
@@ -83,6 +85,14 @@ async def connect_bot(token: str) -> Bot:
     except TelegramUnauthorizedError:
         await bot.session.close()
         msg = "Telegram rejected TELEGRAM_BOT_TOKEN (unauthorized); check or regenerate it"
+        raise ConfigurationError(msg) from None
+    except ClientDecodeError as error:
+        await bot.session.close()
+        msg = (
+            "unexpected content from api.telegram.org (not JSON): the network or a firewall is "
+            "blocking Telegram, see RUNBOOK 'Telegram is unreachable'. "
+            f"Answer: {summarise_body(error.data)}"
+        )
         raise ConfigurationError(msg) from None
     except BaseException:
         await bot.session.close()
@@ -144,7 +154,9 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
     settings.require_explicit_handicap_convention()
     async with open_runtime(settings) as runtime:
         notifier = TelegramNotifier(admin_ids=admin_ids, default_zone=settings.display_timezone)
-        system = create_real_services(runtime.ctx, notifier=notifier)
+        system = create_real_services(
+            runtime.ctx, notifier=notifier, build=get_version(settings).label
+        )
         notifier.attach_settings(system.services.settings)
         logger.info("services_backend", backend="real", sample_data=False)
         scheduler = PipelineScheduler(
@@ -195,6 +207,7 @@ def main() -> int:
             app_env=settings.app_env,
             secret_values=settings.secret_values(),
         )
+        register_secrets(settings.secret_values())  # bot token, API keys, healthchecks URL
         build = get_version(settings)
         logger.info(
             "app_started", version=build.version, sha=build.git_sha, services=settings.app_services
