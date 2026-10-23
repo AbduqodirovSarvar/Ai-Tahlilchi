@@ -10,7 +10,7 @@
 
 ### ✅ Darvozadan o'tadi (shartli) — "Merge mumkin"
 
-🔴 topilma **yo'q**: foydalanuvchilar izolyatsiyasi, whitelist, zarar limiti chegarasi, balans/foyda hisobi, ekspress ehtimollik arifmetikasi, hisobot davrlari (DST va yarim tun) va callback_data hajmi mustaqil oracle bilan tasdiqlandi. 4 ta 🟠 va 10 ta 🟡 topilma bor; ularning hammasi `xfail(strict=True)` bilan qayd etilgan (tuzatilganda XPASS bo'lib yiqiladi va belgini olib tashlash kerak bo'ladi).
+🔴 topilma **yo'q**: foydalanuvchilar izolyatsiyasi, whitelist, zarar limiti chegarasi, balans/foyda hisobi, ekspress ehtimollik arifmetikasi, hisobot davrlari (DST va yarim tun) va callback_data hajmi mustaqil oracle bilan tasdiqlandi. 4 ta 🟠 va 6 ta 🟡 topilma (hamda bir nechta kuzatuv) bor; topilmalarning hammasi `xfail(strict=True)` bilan qayd etilgan (tuzatilganda XPASS bo'lib yiqiladi va belgini olib tashlash kerak bo'ladi).
 
 **Shartlar (merge dan keyin, T5 yopilishidan oldin):**
 1. **F-2** (cashout birligi) — pul ko'rsatkichi noto'g'ri bo'lishi mumkin: jonli ishlatishdan oldin tuzatilsin yoki prompt matni aniqlashtirilsin.
@@ -84,9 +84,9 @@
 
 | # | Mezon | Holat | Dalil |
 |---|---|---|---|
-| 1a | Soxta `callback_data` bilan boshqa foydalanuvchi ma'lumotiga kirish (stavka, shablon, sevimli, signal, hisobot, eksport) | ✅ | `test_forged_callbacks_of_another_user_change_nothing_and_leak_nothing`: 34 ta tugma B dan A ning ob'ektlariga; A ning stavkasi/shablon jadvali/bayroqlari/signal holati o'zgarmadi, javoblarda A ning nomi, summasi, jamoasi yo'q; B da hech narsa yaratilmadi. Nazorat: A ning o'zi bosganda ishlaydi |
+| 1a | Soxta `callback_data` bilan boshqa foydalanuvchi ma'lumotiga kirish (stavka, shablon, sevimli, signal, hisobot, eksport) | ✅ | `test_forged_callbacks_of_another_user_change_nothing_and_leak_nothing`: 33 ta tugma B dan A ning ob'ektlariga; A ning stavkasi/shablon jadvali/bayroqlari/signal holati o'zgarmadi, javoblarda A ning nomi, summasi, jamoasi yo'q; B da hech narsa yaratilmadi. Nazorat: A ning o'zi bosganda ishlaydi |
 | 1b | Tugmalar JORIY foydalanuvchi ma'lumotiga qarshi qayta tekshiriladi | ✅ | Stavka/shablon/signal — `NotFoundError`; sevimli — "endi yo'q"; ekspress/maxsus/jadval — `StaleDraftError` (draft foydalanuvchining o'zida) |
-| 1c | Whitelist va faqat shaxsiy chat yangi routerlarda | ✅ | Begona: 13 matn/buyruq + 34 tugma → **0 API chaqiruv**; admin guruhi → 0 |
+| 1c | Whitelist va faqat shaxsiy chat yangi routerlarda | ✅ | Begona: 13 matn/buyruq + 33 tugma → **0 API chaqiruv**; admin guruhi → 0 |
 | 1d | Oddiy matn → jamoa qidiruvi: begona nima qila oladi, rate limit | ✅ | Begonaning matni katalogga yetmaydi (spy); admin: 60 matn → katalog chaqiruvlari ≤ burst·12; barcha menyu yorliqlari qidiruvga tushmaydi |
 | 2a | Zarar limiti aniq chegarada (kunlik) | ✅ | 99/100 → ruxsat, 100/100 → to'xtatish ("bugun 100"); `>=` |
 | 2b | Foydalanuvchi mintaqasida kun/hafta (New York, Tashkent, Auckland) | ✅ | 6 parametrli test: 03:30 UTC = NY da kecha; yakshanba 23:30 NY = dushanba Toshkentda |
