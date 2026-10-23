@@ -13,6 +13,7 @@ from app.logging import get_logger
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery
 from app.pipeline.ledger import Failure, LedgerKey
+from app.pipeline.redaction import scrub_text
 
 logger = get_logger(__name__)
 
@@ -43,7 +44,7 @@ async def alert_throttled(
         return False
     await ctx.ledger.stamp(ALERT_JOB, throttle, now=now)
     try:
-        await delivery.alert_admin(component, message, now)
+        await delivery.alert_admin(component, scrub_text(message), now)
     except Exception as error:  # an unreachable admin chat must not hide the original error
         logger.warning("admin_alert_failed", component=component, error=repr(error))
         return False

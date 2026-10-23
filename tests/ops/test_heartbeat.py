@@ -7,7 +7,7 @@ from pydantic import HttpUrl
 
 from app.config import Settings
 from app.logging import configure_logging
-from app.ops.heartbeat import Heartbeat, PingKind
+from app.ops.heartbeat import MAX_DETAIL_CHARS, Heartbeat, PingKind
 
 URL = "https://hc-ping.com/11111111-2222-3333-4444-555555555555"
 
@@ -27,7 +27,7 @@ async def test_pings_the_endpoint_of_each_kind(kind: PingKind, suffix: str) -> N
     assert await heartbeat().ping(kind, "settle ok") is True
 
     assert route.call_count == 1
-    assert route.calls.last.request.content == b"settle ok"
+    assert route.calls.last.request.content == b"settle"  # a short code, never free text
 
 
 @respx.mock
@@ -83,10 +83,27 @@ async def test_the_secret_url_never_reaches_the_logs(capsys: pytest.CaptureFixtu
 
 
 @respx.mock
-async def test_long_detail_is_truncated() -> None:
+async def test_long_detail_is_cut_to_a_short_code() -> None:
     route = respx.post(URL).respond(200)
     await heartbeat().ping(detail="x" * 5000)
-    assert len(route.calls.last.request.content) == 1000
+    assert len(route.calls.last.request.content) == MAX_DETAIL_CHARS
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("detail", "sent"),
+    [
+        ("settle: ConnectError https://api.example/odds?key=SECRET123456", b"settle"),
+        ("daily.digest failed: boom", b"daily.digest"),
+        ("   ", b""),
+        (None, b""),
+    ],
+)
+async def test_internal_error_text_never_leaves_the_host(detail: str | None, sent: bytes) -> None:
+    route = respx.post(URL + "/fail").respond(200)
+    await heartbeat().ping(PingKind.FAIL, detail)
+    assert route.calls.last.request.content == sent
+    assert b"SECRET" not in route.calls.last.request.content
 
 
 def test_from_settings_uses_healthchecks_url() -> None:

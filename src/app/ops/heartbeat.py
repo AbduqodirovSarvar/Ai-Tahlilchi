@@ -11,6 +11,7 @@ credential), so it is never logged; only the outcome is.
 """
 
 import asyncio
+import re
 from enum import StrEnum
 from typing import Final, Self
 
@@ -25,8 +26,15 @@ logger = get_logger(__name__)
 PING_TIMEOUT_SECONDS: Final = 10.0
 PING_ATTEMPTS: Final = 3
 PING_BACKOFF_SECONDS: Final = 2.0
-MAX_DETAIL_CHARS: Final = 1000
-"""healthchecks.io keeps the first 100 kB of a body; a short note is all that is useful."""
+MAX_DETAIL_CHARS: Final = 40
+"""The body is a short code (the job name), never free text: it goes to a third party."""
+_CODE_PATTERN: Final = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def short_code(detail: str | None) -> str:
+    """The leading job-name-like token of ``detail``; internal error text never leaves the host."""
+    match = _CODE_PATTERN.match((detail or "").strip())
+    return "" if match is None else match.group(0)[:MAX_DETAIL_CHARS]
 
 
 class PingKind(StrEnum):
@@ -70,7 +78,7 @@ class Heartbeat:
         if self._url is None:
             return False
         target = self._url + kind.value
-        body = (detail or "")[:MAX_DETAIL_CHARS].encode()
+        body = short_code(detail).encode()
         for attempt in range(self._attempts):
             if attempt:
                 await asyncio.sleep(self._backoff * 2 ** (attempt - 1))
