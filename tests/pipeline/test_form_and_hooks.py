@@ -194,7 +194,7 @@ async def test_a_restart_keeps_every_job_once(tmp_path: Path) -> None:
         await scheduler.stop()
 
     assert names == [set(JOB_NAMES)] * 3
-    assert len(JOB_NAMES) == len(set(JOB_NAMES)) == 8
+    assert len(JOB_NAMES) == len(set(JOB_NAMES)) == 9
 
 
 @dataclass

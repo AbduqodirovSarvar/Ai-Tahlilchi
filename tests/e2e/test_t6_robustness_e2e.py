@@ -4,7 +4,6 @@ The dispatcher is the production one; the fast tests run over the fake services,
 need the database run over the real services (``Week``).
 """
 
-import contextlib
 import json
 import sqlite3
 from contextlib import closing
@@ -15,7 +14,6 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from sqlalchemy.exc import OperationalError
 
 from app.bot import callbacks, texts
 from app.bot.callbacks import CardCb
@@ -230,8 +228,7 @@ async def test_a_locked_database_fails_the_job_cleanly_and_the_next_tick_recover
         blocker = sqlite3.connect(tmp_path / "week.db", timeout=0.1, isolation_level=None)
         try:
             blocker.execute("BEGIN IMMEDIATE")  # another process holds the write lock
-            with contextlib.suppress(sqlite3.OperationalError, OperationalError):
-                await tick(reborn, 30)  # see the xfail below: today the error escapes the wrapper
+            await tick(reborn, 30)  # the job wrapper never raises, even when it cannot record
             assert [m for m in reborn.pushed(USER) if m.text.startswith("☀️")] == []
             bet_attempt = await reborn.client(USER).send("/natijalar")
             assert not [
@@ -305,12 +302,6 @@ async def test_a_locked_fsm_database_does_not_kill_the_bot(
         assert any(isinstance(m, SendMessage | EditMessageText) for m in again), outcome
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T6 finding: PipelineJobs.run writes its failure record with the same locked "
-    "database, so the OperationalError escapes the wrapper that promises to never raise "
-    "(src/app/scheduler.py PipelineJobs.run -> ledger.record_run/record_error/alert_throttled)",
-)
 async def test_a_job_wrapper_never_raises_even_when_the_database_is_locked(
     history_template,
     tmp_path,
