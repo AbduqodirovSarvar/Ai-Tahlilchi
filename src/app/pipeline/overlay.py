@@ -90,7 +90,11 @@ def version_of(record: CalibrationRecord) -> CalibrationVersion:
     Raises:
         ModelInputError: the stored knots are corrupt.
     """
-    params = {"x": list(record.params.get("x", [])), "y": list(record.params.get("y", []))}
+    stored: object = record.params  # JSON column: whatever was written, not what the type says
+    if not isinstance(stored, Mapping):
+        msg = f"stored calibration params must be an object, got {type(stored).__name__}"
+        raise ModelInputError(msg)
+    params = {"x": list(stored.get("x", [])), "y": list(stored.get("y", []))}
     validate_params(params)
     return CalibrationVersion(
         version=record.version,
@@ -113,6 +117,19 @@ def rules_of(rows: Sequence[SegmentRecord]) -> dict[SegmentKey, SegmentRule]:
         for row in rows
         if not row.enabled or row.ev_threshold > NO_FLOOR
     }
+
+
+async def load_overlay(source: LearningSource) -> LearningOverlay:
+    """The overlay of ``source``, or the empty one (logged) if it fails for any reason.
+
+    The analysis path calls this instead of ``source.load()``: whatever is wrong with the learning
+    data, a recommendation must still be produced from the raw model.
+    """
+    try:
+        return await source.load()
+    except Exception as error:
+        logger.warning("learning_overlay_failed", error=repr(error))
+        return EMPTY_OVERLAY
 
 
 class DbLearningSource:

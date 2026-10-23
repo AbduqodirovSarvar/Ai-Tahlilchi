@@ -9,6 +9,7 @@ provider is skipped or refused with a clear error.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 
 import httpx
 
@@ -22,8 +23,9 @@ from app.pipeline.clock import Clock, system_clock
 from app.pipeline.config import PipelineConfig, StakingMode
 from app.pipeline.context import PipelineContext
 from app.pipeline.experience import DbExperience
+from app.pipeline.learning_settings import LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger
-from app.pipeline.overlay import DbLearningSource
+from app.pipeline.overlay import DbLearningSource, LearningSource, NoLearning
 from app.pipeline.provider import FootballProvider
 from app.pipeline.review import LlmCandidateReviewer, LlmPostmortemAnalyst
 from app.sports.football_mapping import HandicapConvention
@@ -64,6 +66,14 @@ async def open_runtime(
     else:
         logger.warning("pipeline_without_provider", reason="API_FOOTBALL_KEY is not set")
     llm = create_llm_service(settings)  # one service: reviews and post-mortems share its budget
+    learning_settings = LearningSettings(
+        mode=LearningMode(settings.learning_mode),
+        manual_hold=timedelta(days=settings.learning_manual_hold_days),
+    )
+    # Only "apply" lets the learned rules reach the analysis; shadow keeps the raw model.
+    learning: LearningSource = (
+        DbLearningSource(sessions) if learning_settings.mode is LearningMode.APPLY else NoLearning()
+    )
     ctx = PipelineContext(
         sessions=sessions,
         ledger=Ledger(sessions),
@@ -71,7 +81,8 @@ async def open_runtime(
         clock=clock,
         config=config or PipelineConfig(staking=StakingMode(settings.staking_mode)),
         reviewer=LlmCandidateReviewer(llm, experience=DbExperience(sessions, clock)),
-        learning=DbLearningSource(sessions),
+        learning=learning,
+        learning_settings=learning_settings,
         postmortem=LlmPostmortemAnalyst(llm),
     )
     try:

@@ -11,7 +11,9 @@ settled signals and decides whether it is *allowed to be used*:
 3. **Gate.** The per-sample Brier gain ``(p-y)^2 - (f(p)-y)^2`` on the hold-out must average at
    least ``min_gain`` *and* its one-sided bootstrap lower bound must be above zero. A model
    that is already calibrated therefore never gets a map (the gain is noise), and a small
-   sample never does either (the lower bound is below zero).
+   sample never does either (the lower bound is below zero). The weekly refit is a repeated test,
+   so the bound is 99.5% (one-sided) and a map is activated only if the gate is also passed on
+   the previous run (:func:`confirmed`); simulations in ADR 0013 give the false-activation rate.
 4. **Shipped map.** After the gate passes the map is refitted on all eligible samples (more
    data than the 70% that was tested); ``brier_before``/``brier_after`` are the hold-out
    numbers of the tested fit, which is the honest evidence, not an in-sample score.
@@ -23,7 +25,7 @@ active one and roll back with :func:`select_rollback`. Pure: no I/O.
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from itertools import pairwise
 from typing import Final
@@ -40,13 +42,16 @@ MIN_CALIBRATION_SAMPLES: Final = 200
 MIN_HOLDOUT_SAMPLES: Final = 60
 HOLDOUT_FRACTION: Final = 0.3
 MIN_BRIER_GAIN: Final = 0.001
-BOOTSTRAP_RESAMPLES: Final = 1000
-ONE_SIDED_CONFIDENCE: Final = 0.95
+BOOTSTRAP_RESAMPLES: Final = 2000
+ONE_SIDED_CONFIDENCE: Final = 0.995
+MAX_CONFIRMATION_GAP: Final = timedelta(days=10)
+"""Longest gap between two weekly runs that still count as "consecutive"."""
 DEFAULT_SEED: Final = 11
 OUTPUT_FLOOR: Final = 0.01
 OUTPUT_CEILING: Final = 0.99
 """Calibrated probabilities stay inside this band: a fitted step of 0 or 1 is never certainty."""
 COMPLEMENT_SUM_TOLERANCE: Final = 1e-6
+NEGLIGIBLE_MASS: Final = 1e-12
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,7 +219,7 @@ def rescale_outcomes(
     """
     current = outcomes.win + outcomes.half_win
     target = check_probability(win_probability)
-    if current <= 0.0:
+    if current <= NEGLIGIBLE_MASS:  # nothing to scale (and a denormal would overflow the ratio)
         return outcomes
     up = target / current
     rest = 1.0 - current
@@ -315,6 +320,20 @@ def _reason(gain: float, low: float, policy: CalibrationPolicy) -> CalibrationRe
     if low <= 0.0:
         return CalibrationReason.NOT_SIGNIFICANT
     return CalibrationReason.IMPROVED
+
+
+def confirmed(fit: CalibrationFit, *, previous_pass_at: datetime | None) -> bool:
+    """True when ``fit`` passed the gate now *and* the previous weekly run did too.
+
+    ``previous_pass_at`` is the creation time of the previous run's version if that version
+    passed the gate, else ``None``. One passing week out of 52 looks is what noise produces; two
+    in a row is much rarer. A gap longer than ``MAX_CONFIRMATION_GAP`` (a skipped week) breaks
+    the chain.
+    """
+    version = fit.version
+    if not fit.activate or version is None or previous_pass_at is None:
+        return False
+    return version.created_at - previous_pass_at <= MAX_CONFIRMATION_GAP
 
 
 def select_rollback(
