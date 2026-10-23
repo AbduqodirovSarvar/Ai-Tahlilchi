@@ -171,15 +171,16 @@ class CustomCb(CallbackData, prefix="cu"):
 class WatchCb(CallbackData, prefix="wl"):
     """⭐ Sevimlilar buttons.
 
-    ``kind`` is ``t`` (team) or ``l`` (league); ``key`` is ``crc32(entity_id)`` in hex for
+    ``kind`` is ``t`` (team) or ``l`` (league); ``key`` is a 12-hex digest of the entity id for
     entries, an option index for pick lists and the signal id on a card; ``flag`` names a
-    notification (``l``/``o``/``r``).
+    notification (``l``/``o``/``r``); ``page`` is the list page to return to.
     """
 
     action: str
     kind: str = ""
     key: str = ""
     flag: str = ""
+    page: int = 0
 
 
 class TplCb(CallbackData, prefix="tp"):
@@ -252,3 +253,27 @@ WIZARD_CALLBACKS: tuple[type[CallbackData], ...] = (
 WIZARD_CALLBACK_PREFIXES: tuple[str, ...] = tuple(
     f"{callback.__prefix__}{callback.__separator__}" for callback in WIZARD_CALLBACKS
 )
+
+
+class ResultCb(CallbackData, prefix="rs"):
+    """Result marking buttons (F8.1): under a card and in the ``/natijalar`` list.
+
+    ``action``: ``mark`` (``value`` ``w``/``l``/``v``), ``cash`` (ask for a cash-out result),
+    ``note`` (ask for a note), ``list`` (page ``page`` of the pending list), ``card`` (back to
+    the card). ``origin`` is ``l`` when the button sits in the list (the list is redrawn
+    afterwards) and empty when it sits under a card (the card is redrawn).
+    """
+
+    action: str
+    signal_id: int = 0
+    value: str = ""
+    page: int = 0
+    origin: str = ""
+
+
+class LearnCb(CallbackData, prefix="ln"):
+    """``/ozgarishlar`` buttons: ``list`` a page, ``ask`` to undo entry ``id``, ``undo`` it."""
+
+    action: str
+    id: int = 0
+    page: int = 0

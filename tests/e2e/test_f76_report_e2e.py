@@ -231,7 +231,7 @@ async def test_eksport_sends_signals_and_bets_as_csv(world: World) -> None:
 
     documents = [m for m in methods if isinstance(m, SendDocument)]
     assert [d.document.filename for d in documents] == ["signals.csv", "bets.csv"]  # type: ignore[union-attr]
-    signals, bets = (d.document.data.decode() for d in documents)  # type: ignore[union-attr]
+    signals, bets = (d.document.data.decode("utf-8-sig") for d in documents)  # type: ignore[union-attr]
     assert signals.startswith("signal_id,")
     assert bets.startswith("bet_id,")
     assert len(bets.strip().splitlines()) == 1 + 4
@@ -248,7 +248,7 @@ async def test_export_button_and_empty_exports(world: World) -> None:
 
     documents = [m for m in methods if isinstance(m, SendDocument)]
     assert len(documents) == 2
-    assert len(documents[1].document.data.decode().strip().splitlines()) == 1  # type: ignore[union-attr]
+    assert len(documents[1].document.data.decode("utf-8-sig").strip().splitlines()) == 1  # type: ignore[union-attr]
 
 
 async def test_exports_are_per_user(world: World) -> None:
@@ -258,4 +258,6 @@ async def test_exports_are_per_user(world: World) -> None:
     methods = await other.send("/eksport")
 
     documents = [m for m in methods if isinstance(m, SendDocument)]
-    assert all(len(d.document.data.decode().strip().splitlines()) == 1 for d in documents)  # type: ignore[union-attr]
+    assert all(
+        len(d.document.data.decode("utf-8-sig").strip().splitlines()) == 1 for d in documents
+    )  # type: ignore[union-attr]

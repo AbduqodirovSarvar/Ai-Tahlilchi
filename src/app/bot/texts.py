@@ -53,6 +53,8 @@ HELP: Final = (
     "/ekspress — 2–4 signaldan ekspress hisoblash\n"
     "/qayta — bugungi signallarni qayta hisoblash (yoki <code>/qayta ertaga</code>, "
     "<code>/qayta 3kun</code>)\n"
+    "/natijalar — natijasi aniqlanmagan signallarni bir bosishda belgilash\n"
+    "/ozgarishlar — model o'zgarishlari jurnali va orqaga qaytarish\n"
     "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
     "/sozlamalar — sozlamalar\n"
     "/bekor — joriy amalni bekor qilish\n"
@@ -85,7 +87,7 @@ STALE_BUTTON_HINT: Final = (
     "⌛ Bu tugma eskirgan (bot qayta ishga tushgan yoki oqim yakunlangan).\n"
     "Qaytadan boshlang: 📊 <b>Tahlil</b> yoki /start."
 )
-ALREADY_RUNNING: Final = "⏳ Tahlil allaqachon bajarilmoqda, kuting."
+ALREADY_RUNNING: Final = "⏳ Tahlil allaqachon bajarilmoqda, kuting. Qotib qolsa, /bekor yuboring."
 RATE_LIMITED: Final = "⏳ Juda tez! Bir necha soniya kutib, qayta urinib ko'ring."
 COOLDOWN: Final = "⏳ {minutes} daqiqadan keyin qayta urinib ko'ring."
 BUDGET_EXCEEDED: Final = (
@@ -604,6 +606,17 @@ QAYTA_BAD_ARGUMENT: Final = (
 
 # --------------------------------------------------------------------------- notifications
 DIGEST_TITLE: Final = "☀️ <b>Kunlik tahlil</b> — {weekday}, {day}"
+DIGEST_TEMPLATE_TITLE: Final = "💾 <b>{name}</b> — {weekday}, {day}"
+LOSS_LIMIT_PERIODS: Final[dict[str, str]] = {"day": "kunlik", "week": "haftalik"}
+DIGEST_LOSS_LIMIT: Final = (
+    "🛑 <b>Zarar limitiga yetildi</b>: {period} limit {limit}, zarar {loss}.\n"
+    "Yangi signallar yuborilmaydi: bugun to'xtab turish tavsiya etiladi. Qaror sizniki: "
+    "kerak bo'lsa, 📊 Tahlil orqali qo'lda tahlil qilishingiz mumkin."
+)
+RESULTS_LOSS_LIMIT: Final = (
+    "🛑 Zarar limitiga yetgansiz ({period} limit {limit}, zarar {loss}). "
+    "Tahlil baribir bajarildi: qaror sizniki, lekin to'xtab turish tavsiya etiladi."
+)
 DIGEST_YESTERDAY: Final = (
     "📆 <b>Kecha:</b> {signals} ta signal · {won} ✅ · {lost} ❌{extra} · {profit} unit{clv}"
 )
@@ -801,7 +814,13 @@ CUSTOM_SELECTED: Final = "Tanlangan: {count} (ko'pi bilan {max})"
 CUSTOM_LIMIT: Final = "Bir martada ko'pi bilan {max} ta o'yin tahlil qilinadi"
 CUSTOM_SELECT_ONE: Final = "Avval kamida bitta o'yinni belgilang"
 CUSTOM_RUNNING: Final = "⏳ Maxsus tahlil boshlandi…"
-CUSTOM_ALREADY_RUNNING: Final = "⏳ Maxsus tahlil allaqachon bajarilmoqda, kuting."
+CUSTOM_ALREADY_RUNNING: Final = (
+    "⏳ Maxsus tahlil allaqachon bajarilmoqda, kuting. Qotib qolsa, /bekor yuboring."
+)
+RESTART_RECOVERED: Final = (
+    "🔄 Bot qayta ishga tushdi, shu sababli davom etayotgan tahlil to'xtadi. "
+    "Natija kelmagan bo'lsa, tahlilni qaytadan ishga tushiring."
+)
 CUSTOM_RESULT_HEADER: Final = (
     "🔍 <b>Maxsus tahlil</b>: {fixtures} ta o'yin · {picks} ta tanlov (EV filtrisiz)"
 )
@@ -835,7 +854,6 @@ WATCH_FOOTER: Final = (
 )
 WATCH_ITEM_LINE: Final = "{icon} <b>{name}</b> — {flags}"
 WATCH_FLAGS_NONE: Final = "bildirishnomasiz"
-WATCH_MORE: Final = "…va yana {count} ta"
 WATCH_KIND_ICONS: Final[dict[WatchKind, str]] = {WatchKind.TEAM: "👕", WatchKind.LEAGUE: "🏆"}
 WATCH_NOTIFY_LABELS: Final[dict[WatchNotification, str]] = {
     WatchNotification.LINEUPS: "📋 Tarkib",
@@ -880,7 +898,6 @@ TPL_EMPTY: Final = (
 TPL_LINE: Final = "• <b>{name}</b> — {summary}{schedule}"
 TPL_SUMMARY: Final = "{dates} · {sports} · ≥ {probability} · EV ≥ {ev}"
 TPL_SCHEDULE_SHORT: Final = " · 🗓 {days} {time}"
-TPL_MORE: Final = "…va yana {count} ta"
 TPL_DATES: Final[dict[str, str]] = {
     "today": "bugun",
     "tomorrow": "ertaga",
@@ -935,7 +952,6 @@ BANK_UNIT_UNSET: Final = "🎲 Unit kiritilmagan: ⚙️ Bank va limitlar."
 BANK_SETTLED: Final = "📊 Yopilgan: {count} ta · ✅ {won} · ❌ {lost} · ↩️ {void} · 💸 {cashout}"
 BANK_PL: Final = "💰 Foyda/zarar (yopilganlar): <b>{profit}</b>{yield_part}"
 BANK_YIELD: Final = " · stavkaga nisbatan {value}"
-BANK_RECENT: Final = "(oxirgi {count} ta stavka bo'yicha)"
 BANK_LIMITS: Final = "🛑 Zarar limiti: bugun {today}/{daily}, hafta {week}/{weekly}"
 BANK_LIMIT_NOT_SET: Final = "belgilanmagan"
 BTN_BANK_OPEN: Final = "🟡 Ochiq ({count})"
@@ -958,11 +974,14 @@ BANK_BET_TITLE: Final = (
 BTN_MARK_CASHOUT: Final = "💸 Cashout"
 BANK_MARKED: Final = "✅ Natija belgilandi: {result}"
 BANK_MARK_REFUSED: Final = "O'yin hali boshlanmagan: natijani belgilab bo'lmaydi."
+BANK_MARK_RETRO: Final = "Bu retro-tahlil signali: unga natija belgilab bo'lmaydi."
+BANK_MARK_CANCELLED: Final = "Signal bekor qilingan: natijani belgilab bo'lmaydi."
 BANK_CASHOUT_PROMPT: Final = (
-    "💸 Cashout natijasini <b>unit</b> da yozing (foyda musbat, zarar manfiy), "
-    "masalan <code>0.8</code> yoki <code>-0.4</code>."
+    "💸 Bukmeker sizga to'lagan <b>summani</b> yozing (stavkangiz: {stake}), "
+    "masalan <code>200</code>. Foyda = to'langan summa − stavka; "
+    "to'lov bo'lmagan bo'lsa <code>0</code> yozing."
 )
-BANK_CASHOUT_RANGE: Final = "Cashout natijasi -100 dan 100 gacha unit bo'lishi kerak."
+BANK_CASHOUT_RANGE: Final = "To'langan summa 0 dan katta yoki unga teng haqiqiy son bo'lishi kerak."
 BANK_NO_SIGNAL: Final = "Bu stavka signalga bog'lanmagan: natijani belgilab bo'lmaydi."
 BANK_NO_CHART: Final = (
     "📈 Grafik uchun bank (⚙️ Bank va limitlar) va kamida bitta yopilgan stavka kerak."
@@ -1083,4 +1102,116 @@ EXPRESS_WARNING: Final = (
 EXPRESS_REFUSED: Final = (
     "🧩 Bu ekspressni hisoblab bo'lmaydi: signal endi tavsiya qilinmaydi, o'yin boshlangan "
     "yoki bir o'yindan ikkita tanlov bor. Ro'yxatni yangilab, qaytadan tanlang."
+)
+
+
+# ------------------------------------------------------------ results marking (F8.1)
+BTN_RESULT_NOTE: Final = "💬 Izoh"
+BTN_RESULT_MARKS: Final[dict[str, str]] = {
+    "w": "✅ O'tdi",
+    "l": "❌ O'tmadi",
+    "v": "↩️ Void",
+    "c": "💸 Cashout",
+}
+RESULTS_PENDING_COMMAND_TITLE: Final = "🏁 <b>Natijasi kutilayotgan signallar</b> — {count} ta"
+RESULTS_PENDING_HINT: Final = (
+    "Natija API dan kelmagan signallar. Bir tugma bilan belgilang; o'yin bekor qilingan "
+    "bo'lsa ↩️ Void, erta yopgan bo'lsangiz 💸 Cashout."
+)
+RESULTS_PENDING_LINE: Final = "{number}. {fixture} — {selection} @ {odds} · {kickoff}"
+RESULTS_PENDING_EMPTY: Final = "✅ Natijasi kutilayotgan signal yo'q. Hammasi aniqlangan."
+RESULT_MARKED: Final = "✅ Natija belgilandi: {result}"
+RESULT_MARK_NOT_STARTED: Final = "O'yin hali boshlanmagan: natijani belgilab bo'lmaydi."
+RESULT_MARK_RETRO: Final = "Bu retro-tahlil signali: unga natija belgilab bo'lmaydi."
+RESULT_MARK_CANCELLED: Final = "Signal bekor qilingan: natijani belgilab bo'lmaydi."
+RESULT_SIGNAL_GONE: Final = "ℹ️ Bu signal topilmadi (o'chirilgan yoki boshqa foydalanuvchiniki)."
+RESULT_CASHOUT_PROMPT: Final = (
+    "💸 <b>{fixture}</b>\nCashout natijasini <b>unit</b> da yozing: tavsiya etilgan stavkaga "
+    "nisbatan (foyda musbat, zarar manfiy), masalan <code>0.8</code> yoki <code>-0.4</code>.\n"
+    "Bukmeker to'lagan summa bo'yicha yopmoqchi bo'lsangiz, 🎟 Mening stavkalarim orqali "
+    "summani yozing."
+)
+RESULT_CASHOUT_RANGE: Final = "Cashout natijasi -100 dan 100 gacha unit bo'lishi kerak."
+RESULT_NOTE_PROMPT: Final = (
+    "💬 <b>{fixture}</b>\nIzohingizni yozing (eng ko'pi {limit} belgi), masalan: "
+    "<i>tarkibda asosiy hujumchi yo'q edi</i>. U keyingi tahlilda kontekst sifatida ishlatiladi."
+)
+RESULT_NOTE_SAVED: Final = "💬 Izoh saqlandi: «{note}»"
+RESULT_NOTE_TOO_LONG: Final = "Izoh juda uzun: {limit} belgidan oshmasin ({length} belgi yozildi)."
+RESULT_NOTE_EMPTY: Final = "Izoh bo'sh bo'lishi mumkin emas. Matn yozing yoki /bekor."
+BTN_RESULT_BACK_TO_CARD: Final = "⬅️ Kartaga"
+RESULT_INPUT_STALE: Final = "ℹ️ Bu so'rov eskirgan. Signal kartasidagi tugmani qaytadan bosing."
+
+
+# ------------------------------------------------------------ learning journal (F8.8)
+LEARN_TITLE: Final = "🧠 <b>Model o'zgarishlari</b> — {total} ta"
+LEARN_MODES: Final[dict[str, str]] = {
+    "off": "⚪ O'rganish o'chirilgan: model hech narsani o'zgartirmaydi.",
+    "shadow": (
+        "👁 <b>Kuzatuv rejimi</b>: model nimani o'zgartirishni hisoblaydi va yozib boradi, "
+        "lekin tahlilga hali qo'llamaydi."
+    ),
+    "apply": "✅ <b>Qo'llash rejimi</b>: ro'yxatdagi o'zgarishlar tahlilga ta'sir qiladi.",
+}
+LEARN_EMPTY: Final = "Hozircha o'zgarish yo'q. Model har dushanba natijalarni ko'rib chiqadi."
+LEARN_KINDS: Final[dict[str, str]] = {
+    "segment_raised": "📈 Segment chegarasi oshirildi",
+    "segment_disabled": "⛔ Segment o'chirildi",
+    "segment_relaxed": "🔓 Segment qayta yoqildi",
+    "calibration_activated": "🎯 Kalibratsiya yoqildi",
+    "calibration_rolled_back": "↩️ Kalibratsiya qaytarildi",
+    "segment_rolled_back": "↩️ Segment qaytarildi",
+}
+LEARN_LINE: Final = "<b>#{id}</b> {kind} · {date}"
+LEARN_DETAIL_SEGMENT: Final = "   <code>{subject}</code>{samples}{floor}"
+LEARN_DETAIL_CALIBRATION: Final = "   versiya {version}{samples}"
+LEARN_DETAIL_SAMPLES: Final = " · namuna {samples}"
+LEARN_DETAIL_FLOOR: Final = " · EV chegarasi {floor}"
+LEARN_REASON: Final = "   sabab: <code>{reason}</code>"
+LEARN_STATE_APPLIED: Final = "   ✅ qo'llangan"
+LEARN_STATE_SHADOW: Final = "   👁 kuzatuv rejimi: shunday qilgan bo'lardi"
+LEARN_STATE_ROLLED_BACK: Final = "   ↩️ qaytarilgan"
+BTN_LEARN_UNDO: Final = "↩️ Qaytarish #{id}"
+BTN_LEARN_UNDO_YES: Final = "✅ Ha, qaytarish"
+BTN_LEARN_UNDO_NO: Final = "⬅️ Yo'q"
+BTN_LEARN_BACK: Final = "⬅️ Ro'yxatga"
+LEARN_UNDO_ASK: Final = (
+    "↩️ <b>#{id}</b> o'zgarishni qaytarasizmi?\n\n{line}\n\n"
+    "Qaytarilgan o'zgarishni model {days} kun davomida qayta o'zgartirmaydi "
+    "(qo'lda ushlab turish)."
+)
+LEARN_UNDO_OUTCOMES: Final[dict[str, str]] = {
+    "rolled_back": "↩️ Qaytarildi. Model bu o'zgarishni {days} kun davomida qayta qo'llamaydi.",
+    "not_found": "ℹ️ Bu o'zgarish topilmadi.",
+    "already_rolled_back": "ℹ️ Bu o'zgarish allaqachon qaytarilgan.",
+    "not_undoable": "ℹ️ Bu yozuvni qaytarib bo'lmaydi.",
+    "stale": (
+        "⚠️ Bu o'zgarishdan keyin holat yana o'zgargan: qaytarish yangi holatni eskisi bilan "
+        "almashtirib yuborar edi, shuning uchun bajarilmadi. Avval eng yangi o'zgarishni "
+        "qaytaring."
+    ),
+}
+LEARN_SUMMARY_TITLE: Final = "🧠 <b>Model nimani o'rgandi</b> — hafta {week}"
+LEARN_SUMMARY_NONE: Final = "Bu hafta model hech narsani o'zgartirmadi."
+LEARN_SUMMARY_COUNTS: Final = (
+    "Kalibratsiya: {calibration} · o'chirilgan segment: {disabled} · chegarasi oshirilgan: "
+    "{raised} · qayta yoqilgan: {relaxed}"
+)
+LEARN_SUMMARY_MORE: Final = "…va yana {count} ta"
+LEARN_SUMMARY_FOOTER: Final = "Batafsil va orqaga qaytarish: /ozgarishlar"
+STATUS_LEARNING_HEADER: Final = "🧠 <b>Model o'rganishi:</b>"
+STATUS_LEARNING_MODE: Final[dict[str, str]] = {
+    "off": "• rejim: o'chirilgan",
+    "shadow": "• rejim: kuzatuv (hisoblaydi, tahlilga qo'llamaydi)",
+    "apply": "• rejim: qo'llash (tahlilga ta'sir qiladi)",
+}
+STATUS_LEARNING_JOBS: Final[dict[str, str]] = {
+    "learning": "haftalik o'rganish",
+    "lessons": "saboqlar",
+    "postmortem": "mag'lubiyat tahlili",
+}
+STATUS_LEARNING_JOB_LINE: Final = "• {mark}{name} — {time}"
+STATUS_LEARNING_MISSED: Final = (
+    "⚠️ Haftalik o'rganish bu hafta ishlamagan (hafta yo'qolgan): model yangilanmayapti. "
+    "Serverni tekshiring."
 )

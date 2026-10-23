@@ -16,6 +16,7 @@ from app.pipeline.delivery import (
     UpdateDelivery,
     WatchDelivery,
 )
+from app.pipeline.learning_digest import LearningDelivery
 from app.pipeline.ledger import LedgerKey
 from app.services.interfaces import (
     AdminAlert,
@@ -26,6 +27,8 @@ from app.services.interfaces import (
     DaySummary,
     DeliveryKey,
     FixtureOption,
+    LearningMode,
+    LearningSummary,
     MessageRef,
     Notifier,
     SettledNotice,
@@ -38,6 +41,7 @@ from app.services.interfaces import (
 )
 from app.services.real.analysis import recalc_diff
 from app.services.real.core import Core, loss_limit_notice, to_view
+from app.services.real.learning import change_view
 from app.services.real.signals import RealResultService
 
 logger = get_logger(__name__)
@@ -93,6 +97,17 @@ class LogOnlyNotifier:
     ) -> MessageRef | None:
         """Log the settlement."""
         logger.info("notify_settled", user_id=user_id, key=key)
+        return None
+
+    async def send_learning_summary(
+        self,
+        user_id: int,
+        summary: LearningSummary,
+        *,
+        key: DeliveryKey,
+    ) -> MessageRef | None:
+        """Log the weekly learning summary."""
+        logger.info("notify_learning", user_id=user_id, changes=len(summary.changes), key=key)
         return None
 
     async def alert_admin(self, alert: AdminAlert) -> None:
@@ -229,6 +244,19 @@ class NotifierDelivery:
             profit_units=message.profit_units,
         )
         sent = await self._notifier.send_result_settled(user_id, notice, key=_key(key))
+        return _reference(self._notifier, user_id, sent)
+
+    async def learning_summary(
+        self, user_id: int, message: LearningDelivery, key: LedgerKey
+    ) -> str | None:
+        """Send the weekly "what the model learned" message."""
+        views = (change_view(change) for change in message.changes)
+        summary = LearningSummary(
+            week=message.week,
+            mode=LearningMode(message.mode.value),
+            changes=tuple(view for view in views if view is not None),
+        )
+        sent = await self._notifier.send_learning_summary(user_id, summary, key=_key(key))
         return _reference(self._notifier, user_id, sent)
 
     async def alert_admin(self, component: str, message: str, at: datetime) -> None:

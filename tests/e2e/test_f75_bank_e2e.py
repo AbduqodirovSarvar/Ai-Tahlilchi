@@ -10,8 +10,8 @@ from aiogram import Bot
 from aiogram.methods import SendPhoto
 
 from app.bot import texts
-from app.bot.bank_ui import summarize
 from app.bot.callbacks import BankCb, BetCb, CardCb
+from app.bot.formatters import money
 from app.bot.states import BetFlow
 from app.services.fake import create_fake_services
 from app.services.interfaces import (
@@ -24,6 +24,7 @@ from app.services.interfaces import (
     Services,
     SignalView,
 )
+from app.services.report_math import bank_totals
 from tests.bot.fakes import ADMIN_ID, RecordingSession
 from tests.e2e.bot_client import Client, answers, make_dispatcher, shown
 from tests.e2e.conftest import SECOND_ADMIN_ID
@@ -194,24 +195,27 @@ async def test_result_cannot_be_marked_before_the_match(world: World) -> None:
     assert (await world.services.bets.list_bets(ADMIN_ID))[0].outcome is None
 
 
-async def test_cashout_asks_for_units_and_validates(world: World) -> None:
+async def test_cashout_asks_for_the_payout_and_validates(world: World) -> None:
     await world.settings(bank=Decimal(100_000), unit=Decimal(10_000))
     await world.bet_on_started_match()
+    (open_bet,) = await world.services.bets.list_bets(ADMIN_ID)
     await world.admin.send(texts.MENU_BETS)
     await world.admin.press("Ochiq")
     await world.admin.press(" · 2.00")
 
     prompt = shown(await world.admin.press(texts.BTN_MARK_CASHOUT))
-    assert prompt == [texts.BANK_CASHOUT_PROMPT]
+    assert prompt == [texts.BANK_CASHOUT_PROMPT.format(stake=money(open_bet.stake))]
     assert await world.admin.state() == BetFlow.cashout_input.state
-    assert "son emas" in shown(await world.admin.send("abc"))[0]
-    assert shown(await world.admin.send("500")) == [texts.BANK_CASHOUT_RANGE]
+    assert "abc" in shown(await world.admin.send("abc"))[0]
+    assert "-5" in shown(await world.admin.send("-5"))[0]  # a payout is never negative
+    assert shown(await world.admin.send("1" + "0" * 15)) == [texts.BANK_CASHOUT_RANGE]
     assert await world.admin.state() == BetFlow.cashout_input.state
 
-    methods = await world.admin.send("-0.4")
+    methods = await world.admin.send("6 000")
 
     (bet,) = await world.services.bets.list_bets(ADMIN_ID)
     assert bet.outcome is ResultMark.CASHOUT
+    assert bet.profit == Decimal(6000) - open_bet.stake  # payout minus stake, in money
     assert "Cashout" in shown(methods)[0]
     assert await world.admin.state() is None
 
@@ -367,20 +371,18 @@ async def test_force_button_of_a_vanished_signal_explains(world: World) -> None:
 
 # --------------------------------------------------------------------------- pure
 def test_totals_ignore_void_stakes_for_the_yield() -> None:
-    from tests.bot.test_account_formatters import make_bet  # noqa: PLC0415
-
-    bets = [
-        make_bet(outcome=ResultMark.WON, profit=Decimal(100), stake=Decimal(100)),
-        make_bet(outcome=ResultMark.LOST, profit=Decimal(-100), stake=Decimal(100)),
-        make_bet(outcome=ResultMark.VOID, profit=Decimal(0), stake=Decimal(500)),
-        make_bet(outcome=ResultMark.CASHOUT, profit=Decimal(20), stake=Decimal(100)),
-        make_bet(outcome=None, profit=None, stake=Decimal(70)),
+    rows = [
+        (ResultMark.WON, Decimal(100), Decimal(100)),
+        (ResultMark.LOST, Decimal(100), Decimal(-100)),
+        (ResultMark.VOID, Decimal(500), Decimal(0)),
+        (ResultMark.CASHOUT, Decimal(100), Decimal(20)),
+        (None, Decimal(70), None),
     ]
 
-    totals = summarize(bets)
+    totals = bank_totals(rows)
 
     assert (totals.settled, totals.won, totals.lost, totals.void, totals.cashout) == (4, 1, 1, 1, 1)
     assert totals.profit == Decimal(20)
     assert totals.staked == Decimal(300)
     assert totals.yield_rate == pytest.approx(20 / 300)
-    assert summarize([]).yield_rate is None
+    assert bank_totals([]).yield_rate is None

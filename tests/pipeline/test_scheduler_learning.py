@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import NullDelivery
+from app.pipeline.learning import LearningReport
 from app.pipeline.ledger import Ledger
 from app.scheduler import JOB_LEARNING, JOB_NAMES, PipelineJobs, PipelineScheduler
 
@@ -36,8 +37,9 @@ async def test_the_learning_job_name_runs_the_weekly_review(
 ) -> None:
     calls: list[PipelineContext] = []
 
-    async def fake_review(ctx: PipelineContext) -> None:
+    async def fake_review(ctx: PipelineContext) -> LearningReport:
         calls.append(ctx)
+        return LearningReport(skipped=True)
 
     monkeypatch.setattr("app.scheduler.run_learning", fake_review)
     ctx = PipelineContext(sessions=sessions, ledger=ledger)

@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from app.domain import Sport, normalize_name
 from app.logging import get_logger
+from app.services._fake_learning import FakeLearningService, FakeLearningState
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
     SPORT_MARKETS,
@@ -79,6 +80,7 @@ from app.services.interfaces import (
     FixturePage,
     JobStatus,
     LeagueOption,
+    LearningSummary,
     LlmQuota,
     MessageRef,
     ProgressCallback,
@@ -118,6 +120,7 @@ from app.services.interfaces import (
 )
 from app.services.report_math import (
     SignalOutcome,
+    bank_totals,
     bets_export_file,
     build_report,
     day_summary,
@@ -217,6 +220,7 @@ class _StoredSignal:
     data_as_of: datetime | None = None
     manual_mark: ResultMark | None = None
     cashout_units: Decimal | None = None
+    cashout_payouts: dict[int, Decimal] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -280,6 +284,7 @@ class FakeState:
         self.bets: dict[BetId, _StoredBet] = {}
         self.bet_tokens: dict[tuple[int, str], BetId] = {}
         self.busy: set[int] = set()
+        self.learning = FakeLearningState()
         self.next_id = itertools.count(1)
 
     def now(self) -> datetime:
@@ -1139,6 +1144,9 @@ class FakeBetService:
     ) -> Decimal | None:
         """Bet profit; a cash-out scales the signal's cash-out units to the bet stake."""
         if outcome is ResultMark.CASHOUT:
+            payout = stored.cashout_payouts.get(bet.bet_id)
+            if payout is not None:
+                return payout - bet.stake
             units = self._state.view(stored).stake_units or Decimal(1)
             return bet.stake * (stored.cashout_units or Decimal(0)) / units
         view = replace(self._state.view(stored), odds=bet.odds_taken, stake_units=bet.stake)
@@ -1149,6 +1157,13 @@ class FakeBetService:
         bets = [bet for bet in self._state.bets.values() if bet.user_id == user_id]
         bets.sort(key=lambda bet: (bet.placed_at, bet.bet_id), reverse=True)
         return [self.view(bet) for bet in bets]
+
+    async def get_bet(self, user_id: int, bet_id: BetId) -> BetView:
+        """See :meth:`BetService.get_bet`."""
+        bet = self._state.bets.get(bet_id)
+        if bet is None or bet.user_id != user_id:
+            raise NotFoundError("bet", bet_id)
+        return self.view(bet)
 
     async def list_bets(
         self, user_id: int, *, open_only: bool = False, limit: int = 20
@@ -1177,6 +1192,7 @@ class FakeBetService:
                 Decimal(0),
             ),
             open_bets=sum(bet.outcome is None for bet in self.user_bets(user_id)),
+            totals=bank_totals((b.outcome, b.stake, b.profit) for b in self.user_bets(user_id)),
             history=_bank_history(settings.bank, by_day),
             loss_today=loss_today,
             loss_this_week=loss_week,
@@ -1245,6 +1261,14 @@ class FakeResultService:
             raise ValidationFailedError("signal_id", "the match has not started yet")
         stored.manual_mark = request.mark
         stored.cashout_units = request.cashout_profit_units
+        stored.cashout_payouts = {}
+        if request.cashout_bet_id is not None and request.cashout_payout is not None:
+            bet = self._state.bets.get(request.cashout_bet_id)
+            if bet is None or bet.user_id != user_id or bet.signal_id != stored.signal_id:
+                raise NotFoundError("bet", request.cashout_bet_id)
+            profit = request.cashout_payout - bet.stake
+            stored.cashout_payouts[bet.bet_id] = request.cashout_payout
+            stored.cashout_units = self._state.view(stored).stake_units * profit / bet.stake
         return self._state.view(stored)
 
     async def add_note(self, user_id: int, signal_id: SignalId, text: str) -> None:
@@ -1351,7 +1375,13 @@ class FakeSystemStatusService:
             tokens_limit=FAKE_LLM_TOKEN_LIMIT,
         )
         return SystemStatus(
-            quotas=(quota,), last_refresh_at=refreshed, jobs=jobs, recent_errors=(), llm=llm
+            quotas=(quota,),
+            last_refresh_at=refreshed,
+            jobs=jobs,
+            recent_errors=(),
+            llm=llm,
+            learning_mode=self._state.learning.mode,
+            learning_missed=self._state.learning.missed,
         )
 
 
@@ -1425,6 +1455,12 @@ class FakeNotifier:
         """See :meth:`Notifier.send_result_settled`."""
         return self._record("result_settled", user_id, notice, key)
 
+    async def send_learning_summary(
+        self, user_id: int, summary: LearningSummary, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """See :meth:`Notifier.send_learning_summary`."""
+        return self._record("learning_summary", user_id, summary, key)
+
     async def alert_admin(self, alert: AdminAlert) -> None:
         """See :meth:`Notifier.alert_admin`."""
         self._record("alert_admin", None, alert, None)
@@ -1446,4 +1482,5 @@ def create_fake_services(*, clock: Clock = system_clock) -> Services:
         reports=FakeReportService(state, bets),
         status=FakeSystemStatusService(state),
         express=FakeExpressService(state),
+        learning=FakeLearningService(state.learning),
     )

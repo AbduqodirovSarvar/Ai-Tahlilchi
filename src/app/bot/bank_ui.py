@@ -5,7 +5,6 @@ the service's settled bets. The totals here only add up what the service already
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Final
@@ -28,41 +27,6 @@ MARK_CODES: Final[dict[str, ResultMark]] = {
     "v": ResultMark.VOID,
 }
 CASHOUT_CODE: Final = "c"
-_WINS: Final = frozenset({ResultMark.WON, ResultMark.HALF_WON})
-_LOSSES: Final = frozenset({ResultMark.LOST, ResultMark.HALF_LOST})
-
-
-@dataclass(frozen=True, slots=True)
-class BetTotals:
-    """What the settled bets add up to."""
-
-    settled: int
-    won: int
-    lost: int
-    void: int
-    cashout: int
-    profit: Decimal
-    staked: Decimal
-
-    @property
-    def yield_rate(self) -> float | None:
-        """Profit over the stakes that were really at risk (void bets excluded); ``None`` if 0."""
-        return float(self.profit / self.staked) if self.staked else None
-
-
-def summarize(bets: Sequence[BetView]) -> BetTotals:
-    """Count and add up the settled bets of ``bets``."""
-    settled = [bet for bet in bets if bet.outcome is not None]
-    at_risk = [bet for bet in settled if bet.outcome is not ResultMark.VOID]
-    return BetTotals(
-        settled=len(settled),
-        won=sum(bet.outcome in _WINS for bet in settled),
-        lost=sum(bet.outcome in _LOSSES for bet in settled),
-        void=sum(bet.outcome is ResultMark.VOID for bet in settled),
-        cashout=sum(bet.outcome is ResultMark.CASHOUT for bet in settled),
-        profit=sum((bet.profit or Decimal(0) for bet in settled), Decimal(0)),
-        staked=sum((bet.stake for bet in at_risk), Decimal(0)),
-    )
 
 
 def signed_money(value: Decimal) -> str:
@@ -102,10 +66,11 @@ def format_overview(
 ) -> str:
     """Bank, unit, open bets, the settled tally with profit and the loss-limit state.
 
-    ``bets`` are the user's most recent bets (open and settled).
+    ``bets`` are the user's most recent bets (the open ones are listed); the settled tally and
+    profit come from the service, which counts every bet, not only these.
     """
     open_bets = tuple(bet for bet in bets if bet.outcome is None)
-    totals = summarize(bets)
+    totals = bank.totals
     lines = [
         format_bets(bank, open_bets, zone),
         "",

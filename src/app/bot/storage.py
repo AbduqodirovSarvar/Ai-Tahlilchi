@@ -12,7 +12,7 @@ lazy, so building the dispatcher never touches the disk.
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -21,6 +21,7 @@ from aiogram.exceptions import DataNotDictLikeError
 from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, DefaultKeyBuilder, StateType, StorageKey
 
+from app.bot.states import RUNNING_STATES
 from app.logging import get_logger
 
 logger = get_logger(__name__)
@@ -40,6 +41,15 @@ def fsm_db_path(db_path: Path) -> Path:
     return db_path.with_name(FSM_DB_NAME)
 
 
+def _chat_of(key: str) -> int | None:
+    """The chat id inside a ``fsm:<bot>:<chat>:<user>:...`` key, if it has one."""
+    parts = key.split(":")
+    try:
+        return int(parts[2])
+    except (IndexError, ValueError):
+        return None
+
+
 class SqliteStorage(BaseStorage):
     """Persistent FSM storage; one row per ``(bot, chat, user, destiny)``."""
 
@@ -49,6 +59,7 @@ class SqliteStorage(BaseStorage):
         self._keys = DefaultKeyBuilder(with_bot_id=True, with_destiny=True)
         self._connection: aiosqlite.Connection | None = None
         self._open_lock = asyncio.Lock()
+        self._recovered: list[int] = []
 
     async def _db(self) -> aiosqlite.Connection:
         """The shared connection, opened (and the table created) on first use."""
@@ -61,6 +72,9 @@ class SqliteStorage(BaseStorage):
                 await connection.execute(_SCHEMA)
                 await connection.commit()
                 self._connection = connection
+                # A background analysis cannot outlive the process, so a "running" state found
+                # on opening belongs to a dead job: forget it (QA F-1), remember whom to tell.
+                self._recovered = await self._clear_states(connection, RUNNING_STATES)
             return self._connection
 
     async def close(self) -> None:
@@ -114,6 +128,33 @@ class SqliteStorage(BaseStorage):
             logger.warning("fsm_data_not_a_dict", key=self._keys.build(key))
             return {}
         return decoded
+
+    async def take_recovered(self) -> list[int]:
+        """Chats whose dead "running" state was cleared when the storage was opened (once)."""
+        if self._connection is None and not self._path.exists():
+            return []  # a first start has nothing to recover and must not create the file
+        await self._db()
+        chats, self._recovered = self._recovered, []
+        return chats
+
+    @staticmethod
+    async def _clear_states(db: aiosqlite.Connection, states: Collection[str]) -> list[int]:
+        """Clear every stored state in ``states``; return the chat ids they belonged to.
+
+        Rows whose key cannot be read as a chat are cleared too and just not reported.
+        """
+        if not states:
+            return []
+        marks = ",".join("?" for _ in states)
+        async with db.execute(
+            f"SELECT key FROM fsm WHERE state IN ({marks})",  # noqa: S608 - only placeholders
+            tuple(states),
+        ) as cursor:
+            keys = [row[0] for row in await cursor.fetchall()]
+        await db.execute(f"UPDATE fsm SET state = NULL WHERE state IN ({marks})", tuple(states))  # noqa: S608
+        await db.execute("DELETE FROM fsm WHERE state IS NULL AND data = '{}'")
+        await db.commit()
+        return [chat for chat in map(_chat_of, keys) if chat is not None]
 
     async def _row(self, key: StorageKey) -> tuple[str | None, str] | None:
         db = await self._db()

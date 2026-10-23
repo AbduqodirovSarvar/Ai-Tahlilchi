@@ -31,7 +31,7 @@ from app.bot.parsing import (
     parse_time_range,
     parse_timezone,
 )
-from app.bot.states import SETTINGS_FIELD_KEY, SettingsFlow
+from app.bot.states import SETTINGS_FIELD_KEY, SettingsFlow, leave_flow
 from app.bot.wizard import high_probability, sport_options, supported_markets
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
@@ -241,7 +241,7 @@ async def show_settings(
     message: Message, state: FSMContext, services: Services, user_id: int
 ) -> None:
     """⚙️ Sozlamalar / ``/sozlamalar``: the overview."""
-    await state.set_state(None)
+    await leave_flow(state)
     settings = await services.settings.get_settings(user_id)
     await send_html(message, await _overview(settings, services), keyboards.settings_keyboard())
 
@@ -328,7 +328,7 @@ async def on_settings(
     settings = await services.settings.get_settings(user_id)
     action = callback_data.action
     if action == "back":
-        await state.set_state(None)
+        await leave_flow(state)
         await answer_callback(callback)
         await edit_html(message, await _overview(settings, services), keyboards.settings_keyboard())
         return
@@ -369,12 +369,12 @@ async def on_settings_text(
     field = data.get(SETTINGS_FIELD_KEY)
     parser = TEXT_PARSERS.get(field) if isinstance(field, str) else None
     if parser is None or not isinstance(field, str):
-        await state.set_state(None)
+        await leave_flow(state)
         raise StaleDraftError
     value = parser(message.text or "")
     settings = await services.settings.get_settings(user_id)
     saved = await _save(services, user_id, with_value(settings, field, value))
-    await state.set_state(None)
+    await leave_flow(state)
     text = await _overview(saved, services)
     if field == "min_probability":
         text = _with_warning(text, saved, notices, user_id)

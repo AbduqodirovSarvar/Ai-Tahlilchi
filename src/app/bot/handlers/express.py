@@ -26,7 +26,7 @@ from app.bot.express_ui import (
 )
 from app.bot.flow import FlowContext, FlowContextMiddleware
 from app.bot.messaging import answer_callback, callback_message, edit_html, send_html
-from app.bot.states import ExpressFlow
+from app.bot.states import ExpressFlow, leave_flow
 from app.services.errors import ValidationFailedError
 from app.services.interfaces import (
     MAX_EXPRESS_LEGS,
@@ -57,7 +57,7 @@ async def _load(flow: FlowContext, callback: CallbackQuery) -> tuple[ExpressDraf
 async def _drop(flow: FlowContext) -> None:
     data = await flow.state.get_data()
     data.pop(EXPRESS_KEY, None)
-    await flow.state.set_state(None)
+    await leave_flow(flow.state)
     await flow.state.set_data(data)
 
 

@@ -145,14 +145,14 @@ def parse_count(text: str, low: int, high: int) -> int:
     return int(value)
 
 
-def parse_money(text: str) -> Decimal:
-    """A positive amount; spaces and ``_`` as thousands separators are allowed."""
+def parse_money(text: str, *, allow_zero: bool = False) -> Decimal:
+    """A positive amount (zero too with ``allow_zero``); spaces and ``_`` separate thousands."""
     cleaned = re.sub(r"[\s_']", "", text).replace(",", ".")
     try:
         amount = Decimal(cleaned)
     except InvalidOperation:
         raise InputError(texts.PARSE_BAD_MONEY.format(value=_quoted(text))) from None
-    if not amount.is_finite() or amount <= 0:
+    if not amount.is_finite() or amount < 0 or (amount == 0 and not allow_zero):
         raise InputError(texts.PARSE_BAD_MONEY.format(value=_quoted(text)))
     return amount
 

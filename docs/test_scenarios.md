@@ -182,7 +182,7 @@
 | 13.3 | ➕ Jamoa → nom yozish; ➕ Liga → ro'yxatdan | Qo'shiladi, element ekrani ochiladi |
 | 13.4 | [📋 Tarkib] [📉 Koeffitsient] [🏁 Natija] | Har biri yoqiladi/o'chadi (✅/▫️), ro'yxatda ko'rinadi |
 | 13.5 | [🗑 Olib tashlash]; boshqa joyda o'chirilgan elementning tugmasi | Ro'yxat qaytadi; "Bu element endi sevimlilarda yo'q" |
-| 13.6 | Kartadagi [⭐ Kuzatish] | Uy jamoasi, mehmon jamoasi, liga tugmalari; ikkinchi bosish — olib tashlaydi |
+| 13.6 | Kartadagi [⭐ Kuzatish] | Uy jamoasi, mehmon jamoasi, liga tugmalari (karta id lari bo'yicha, qidiruvsiz); ikkinchi bosish — olib tashlaydi |
 | 13.7 | Sevimli jamoa o'yini tahlilda | Karta "⭐ Sevimli" belgisi bilan, har doim kiritiladi |
 | 13.8 | Ikkinchi foydalanuvchi | Ro'yxati alohida |
 
@@ -203,7 +203,7 @@
 | 15.1 | `🎟 Mening stavkalarim` yoki `/bank` | Balans, unit, oy foydasi, ochiq stavkalar, yopilgan hisobi (✅ ❌ ↩️ 💸), umumiy foyda va yield, limitlar; [🟡 Ochiq] [✅ Yopilgan] [📈 Bank grafigi] [⚙️ Bank va limitlar] |
 | 15.2 | ⚙️ Bank va limitlar | Bank, unit, kunlik va haftalik limit muharrirlari (sozlamalar bilan bir xil) |
 | 15.3 | 🟡 Ochiq → stavka → [✅ O'tdi] [❌ O'tmadi] [↩️ Qaytarildi] | O'yin boshlangan bo'lsa natija belgilanadi, balans yangilanadi; boshlanmagan bo'lsa alert |
-| 15.4 | [💸 Cashout] → `0.8` yoki `-0.4` | Unit da natija; `abc`, `500` — xato va qadam ochiq; ⬅️ — chiqish |
+| 15.4 | [💸 Cashout] → to'langan summa (masalan `200`) | Foyda = summa − stavka (20.12 ga qarang); `abc`, `-5`, juda katta son — xato va qadam ochiq; ⬅️ — chiqish |
 | 15.5 | ✅ Yopilgan | Natija va foyda bilan oxirgi stavkalar |
 | 15.6 | 📈 Bank grafigi | PNG rasm (kun oxiridagi balans, boshlang'ich bank chizig'i); bank yoki yopilgan stavka yo'q — tushuntirish |
 | 15.7 | Zarar limitiga yetilgach ✅ Stavka qildim | "🛑 Zarar limitiga yetdingiz…" va [🛑 Baribir davom etaman] / [❌]; faqat tasdiqdan keyin odatiy so'rov |
@@ -238,3 +238,56 @@
 | # | Qadam | Kutilgan natija |
 |---|---|---|
 | 19.1 | Foydalanuvchi botni bloklagan, kunlik xabar vaqti | Bir marta urinish (`notify_user_blocked_bot`), pipeline kalitni yakunlaydi: 5 marta qayta urinish ham, adminga kunlik ogohlantirish ham yo'q; 24 soatdan keyin yana urinadi |
+
+
+## 20. 🏁 Natijalarni belgilash (F8.1)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 20.1 | O'yin boshlangan signal kartasi (batafsil kartadan ⬅️, hisobot xabari) | Kartada `[✅ O'tdi] [❌ O'tmadi]` / `[↩️ Void] [💸 Cashout]` / `[💬 Izoh]`; boshlanmagan o'yinda yo'q; retro, tavsiya qilinmagan va bekor qilingan kartada yo'q |
+| 20.2 | [✅ O'tdi] | Karta shu xabarda yangilanadi: "Natija belgilandi" va natija belgisi; signaldagi barcha stavkalar yopiladi; tugmalar qoladi (tuzatish uchun) |
+| 20.3 | API natijasi kelgan kartada qarama-qarshi belgi | Qo'lda belgi ustun; keyingi avtomatik hisob-kitob uni o'zgartirmaydi |
+| 20.4 | O'yin boshlanmagan signalga tugma (eski xabar) | Alert "O'yin hali boshlanmagan…"; retro signal — "retro-tahlil signali…"; bekor qilingan — "Signal bekor qilingan…" |
+| 20.5 | `/natijalar` | Natijasi aniqlanmagan, o'yini tugagan signallar: raqamlangan ro'yxat, har biriga tugmalar; bo'sh bo'lsa "Natijasi kutilayotgan signal yo'q" |
+| 20.6 | Ro'yxatda ✅ / ❌ / ↩️ | Signal ro'yxatdan chiqadi (shu sahifa yangilanadi), "Natija belgilandi" |
+| 20.7 | 6 tadan ko'p signal | ◀️ n/m ▶️; har bir signalga yetib borish mumkin |
+| 20.8 | [💸 Cashout] (signal) → `0.8` | Tavsiya etilgan stavkaga nisbatan unit; `abc` — xato, `500` — "-100 dan 100 gacha", holat ochiq; `/bekor` — so'rov unutiladi, kechikkan raqam hech narsani belgilamaydi |
+| 20.9 | [💬 Izoh] → matn | "Izoh saqlandi" (HTML belgilar escape qilingan); bo'sh yoki 500 belgidan uzun — xato, so'rov ochiq; aynan 500 — qabul |
+| 20.10 | Tahlil ishlayotganda 💬 yoki 💸 | Alert "Tahlil allaqachon bajarilmoqda"; himoya o'chmaydi |
+| 20.11 | Boshqa foydalanuvchining tugmasi (soxta `rs:` callback) | "Topilmadi"; hech narsa o'zgarmaydi, hech qanday holat ochilmaydi |
+| 20.12 | 🎟 Stavkalarim → ochiq stavka → [💸 Cashout] | "Bukmeker sizga to'lagan **summani** yozing (stavkangiz: …)". `200` (stavka 250) → foyda **−50**; `0` — to'liq yo'qotish; `-5`, `abc`, 10¹² dan katta — xato; bir signaldagi boshqa stavkalar shu daromad foizi bilan yopiladi |
+
+## 21. Kunlik xabar va qo'lda tahlil banneri (F8.2)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 21.1 | Ertalabki xabar | Sarlavha + "Kecha: 6 ta signal · 4 ✅ · 2 ❌ · +2.3 unit · CLV +3.1%" (kechagi signal bo'lmasa blok yo'q) |
+| 21.2 | Jadvalli shablon xabari | Sarlavha `💾 Shablon nomi — …`, "Kecha" bloki yo'q |
+| 21.3 | Zarar limiti yetilgan kun | Bitta "🛑 Zarar limitiga yetildi: kunlik/haftalik limit …, zarar …" xabari; bo'sh "0 signal" yo'q |
+| 21.4 | Limit yetilganda 📊 Tahlil yoki 🔍 Maxsus tahlil | Tahlil bajariladi, natija boshida "Zarar limitiga yetgansiz…" banneri; retro oynada banner yo'q |
+| 21.5 | Kartadagi ⭐ | Jamoa/liga tugmalari karta id lari bilan (katalog qidiruvi yo'q); id yo'q kartada kamroq tugma |
+
+## 22. `/ozgarishlar` va model jurnali (F8.8)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 22.1 | `/ozgarishlar` (jurnal bo'sh) | Rejim satri (⚪ o'chiq / 👁 kuzatuv / ✅ qo'llash) va "Hozircha o'zgarish yo'q" |
+| 22.2 | Jurnal bor | Yangi → eski; har yozuv: tur, sana, segment/versiya, namuna, sabab; `👁 kuzatuv rejimi: shunday qilgan bo'lardi` yoki `✅ qo'llangan` yoki `↩️ qaytarilgan` |
+| 22.3 | 10 tadan ko'p | ◀️ n/m ▶️; har bir yozuvga yetib borish mumkin |
+| 22.4 | Qo'llangan yozuvda [↩️ Qaytarish #N] | Kuzatuv (applied=0) va qaytarilgan yozuvda tugma yo'q |
+| 22.5 | [↩️ Qaytarish #N] | Tasdiq ekrani: yozuv + "model N kun qayta o'zgartirmaydi"; [✅ Ha, qaytarish] / [⬅️ Yo'q] (hech narsa o'zgarmaydi) |
+| 22.6 | ✅ Ha | "Qaytarildi…"; ro'yxatda `↩️ qaytarilgan`; ikki marta bosish — "allaqachon qaytarilgan" |
+| 22.7 | Yozuvdan keyin holat o'zgargan (yangi kalibratsiya/segment) | `STALE`: tushuntirish, hech narsa yozilmaydi; eng yangi o'zgarishni qaytaring |
+| 22.8 | Yozuv ro'yxatdan yo'qolgan/boshqa sahifaga o'tgan eski tugma | "Bu tugma eskirgan" |
+| 22.9 | Dushanba 09:00 dan keyin | Har bir foydalanuvchiga bitta "🧠 Model nimani o'rgandi — hafta …" (rejim, sanoq, yozuvlar; ≤ 8 ta batafsil, qolgani "…va yana N ta"); `off` da yuborilmaydi; tinch soatda o'tkazib yuboriladi; qayta ishga tushirish dublikat yaratmaydi |
+| 22.10 | `/holat` | "🧠 Model o'rganishi": rejim, oxirgi `learning`/`lessons`/`postmortem` ishlari; haftalik ish 8 kundan ko'p ishlamagan bo'lsa "⚠️ … hafta yo'qolgan" |
+
+## 23. T5 bot tuzatishlari (QA F-1..F-10)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 23.1 | Tahlil ishlayotganda bot qayta ishga tushadi | Ishga tushganda "Bot qayta ishga tushdi… tahlilni qaytadan boshlang" xabari; 🔍/▶️ qotib qolmaydi |
+| 23.2 | Tahlil ishlayotganda ⭐, `/kuzat`, ⚙️, 💾, 📈, 🧩 ochiladi | "Allaqachon bajarilmoqda" himoyasi saqlanadi; `/bekor` — chiqish yo'li, matnda aytilgan |
+| 23.3 | 24 jamoa sevimlida / 25 shablon | Sahifalar (10 tadan); 21-chi va keyingisini ochish, bildirishnomani o'zgartirish, o'chirish; elementdan ⬅️ shu sahifaga qaytaradi; mavjud bo'lmagan sahifa — oxirgisi |
+| 23.4 | 105 ta yopilgan stavka | Bank ekranida foyda/yopilgan soni **hammasi** bo'yicha (balans bilan mos); 101-chi ochiq stavka ham ochiladi va yopiladi |
+| 23.5 | `/eksport` | Fayllar UTF-8 BOM bilan; `=`/`+`/`-`/`@` bilan boshlangan liga/jamoa nomi oldida `'`; raqamlar o'zgarmagan (`-50`) |
+| 23.6 | Liga nomi `$…$` bo'lgan hisobot grafigi | Grafik chiziladi (xato yo'q) |
+| 23.7 | Zarari bir sentdan kam | "0" (hech qachon "-0") |
+| 23.8 | 4096 belgidan uzun ro'yxat (tugmadan tahrir) | Birinchi qism tahrir, qolgani yangi xabar(lar)da, tugmalar oxirgisida; hech narsa kesilmaydi |
+| 23.9 | Ekspress: −10% EV oyoq + 0% EV oyoq | Ekspress EV −10% (0% emas); bir o'yindan ikki tanlov hamon rad etiladi |

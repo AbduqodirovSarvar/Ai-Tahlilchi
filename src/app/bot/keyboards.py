@@ -4,7 +4,7 @@ import calendar
 import zlib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Final
 
 from aiogram.types import (
@@ -38,6 +38,7 @@ from app.bot.callbacks import (
     SportCb,
     encode_ref,
 )
+from app.bot.result_buttons import card_result_rows, markable
 from app.domain import MarketType
 from app.services.interfaces import (
     MAX_RETRO_LOOKBACK_DAYS,
@@ -449,11 +450,18 @@ def card_keyboard(signal_id: int, *, retro: bool = False) -> InlineKeyboardMarku
     )
 
 
-def signal_keyboard(signal: SignalView) -> InlineKeyboardMarkup:
-    """Card buttons that fit the signal: retro and cancelled signals cannot be recalculated."""
-    return card_keyboard(
+def signal_keyboard(signal: SignalView, now: datetime | None = None) -> InlineKeyboardMarkup:
+    """Card buttons that fit the signal: retro and cancelled signals cannot be recalculated.
+
+    With ``now`` a card whose match has started also carries the result buttons (F8.1); a
+    card that already shows a result carries them regardless, as a correction.
+    """
+    base = card_keyboard(
         signal.signal_id, retro=signal.retro or signal.state is SignalState.CANCELLED
     )
+    if not markable(signal, now):
+        return base
+    return _markup([*base.inline_keyboard, *card_result_rows(signal.signal_id)])
 
 
 def detail_keyboard(signal_id: int) -> InlineKeyboardMarkup:

@@ -8,7 +8,7 @@ on that signal. Chart rendering blocks, so it runs in a worker thread.
 """
 
 import asyncio
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Final
 
 from aiogram import F, Router
@@ -45,16 +45,17 @@ from app.bot.messaging import (
     edit_html,
     send_html,
 )
-from app.bot.parsing import InputError, parse_number
+from app.bot.parsing import InputError, parse_money
 from app.bot.states import BetFlow
 from app.services.errors import NotFoundError, ValidationFailedError
-from app.services.interfaces import BetView, ResultMark, ResultMarkRequest
+from app.services.interfaces import BetView, ResultMark, ResultMarkRequest, SignalState
 
 BANK_COMMAND: Final = "bank"
 LIST_LIMIT: Final = 100
 """Bets read for the overview, lists and totals (the service's own cap)."""
 CASHOUT_KEY: Final = "cashout"
-MAX_CASHOUT_UNITS: Final = Decimal(100)
+MAX_CASHOUT_PAYOUT: Final = Decimal(10) ** 12
+"""A payout beyond this is a typo, not a cash-out."""
 
 
 def _message_of(callback: CallbackQuery) -> Message:
@@ -74,10 +75,10 @@ async def _open_bet(flow: FlowContext, bet_id: int) -> BetView:
     Raises:
         NotFoundError: settled meanwhile, or not the user's.
     """
-    for bet in await _bets(flow, open_only=True):
-        if bet.bet_id == bet_id:
-            return bet
-    raise NotFoundError("bet", bet_id)
+    bet = await flow.services.bets.get_bet(flow.user_id, bet_id)
+    if bet.outcome is not None:
+        raise NotFoundError("bet", bet_id)
+    return bet
 
 
 # --------------------------------------------------------------------------- overview
@@ -88,8 +89,7 @@ async def _overview(
     bank = await flow.services.bets.bank_summary(flow.user_id)
     bets = await _bets(flow)
     text = format_overview(bank, bets, settings, settings.zone)
-    open_count = sum(1 for bet in bets if bet.outcome is None)
-    return (f"{notice}\n\n{text}" if notice else text), overview_keyboard(open_count)
+    return (f"{notice}\n\n{text}" if notice else text), overview_keyboard(bank.open_bets)
 
 
 async def show_overview(message: Message, flow: FlowContext) -> None:
@@ -144,11 +144,31 @@ async def on_setup(callback: CallbackQuery) -> None:
 
 
 # --------------------------------------------------------------------------- manual result
-async def _mark(flow: FlowContext, bet: BetView, mark: ResultMark, units: Decimal | None) -> None:
+async def _mark(flow: FlowContext, bet: BetView, mark: ResultMark, payout: Decimal | None) -> None:
     if bet.signal_id is None:
         raise ValidationFailedError("signal_id", "the bet has no signal")
-    request = ResultMarkRequest(signal_id=bet.signal_id, mark=mark, cashout_profit_units=units)
+    request = ResultMarkRequest(
+        signal_id=bet.signal_id,
+        mark=mark,
+        cashout_bet_id=None if payout is None else bet.bet_id,
+        cashout_payout=payout,
+    )
     await flow.services.results.mark_result(flow.user_id, request)
+
+
+async def _refusal(flow: FlowContext, bet: BetView) -> str:
+    """Why the service refused the mark, in the user's words (not always "not started")."""
+    if bet.signal_id is None:  # pragma: no cover - callers check the signal first
+        return texts.BANK_NO_SIGNAL
+    try:
+        signal = await flow.services.signals.get_signal(flow.user_id, bet.signal_id)
+    except NotFoundError:
+        return texts.BANK_NOT_FOUND
+    if signal.retro:
+        return texts.BANK_MARK_RETRO
+    if signal.state is SignalState.CANCELLED:
+        return texts.BANK_MARK_CANCELLED
+    return texts.BANK_MARK_REFUSED
 
 
 async def on_mark(callback: CallbackQuery, callback_data: BankCb, flow: FlowContext) -> None:
@@ -166,7 +186,7 @@ async def on_mark(callback: CallbackQuery, callback_data: BankCb, flow: FlowCont
     try:
         await _mark(flow, bet, mark, None)
     except ValidationFailedError:
-        await answer_callback(callback, texts.BANK_MARK_REFUSED, alert=True)
+        await answer_callback(callback, await _refusal(flow, bet), alert=True)
         return
     await answer_callback(callback)
     notice = texts.BANK_MARKED.format(result=texts.RESULT_LABELS[mark])
@@ -182,7 +202,7 @@ async def _ask_cashout(callback: CallbackQuery, flow: FlowContext, bet: BetView)
     await flow.state.set_state(BetFlow.cashout_input)
     await edit_html(
         message,
-        texts.BANK_CASHOUT_PROMPT,
+        texts.BANK_CASHOUT_PROMPT.format(stake=money(bet.stake)),
         markup_of([[single_button(texts.BTN_BANK_HOME, BankCb(action="open"))]]),
     )
 
@@ -197,33 +217,29 @@ async def _clear_cashout(flow: FlowContext) -> None:
     await flow.state.set_data(data)
 
 
-def _parse_units(text: str) -> Decimal:
-    """The typed cash-out result in units.
+def _parse_payout(text: str) -> Decimal:
+    """The typed cash-out payout (money the bookmaker paid, zero or more).
 
     Raises:
-        InputError: not a number, or beyond any plausible result.
+        InputError: not a number, negative, or beyond any plausible payout.
     """
-    number = parse_number(text, example="0.8")
-    try:
-        value = Decimal(str(number))
-    except InvalidOperation:  # pragma: no cover - parse_number already rejects non-finite
-        raise InputError(texts.BANK_CASHOUT_RANGE) from None
-    if abs(value) > MAX_CASHOUT_UNITS:
+    value = parse_money(text, allow_zero=True)
+    if value > MAX_CASHOUT_PAYOUT:
         raise InputError(texts.BANK_CASHOUT_RANGE)
     return value
 
 
 async def on_cashout_text(message: Message, flow: FlowContext) -> None:
-    """The typed cash-out result: settle the bet and show the overview."""
+    """The typed cash-out payout: settle the bet and show the overview."""
     stored = (await flow.state.get_data()).get(CASHOUT_KEY)
     if not isinstance(stored, dict) or not isinstance(stored.get("bet_id"), int):
         raise StaleDraftError
-    units = _parse_units(message.text or "")
+    payout = _parse_payout(message.text or "")
     bet = await _open_bet(flow, stored["bet_id"])
     try:
-        await _mark(flow, bet, ResultMark.CASHOUT, units)
+        await _mark(flow, bet, ResultMark.CASHOUT, payout)
     except ValidationFailedError:
-        await send_html(message, texts.BANK_MARK_REFUSED)
+        await send_html(message, await _refusal(flow, bet))
         return
     await _clear_cashout(flow)
     if message.bot is not None:

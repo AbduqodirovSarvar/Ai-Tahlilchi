@@ -1206,6 +1206,25 @@ class BankPoint:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BankTotals:
+    """What *all* of the user's settled bets add up to (v1.8; not just the latest page)."""
+
+    settled: int = 0
+    won: int = 0
+    lost: int = 0
+    void: int = 0
+    cashout: int = 0
+    profit: Decimal = Decimal(0)
+    staked: Decimal = Decimal(0)
+    """Stakes really at risk (void bets excluded)."""
+
+    @property
+    def yield_rate(self) -> float | None:
+        """Profit over the stakes that were really at risk; ``None`` if nothing was staked."""
+        return float(self.profit / self.staked) if self.staked else None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BankView:
     """``/bank`` (plan §6.9). ``balance`` is ``None`` until the user sets a bank.
 
@@ -1224,6 +1243,7 @@ class BankView:
     loss_today: Decimal
     loss_this_week: Decimal
     loss_limit_reached: bool
+    totals: BankTotals = BankTotals()
 
 
 # --------------------------------------------------------------------------- express
@@ -1237,6 +1257,13 @@ class ExpressLeg:
     selection: Selection
     odds: float
     probability: float
+    fair_odds: float | None = None
+    """Zero-EV odds of the pick (v1.8); ``None`` = ``1 / probability`` (a binary pick)."""
+
+    @property
+    def zero_ev_odds(self) -> float:
+        """The odds at which this pick alone would have zero EV."""
+        return 1.0 / self.probability if self.fair_odds is None else self.fair_odds
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1244,9 +1271,12 @@ class ExpressView:
     """An express built from 2-4 signals of different matches (plan §6.11, v1.6).
 
     The legs are independent (different matches), so ``combined_probability`` is the product
-    of the leg probabilities and ``combined_odds`` the product of the odds; ``ev`` =
-    ``combined_probability * combined_odds - 1``. Several 70% picks make a much weaker bet
-    (three of them: about 34%), which the bot spells out.
+    of the leg probabilities and ``combined_odds`` the product of the odds. ``ev`` is
+    ``prod(1 + ev_i) - 1`` over the legs' own EV (v1.8): for a binary pick that equals
+    ``p * odds - 1``, but a quarter-line Asian pick has half-win/half-loss outcomes, so its
+    ``probability`` (win probability, a half win counted as win) times odds is not ``1 + ev``.
+    Several 70% picks make a much weaker bet (three of them: about 34%), which the bot spells
+    out.
     """
 
     legs: tuple[ExpressLeg, ...]
@@ -1256,27 +1286,52 @@ class ExpressView:
 
     @property
     def fair_odds(self) -> float:
-        """Combined odds at which the express would have zero EV."""
-        return 1.0 / self.combined_probability
+        """Combined odds at which the express would have zero EV (every leg at its fair odds)."""
+        return math.prod(leg.zero_ev_odds for leg in self.legs)
 
 
 # --------------------------------------------------------------------------- results
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResultMarkRequest:
-    """Manual settlement (plan §6.13 A). Cash-outs need the realised profit in units."""
+    """Manual settlement (plan §6.13 A).
+
+    A cash-out is given in one of two ways: ``cashout_profit_units`` (the result in units of
+    the signal's recommended stake, for a signal-level mark) or ``cashout_bet_id`` plus
+    ``cashout_payout`` (the money the bookmaker paid out for one of the user's bets; that bet's
+    profit is exactly ``payout - stake``, orchestrator decision #18, contract v1.8).
+    """
 
     signal_id: SignalId
     mark: ResultMark
     cashout_profit_units: Decimal | None = None
+    cashout_bet_id: BetId | None = None
+    cashout_payout: Decimal | None = None
 
     def __post_init__(self) -> None:
         """Only manual marks; the cash-out amount is given exactly for cash-outs."""
         _check(self.mark in MANUAL_RESULT_MARKS, "mark", "cannot be set by hand")
-        is_cashout = self.mark is ResultMark.CASHOUT
-        has_amount = self.cashout_profit_units is not None
-        _check(is_cashout == has_amount, "cashout_profit_units", "required only for cash-outs")
+        by_units = self.cashout_profit_units is not None
+        by_payout = self.cashout_bet_id is not None or self.cashout_payout is not None
+        _check(not (by_units and by_payout), "cashout_payout", "give units or a payout, not both")
+        _check(
+            (self.mark is ResultMark.CASHOUT) == (by_units or by_payout),
+            "cashout_profit_units",
+            "required only for cash-outs",
+        )
         if self.cashout_profit_units is not None:
             _check(self.cashout_profit_units.is_finite(), "cashout_profit_units", "not finite")
+        if by_payout:
+            _check(
+                self.cashout_bet_id is not None and self.cashout_payout is not None,
+                "cashout_payout",
+                "a payout needs its bet",
+            )
+        if self.cashout_payout is not None:
+            _check(
+                self.cashout_payout.is_finite() and self.cashout_payout >= 0,
+                "cashout_payout",
+                "must be zero or more",
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1465,6 +1520,95 @@ class ErrorEntry:
     message: str
 
 
+# --------------------------------------------------------------------------- learning (v1.8)
+class LearningMode(StrEnum):
+    """How far the weekly learning loop may act (``LEARNING_MODE``, ADR 0013)."""
+
+    OFF = "off"
+    SHADOW = "shadow"
+    APPLY = "apply"
+
+
+class LearningChangeKind(StrEnum):
+    """What a journal entry of the learning loop did."""
+
+    SEGMENT_RAISED = "segment_raised"
+    SEGMENT_DISABLED = "segment_disabled"
+    SEGMENT_RELAXED = "segment_relaxed"
+    CALIBRATION_ACTIVATED = "calibration_activated"
+    CALIBRATION_ROLLED_BACK = "calibration_rolled_back"
+    SEGMENT_ROLLED_BACK = "segment_rolled_back"
+
+
+class RollbackOutcome(StrEnum):
+    """What undoing a journal entry did (mirrors the pipeline's ``RollbackResult``)."""
+
+    ROLLED_BACK = "rolled_back"
+    NOT_FOUND = "not_found"
+    ALREADY_ROLLED_BACK = "already_rolled_back"
+    NOT_UNDOABLE = "not_undoable"
+    STALE = "stale"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LearningChangeView:
+    """One entry of the learning journal (`/ozgarishlar`).
+
+    ``applied`` is ``False`` for a shadow-mode entry: what the loop *would* have changed, not
+    what it did. ``subject`` is the segment (``league|market|odds bucket``) or the calibration
+    version; ``ev_floor`` is the EV bar a segment change set, ``version`` the calibration
+    version activated; ``samples`` is the sample size behind the decision.
+    """
+
+    change_id: int
+    at: datetime
+    kind: LearningChangeKind
+    subject: str
+    reason: str
+    applied: bool
+    rolled_back: bool
+    ev_floor: float | None = None
+    version: int | None = None
+    samples: int | None = None
+
+    def __post_init__(self) -> None:
+        """Instants are UTC like everywhere else."""
+        _check_utc(self.at, "at")
+
+    @property
+    def undoable(self) -> bool:
+        """True for a real, still standing change of the kinds that can be undone."""
+        undoable_kinds = {
+            LearningChangeKind.SEGMENT_RAISED,
+            LearningChangeKind.SEGMENT_DISABLED,
+            LearningChangeKind.SEGMENT_RELAXED,
+            LearningChangeKind.CALIBRATION_ACTIVATED,
+        }
+        return self.applied and not self.rolled_back and self.kind in undoable_kinds
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LearningPage:
+    """A page of the journal, newest first."""
+
+    items: tuple[LearningChangeView, ...]
+    page: int
+    page_count: int
+    total: int
+    mode: LearningMode
+    hold_days: int = 30
+    """How many days a manually undone change stays frozen against the loop's next review."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LearningSummary:
+    """The weekly "what the model learned" message (plan 6.13 C, v1.8)."""
+
+    week: date
+    mode: LearningMode
+    changes: tuple[LearningChangeView, ...]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SystemStatus:
     """``/holat`` (plan §6.12)."""
@@ -1474,6 +1618,9 @@ class SystemStatus:
     jobs: tuple[JobStatus, ...]
     recent_errors: tuple[ErrorEntry, ...]
     llm: LlmQuota | None = None
+    learning_mode: LearningMode | None = None
+    learning_missed: bool = False
+    """True when the weekly learning run is overdue (v1.8): it ran before but not this week."""
 
 
 # --------------------------------------------------------------------------- notifications
@@ -1633,6 +1780,12 @@ class Notifier(Protocol):
         self, user_id: int, notice: SettledNotice, *, key: DeliveryKey
     ) -> MessageRef | None:
         """Announce a settled signal."""
+        ...
+
+    async def send_learning_summary(
+        self, user_id: int, summary: LearningSummary, *, key: DeliveryKey
+    ) -> MessageRef | None:
+        """Send the weekly "what the model learned" message (v1.8)."""
         ...
 
     async def alert_admin(self, alert: AdminAlert) -> None:
@@ -1897,6 +2050,14 @@ class WatchlistService(Protocol):
 class BetService(Protocol):
     """The user's own bets and bank (plan §6.9). Settlement is automatic."""
 
+    async def get_bet(self, user_id: int, bet_id: BetId) -> BetView:
+        """One of the user's bets, however old (v1.8; ``list_bets`` is capped).
+
+        Raises:
+            NotFoundError: unknown, or another user's bet.
+        """
+        ...
+
     async def place_bet(self, user_id: int, draft: BetDraft) -> BetView:
         """Record a bet on a signal.
 
@@ -1993,6 +2154,24 @@ class SystemStatusService(Protocol):
         ...
 
 
+class LearningService(Protocol):
+    """The change journal of the learning loop (plan 6.13 C, v1.8).
+
+    The journal is system-wide (the model is shared), so every user of the bot sees the same
+    entries; ``user_id`` is accepted for uniformity with the other services.
+    """
+
+    async def list_changes(
+        self, user_id: int, *, page: int = 0, page_size: int = DEFAULT_PAGE_SIZE
+    ) -> LearningPage:
+        """The journal, newest first; ``page`` is clamped into range."""
+        ...
+
+    async def rollback_change(self, user_id: int, change_id: int) -> RollbackOutcome:
+        """Undo one entry (refused as ``STALE`` when the state has moved on since)."""
+        ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Services:
     """Everything the bot needs, injected at startup (fake now, real services in F4)."""
@@ -2008,3 +2187,4 @@ class Services:
     reports: ReportService
     status: SystemStatusService
     express: ExpressService
+    learning: LearningService

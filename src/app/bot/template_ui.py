@@ -22,10 +22,10 @@ from app.bot.keyboards import (
     markup_of,
     single_button,
 )
+from app.bot.paging import pager_row, paginate
 from app.bot.wizard import summary_fields
 from app.services.interfaces import DateMode, DateSpec, TemplateSchedule, TemplateView
 
-MAX_LISTED_TEMPLATES: Final = 20
 WEEKDAYS: Final = (1, 2, 3, 4, 5, 6, 7)
 DEFAULT_WEEKDAYS: Final = (1, 2, 3, 4, 5)
 """A new schedule starts on working days; the user toggles from there."""
@@ -72,13 +72,12 @@ def summary_of(view: TemplateView) -> str:
     )
 
 
-def format_templates(views: Sequence[TemplateView]) -> str:
-    """The list screen."""
+def format_templates(views: Sequence[TemplateView], page: int = 0) -> str:
+    """The list screen (one page)."""
     if not views:
         return texts.TPL_EMPTY
-    shown = views[:MAX_LISTED_TEMPLATES]
     lines = [texts.TPL_TITLE.format(count=len(views))]
-    for view in shown:
+    for view in paginate(views, page).items:
         schedule = (
             ""
             if view.schedule is None
@@ -91,22 +90,24 @@ def format_templates(views: Sequence[TemplateView]) -> str:
                 name=escape(view.name), summary=summary_of(view), schedule=schedule
             )
         )
-    if len(views) > len(shown):
-        lines.append(texts.TPL_MORE.format(count=len(views) - len(shown)))
     return "\n".join(lines)
 
 
-def templates_keyboard(views: Sequence[TemplateView]) -> InlineKeyboardMarkup:
-    """One button per template."""
+def templates_keyboard(views: Sequence[TemplateView], page: int = 0) -> InlineKeyboardMarkup:
+    """One button per template of the page and the pager (``value`` = page number)."""
+    current = paginate(views, page)
     rows = [
         [
             single_button(
                 ("🗓 " if view.schedule else "💾 ") + view.name,
-                TplCb(action="open", id=view.template_id),
+                TplCb(action="open", id=view.template_id, value=current.number),
             )
         ]
-        for view in views[:MAX_LISTED_TEMPLATES]
+        for view in current.items
     ]
+    pager = pager_row(current, lambda number: TplCb(action="list", value=number))
+    if pager:
+        rows.append(pager)
     return markup_of(rows)
 
 
@@ -127,28 +128,34 @@ def format_template(view: TemplateView) -> str:
     )
 
 
-def template_keyboard(view: TemplateView) -> InlineKeyboardMarkup:
-    """Run, schedule, delete and back."""
+def template_keyboard(view: TemplateView, page: int = 0) -> InlineKeyboardMarkup:
+    """Run, schedule, delete and back (to the list page the template was opened from)."""
     template_id = view.template_id
     return markup_of(
         [
             [single_button(texts.BTN_TPL_RUN, TplCb(action="run", id=template_id))],
             [
                 single_button(texts.BTN_TPL_SCHEDULE, TplCb(action="schedule", id=template_id)),
-                single_button(texts.BTN_TPL_DELETE, TplCb(action="delete", id=template_id)),
+                single_button(
+                    texts.BTN_TPL_DELETE, TplCb(action="delete", id=template_id, value=page)
+                ),
             ],
-            [single_button(texts.BTN_TPL_BACK, TplCb(action="list"))],
+            [single_button(texts.BTN_TPL_BACK, TplCb(action="list", value=page))],
         ]
     )
 
 
-def delete_keyboard(template_id: int) -> InlineKeyboardMarkup:
-    """The delete confirmation."""
+def delete_keyboard(template_id: int, page: int = 0) -> InlineKeyboardMarkup:
+    """The delete confirmation ("no" returns to the template on the same list page)."""
     return markup_of(
         [
             [
-                single_button(texts.BTN_TPL_DELETE_YES, TplCb(action="delete_yes", id=template_id)),
-                single_button(texts.BTN_TPL_DELETE_NO, TplCb(action="open", id=template_id)),
+                single_button(
+                    texts.BTN_TPL_DELETE_YES, TplCb(action="delete_yes", id=template_id, value=page)
+                ),
+                single_button(
+                    texts.BTN_TPL_DELETE_NO, TplCb(action="open", id=template_id, value=page)
+                ),
             ]
         ]
     )
