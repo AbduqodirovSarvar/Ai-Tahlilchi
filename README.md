@@ -50,6 +50,7 @@ cp .env.example .env         # keyin .env ni to'ldiring
 | `APP_ENV` | yo'q | `dev` (rangli loglar) yoki `prod` (JSON loglar) |
 | `DISPLAY_TZ` | yo'q | foydalanuvchiga vaqtni ko'rsatish mintaqasi, standart `Asia/Tashkent` (bazada doim UTC). POSIX `TZ` ishlatilmaydi |
 | `APP_SERVICES` | yo'q | `fake` (standart) yoki `real` (kalitlar tayyor bo'lgach) |
+| `TLS_USE_SYSTEM_TRUST_STORE`, `TLS_CA_BUNDLE` | yo'q | korporativ TLS-proksi uchun, [bo'lim](#korporativ-proksi-ortida) |
 | `HEALTHCHECKS_URL` | yo'q | healthchecks.io ping URL (maxfiy); kunlik sikldan keyin ping |
 | `DB_PATH`, `LOG_LEVEL` | yo'q | standart: `data/app.db`, `INFO` (katta-kichik harf farqi yo'q) |
 
@@ -93,8 +94,35 @@ docker compose down              # to'xtatish
 - **O'rganish halqasi:** `LEARNING_MODE=off|shadow|apply` (standart `shadow`: haftalik job hisoblaydi va jurnalga "nima qilgan bo'lardi" deb yozadi, lekin tahlilga ta'sir qilmaydi). `apply` ga o'tish odam qarori, paper trading davomida shadow jurnalini ko'rgandan keyin ([RUNBOOK 4.1](RUNBOOK.md), [ADR 0013](docs/adr/0013-learning-loop-math.md)).
 - **Servislar rejimi:** `APP_SERVICES=fake` (standart: namunaviy ma'lumot, kalitlarsiz sinash) yoki `real` (pipeline + rejalashtiruvchi; `TELEGRAM_BOT_TOKEN`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY` kerak). `.env` ga yozing va `docker compose up -d`.
 - Resurs chegaralari 1–2 GB VPS uchun: `mem_limit: 768m`, `cpus: 1.5`; Docker loglari 5 × 10 MB.
-- TLS'ni ushlab qoluvchi korporativ proksi ortida build: `docker build --secret id=ca_bundle,src=ca.pem .` (sertifikat image'ga yozilmaydi).
+- TLS'ni ushlab qoluvchi korporativ proksi ortida (build va ishga tushirish): "Korporativ proksi ortida" bo'limi (`docker-compose.proxy.yml`).
 - Qo'lda ishlatiladigan skriptlar image ichida (`/app/scripts`): `docker compose run --rm --no-deps --entrypoint python bot /app/scripts/probe_api.py --help`.
+
+## Korporativ proksi ortida
+
+Ba'zi tarmoqlarda proksi HTTPS trafikni ushlab, o'zining (korporativ) CA sertifikati bilan qayta imzolaydi. Standart sozlamada bot `ClientConnectorCertificateError` / `CERTIFICATE_VERIFY_FAILED` beradi (Telegram, API-Football, Gemini, healthchecks.io). Ikki ixtiyoriy sozlama bor (standart: o'chiq; tekshiruv hech qachon o'chirilmaydi, [ADR 0017](docs/adr/0017-tls-trust-configuration.md)):
+
+| O'zgaruvchi | Ma'nosi |
+|---|---|
+| `TLS_USE_SYSTEM_TRUST_STORE=true` | OS sertifikat ombori (Windows: korporativ CA allaqachon shu yerda). Windows'da lokal ishga tushirish uchun eng ishonchli yo'l |
+| `TLS_CA_BUNDLE=C:/certs/ca.pem` | proksi CA sertifikati(lar)i bor PEM fayl. Ikkalasi berilsa, OS ombori ustun |
+
+**Lokal ishga tushirish** (`.env` ga yozing):
+```
+TLS_USE_SYSTEM_TRUST_STORE=true
+# yoki:  TLS_CA_BUNDLE=C:/certs/corp-ca.pem
+```
+Fayl topilmasa yoki o'qib bo'lmasa, ilova `ConfigurationError` bilan (kod `2`) to'xtaydi; fayl mazmuni hech qachon logga yozilmaydi.
+
+**Docker** (build ham, ishga tushirish ham bitta fayl bilan; sertifikat image'ga yoki gitga tushmaydi):
+```bash
+CA_BUNDLE_FILE=C:/certs/corp-ca.pem \
+  docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+```
+(PowerShell: avval `$env:CA_BUNDLE_FILE="C:/certs/corp-ca.pem"`, keyin xuddi shu `docker compose ...`.) Build'da fayl BuildKit sirri sifatida `uv sync` ga beriladi; ishga tushganda faqat o'qiladigan sir sifatida `/run/secrets/ca_bundle` ga ulanadi va `TLS_CA_BUNDLE` shunga ko'rsatadi. Oddiy tarmoqda `docker-compose.yml` ning o'zi ishlatiladi. Windows'da yo'lda to'g'ri slesh (`/`) ishlating.
+
+**Korporativ CA ni PEM ga eksport qilish:** Windows'da `certmgr.msc` > "Trusted Root Certification Authorities" > kerakli CA > o'ng tugma > All Tasks > Export > "Base-64 encoded X.509 (.CER)"; kengaytmani `.pem` ga o'zgartiring (bir nechta CA bo'lsa, mazmunlarini bitta faylga ketma-ket qo'shing). Ilova PEM ni o'qiganda OpenSSL ning qat'iy RFC 5280 tekshiruvini (Python 3.13 yoqqan; "Basic Constraints not marked critical" xatosini beradi) o'chiradi; zanjir, muddat va host nomi tekshiruvi saqlanadi.
+
+> Ogohlantirish: korporativ firewall (masalan, FortiGate Application Control) Telegram'ni siyosat bo'yicha bloklashi mumkin. Bunda TLS ishlaydi, lekin `api.telegram.org` dan "Application Blocked" HTML sahifasi keladi (`ClientDecodeError`). Bu sertifikat muammosi emas: botni boshqa tarmoqda (server, uy interneti) ishga tushiring yoki IT'dan ruxsat so'rang.
 
 ## Serverga deploy (F9)
 To'liq qo'llanma: **[RUNBOOK.md](RUNBOOK.md)** (o'zbekcha): birinchi deploy, kalitlar, F0 probe va backtest serverda, yangilash/rollback, zaxira va tiklash, kalit almashtirish, loglar, muammolar, production ro'yxati.

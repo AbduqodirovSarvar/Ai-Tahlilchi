@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # Days the loop leaves a segment or the calibration alone after a person rolled a change back.
     learning_manual_hold_days: int = Field(default=30, ge=0, le=365)
     healthchecks_url: HttpUrl | None = None
+    # Outbound HTTPS behind a TLS-intercepting corporate proxy (src/app/tls.py): either trust the
+    # OS certificate store, or a PEM file with the proxy's CA. Both unset = library defaults.
+    tls_ca_bundle: Path | None = None
+    tls_use_system_trust_store: bool = False
 
     @field_validator("log_level", mode="before")
     @classmethod

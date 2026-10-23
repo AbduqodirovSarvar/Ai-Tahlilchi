@@ -10,6 +10,7 @@ from aiogram import Bot
 from hypothesis import HealthCheck, settings
 
 from app.config import Settings
+from app.tls import get_ssl_context
 from tests.bot.fakes import RecordingSession
 from tests.pipeline.world import World
 
@@ -36,6 +37,14 @@ def clean_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in SETTINGS_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def reset_ssl_context_cache() -> Iterator[None]:
+    """The process-wide SSL context is cached from settings; never leak it between tests."""
+    get_ssl_context.cache_clear()
+    yield
+    get_ssl_context.cache_clear()
 
 
 @pytest.fixture(autouse=True)

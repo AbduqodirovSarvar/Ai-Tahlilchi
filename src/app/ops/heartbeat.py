@@ -18,6 +18,7 @@ import httpx
 
 from app.config import Settings
 from app.logging import get_logger
+from app.tls import get_ssl_context
 
 logger = get_logger(__name__)
 
@@ -81,7 +82,9 @@ class Heartbeat:
     async def _send(self, target: str, body: bytes, kind: PingKind) -> bool:
         """One attempt; True when the service answered 2xx."""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, verify=get_ssl_context() or True
+            ) as client:
                 response = await client.post(target, content=body)
         except (httpx.HTTPError, httpx.InvalidURL) as error:
             # The error text may embed the URL (a credential): log the type only.
