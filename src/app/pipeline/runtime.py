@@ -12,17 +12,20 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clients.api_football import create_api_football_client
 from app.config import Settings
 from app.db.api_usage import SqlUsageStore
 from app.db.engine import create_engine_from_settings, create_session_factory
-from app.llm.service import create_llm_service
+from app.llm.service import LlmService, create_llm_service
 from app.logging import get_logger
 from app.pipeline.clock import Clock, system_clock
 from app.pipeline.config import PipelineConfig, StakingMode
 from app.pipeline.context import PipelineContext
 from app.pipeline.experience import DbExperience
+from app.pipeline.learning import promote_shadow_state
 from app.pipeline.learning_settings import LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger
 from app.pipeline.overlay import DbLearningSource, LearningSource, NoLearning
@@ -41,11 +44,38 @@ class Runtime:
     http: httpx.AsyncClient | None
 
 
+def build_reviewer(
+    llm: LlmService, sessions: async_sessionmaker[AsyncSession], clock: Clock, mode: LearningMode
+) -> LlmCandidateReviewer:
+    """The candidate reviewer.
+
+    Learned context (lessons, segment statistics, notes) reaches the LLM only in ``apply`` mode
+    (decision #20), so shadow and off keep the raw review.
+    """
+    experience = DbExperience(sessions, clock) if mode is LearningMode.APPLY else None
+    return LlmCandidateReviewer(llm, experience=experience)
+
+
+async def _promote_on_start(ctx: PipelineContext) -> None:
+    """Journal shadow-time state as applied the moment the mode is ``apply`` (decision #23).
+
+    Waiting for the weekly job would leave the stored state effective but unlisted for days.
+    A database that is not ready yet is not fatal here: the weekly job promotes as well.
+    """
+    if ctx.learning_settings.mode is not LearningMode.APPLY:
+        return
+    try:
+        await promote_shadow_state(ctx)
+    except SQLAlchemyError:
+        logger.exception("learning_promotion_failed")
+
+
 @asynccontextmanager
 async def open_runtime(
     settings: Settings, *, clock: Clock = system_clock, config: PipelineConfig | None = None
 ) -> AsyncIterator[Runtime]:
     """Build the context from ``settings`` and release its resources on exit."""
+    config = config or PipelineConfig(staking=StakingMode(settings.staking_mode))
     engine = create_engine_from_settings(settings)
     await Ledger.ensure_schema(engine)
     sessions = create_session_factory(engine)
@@ -61,6 +91,7 @@ async def open_runtime(
             client,
             clock=clock,
             handicap_convention=HandicapConvention(settings.handicap_convention),
+            bookmakers=config.ingest_bookmakers,
         )
         providers[provider.sport] = provider
     else:
@@ -79,13 +110,14 @@ async def open_runtime(
         ledger=Ledger(sessions),
         providers=providers,
         clock=clock,
-        config=config or PipelineConfig(staking=StakingMode(settings.staking_mode)),
-        reviewer=LlmCandidateReviewer(llm, experience=DbExperience(sessions, clock)),
+        config=config,
+        reviewer=build_reviewer(llm, sessions, clock, learning_settings.mode),
         learning=learning,
         learning_settings=learning_settings,
         postmortem=LlmPostmortemAnalyst(llm),
     )
     try:
+        await _promote_on_start(ctx)
         yield Runtime(ctx=ctx, http=http)
     finally:
         if http is not None:

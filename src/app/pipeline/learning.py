@@ -15,7 +15,9 @@ The analysis path reads the result through :mod:`app.pipeline.overlay`.
 Mode (``LEARNING_MODE``, :mod:`app.pipeline.learning_settings`): ``off`` does nothing; ``shadow``
 (default) computes and stores everything but journals every change with ``applied=False`` and the
 analysis path never reads it; ``apply`` journals real changes. Switching to ``apply`` is a human
-decision after reviewing the shadow journal.
+decision after reviewing the shadow journal. The state stored while in ``shadow`` would become
+effective the moment the mode flips, so :func:`promote_shadow_state` journals it as applied
+changes first (decision #23): ``/ozgarishlar`` then lists, and can undo, everything that acts.
 
 Failure modes. The job claims a ledger key per week, so a second call in the same week is a
 no-op and a crash lets the lease expire and the next call retry. All writes are one transaction:
@@ -84,6 +86,9 @@ logger = get_logger(__name__)
 
 JOB: Final = "learning"
 SUBJECT: Final = "weekly"
+MODE_JOB: Final = "learning.mode"
+"""Ledger stamps ``shadow`` / ``apply``: when the job last ran in that mode."""
+KIND_PROMOTED: Final = "shadow_promoted"
 REFRESH_GROWTH: Final = 1.25
 """An active calibration is replaced only by a fit on this many times more samples."""
 
@@ -133,6 +138,8 @@ async def run_learning(ctx: PipelineContext) -> LearningReport:
         logger.info("learning_skipped", reason="mode_off")
         return LearningReport(skipped=True)
     now = ctx.clock()
+    if mode is LearningMode.APPLY:
+        await promote_shadow_state(ctx)
     key = LedgerKey(JOB, week_start(now), SYSTEM_USER, SUBJECT)
     if not await ctx.ledger.claim(key, now=now):
         logger.info("learning_skipped", reason="already_done_this_week")
@@ -144,6 +151,7 @@ async def run_learning(ctx: PipelineContext) -> LearningReport:
         raise
     detail = f"signals={report.signals} segments={report.segments} changes={len(report.changes)}"
     await ctx.ledger.complete(key, now=now, detail=detail)
+    await ctx.ledger.stamp(MODE_JOB, mode.value, now=now)
     logger.info(
         "learning_done",
         job=JOB,
@@ -152,6 +160,72 @@ async def run_learning(ctx: PipelineContext) -> LearningReport:
         changes=len(report.changes),
     )
     return report
+
+
+async def promote_shadow_state(ctx: PipelineContext) -> int:
+    """Journal the state stored while in ``shadow`` as applied changes (decision #23).
+
+    Runs when the mode is ``apply`` and the job last ran in ``shadow`` (or never in ``apply``):
+    every restricted segment and the active calibration become journal entries with
+    ``applied=True`` (before: the neutral state), so the switch is visible and reversible.
+    Idempotent: the ``apply`` stamp follows the writes, so a second call finds nothing to do (a
+    crash in between repeats the entries, which stay individually undoable).
+
+    Returns how many entries were written.
+    """
+    now = ctx.clock()
+    applied_at = await ctx.ledger.stamped_at(MODE_JOB, LearningMode.APPLY.value)
+    shadow_at = await ctx.ledger.stamped_at(MODE_JOB, LearningMode.SHADOW.value)
+    if applied_at is not None and (shadow_at is None or shadow_at <= applied_at):
+        return 0
+    async with ctx.sessions.begin() as session:
+        written = await _promote_segments(session, now) + await _promote_calibration(session, now)
+    await ctx.ledger.stamp(MODE_JOB, LearningMode.APPLY.value, now=now)
+    logger.info("learning_shadow_promoted", job=JOB, entries=written)
+    return written
+
+
+async def _promote_segments(session: AsyncSession, now: datetime) -> int:
+    count = 0
+    for row in await list_segment_rows(session):
+        state = _state_of(row)
+        if state is SegmentState.ACTIVE:
+            continue
+        ref = _segment_ref(row)
+        await add_learning_change(
+            session,
+            kind=KIND_SEGMENT_DISABLED if state is SegmentState.DISABLED else KIND_SEGMENT_RAISED,
+            subject=f"{row.league_ref}|{row.market.value}|{row.odds_bucket}",
+            before=_snapshot(None, ref),
+            after={**_snapshot(row, ref), "evidence": {"n": row.n, "reason": KIND_PROMOTED}},
+            reason=KIND_PROMOTED,
+            now=now,
+            applied=True,
+        )
+        count += 1
+    return count
+
+
+async def _promote_calibration(session: AsyncSession, now: datetime) -> int:
+    active = await active_calibration(session)
+    if active is None:
+        return 0
+    await add_learning_change(
+        session,
+        kind=KIND_CALIBRATION_ACTIVATED,
+        subject=f"calibration:{active.version}",
+        before={"version": None},
+        after={
+            "version": active.version,
+            "n_samples": active.n_samples,
+            "brier_before": active.brier_before,
+            "brier_after": active.brier_after,
+        },
+        reason=KIND_PROMOTED,
+        now=now,
+        applied=True,
+    )
+    return 1
 
 
 async def _learn(ctx: PipelineContext, now: datetime, *, applied: bool) -> LearningReport:
@@ -442,11 +516,6 @@ class RollbackResult(StrEnum):
     NOT_UNDOABLE = "not_undoable"
     STALE = "stale"
     """The state has moved on since this entry; undoing it would wipe newer state."""
-
-
-async def rollback_learning_change(ctx: PipelineContext, change_id: int) -> bool:
-    """:func:`rollback_change` reduced to "was it undone"."""
-    return await rollback_change(ctx, change_id) is RollbackResult.ROLLED_BACK
 
 
 async def rollback_change(ctx: PipelineContext, change_id: int) -> RollbackResult:

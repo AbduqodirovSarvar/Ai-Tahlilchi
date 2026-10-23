@@ -35,7 +35,8 @@ from app.pipeline.learning import (
     KIND_CALIBRATION_ACTIVATED,
     KIND_SEGMENT_DISABLED,
     LearningReport,
-    rollback_learning_change,
+    RollbackResult,
+    rollback_change,
     run_learning,
     week_start,
 )
@@ -79,6 +80,10 @@ def context(
         learning=DbLearningSource(sessions),
         learning_settings=LearningSettings(mode=LearningMode.APPLY),
     )
+
+
+async def _undone(ctx: PipelineContext, change_id: int) -> bool:
+    return await rollback_change(ctx, change_id) is RollbackResult.ROLLED_BACK
 
 
 async def seed_fixtures(session: AsyncSession, count: int, league: str = "E0") -> list[int]:
@@ -567,8 +572,8 @@ async def test_a_calibration_activation_can_be_rolled_back_once(
     report = await activate_calibration(sessions, ctx, clock)
     (change,) = [c for c in report.changes if c.kind == KIND_CALIBRATION_ACTIVATED]
 
-    assert await rollback_learning_change(ctx, change.id)
-    assert not await rollback_learning_change(ctx, change.id)  # already undone
+    assert await _undone(ctx, change.id)
+    assert not await _undone(ctx, change.id)  # already undone
 
     async with sessions() as session:
         assert await active_calibration(session) is None
@@ -587,7 +592,7 @@ async def test_a_segment_rollback_restores_it_and_holds_it(
     await run_learning(ctx)
     (change,) = (await next_week(ctx, clock)).changes
 
-    assert await rollback_learning_change(ctx, change.id)
+    assert await _undone(ctx, change.id)
     restored = (await list_segment_rows_of(sessions))[0]
     assert restored.enabled
     assert restored.hold_until == clock.now + DEFAULT_MANUAL_HOLD
@@ -609,7 +614,7 @@ async def test_rollback_of_unknown_or_non_undoable_entries(
     clock = Clock(last + timedelta(days=1))
     ctx = context(sessions, ledger, clock)
     await activate_calibration(sessions, ctx, clock)
-    assert not await rollback_learning_change(ctx, 9999)
+    assert not await _undone(ctx, 9999)
     async with sessions() as session:
         journal = await list_learning_changes(session)
     assert len(journal) >= 1
