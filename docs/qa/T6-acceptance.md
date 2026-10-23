@@ -207,6 +207,8 @@ Qayta takrorlash: `python -m uv run --no-config pytest tests/e2e/test_t6_*.py te
 
 ## 7. Topilmalar
 
+> **Holat (T6 fix C, 2026-10-23, [ADR 0019](../adr/0019-t6-fix-round-c.md)):** F-1…F-8 tuzatildi, tegishli strict xfail'lar olib tashlandi va oddiy regressiya testlariga aylandi. F-4: aniq bir marta 77% (145/188) dan 88.5% (170/192) ga, qolgan chegaralar har biri bitta xabar takrori (95% ga erishilmadi, sababi ADR 0019 §2). F-3: `get_bet` fix A da, ro'yxat/eksport N+1 si fix C da. Quyida topilmalarning asl matni (tuzatishdan oldingi holat) saqlangan.
+
 ### 🟠 T6-F-1. Bitta rad etilgan karta kunlik xabarning qolgan kartalarini yutib yuboradi
 - **Joy:** `src/app/bot/notifier.py:198-201` (`_daily`: `if await self._send(...) is None: break`), qaytariladigan havola — sarlavha xabarniki.
 - **Ssenariy:** Telegram 12 ta xabarni ketma-ket qabul qilishi kerak (sarlavha + kun sarlavhasi + 10 karta). Biror kartani Telegram rad etsa (400, yoki ikkinchi urinishda ham 429), tsikl to'xtaydi; xabar "yetkazildi" deb hisoblanadi (ledger kaliti `done`), qayta urinish ham, admin ogohlantirishi ham yo'q (faqat `notify_rejected` ogohlantirish logi). Natija: shu kunning qolgan kartalari (2-karta rad etilsa 8 ta) foydalanuvchiga **hech qachon** yetmaydi, sarlavhada esa "10 ta signal" deyiladi.

@@ -34,7 +34,7 @@ Qisqa buyruqlar (`bin/dc` = loyiha sozlamalari bilan `docker compose`):
 
 ## 2. Server tanlash va xarajat
 
-- **Tavsiya:** 2 vCPU / 2 GB RAM / 20+ GB SSD, Yevropa (API'larga yaqin), Ubuntu 24.04. Hetzner CX22 va o'xshashlari ≈ $4–6/oy. Bot bo'sh turganda ≈ 200 MB ishlatadi, SQLite yillar davomida 1 GB dan kichik.
+- **Tavsiya:** 2 vCPU / 2 GB RAM / 20+ GB SSD, Yevropa (API'larga yaqin), Ubuntu 24.04. Hetzner CX22 va o'xshashlari ≈ $4–6/oy. Bot bo'sh turganda ≈ 200 MB ishlatadi. Baza hajmi (**taxmin, paper trading davomida o'lchang**: `bin/dc exec bot python -m app.ops.healthcheck` baza/WAL hajmini beradi): fix A dan oldin barcha bukmekerlarni saqlash ≈ 7 GB/yil edi; endi faqat 2 bukmeker (Pinnacle va 1xBet) ≈ 3 MB/kun, haftalik `retention` bilan barqaror holat ≈ 0.3 GB va keyin ≈ 0.2 GB/yil. `INGEST_EXTRA_BOOKMAKERS` bilan qo'shilgan har bir kontor buni oshiradi.
 - 1 GB RAM ham ishlaydi (bootstrap 1 GB swap yaratadi; konteyner chegarasi 768 MB), lekin backtest/import ni (7-bo'lim) ko'proq xotira talab qiladi.
 - Oylik: VPS $4–6 + API-Football (bepul 100 so'rov/kun; joriy mavsum uchun pullik ≈ $19/oy bo'lishi mumkin: F0 probe natijasiga qarang) + Gemini bepul tarif ($0). Jami: $4–6 (bepul API) yoki ≈ $25 (pullik ma'lumot bilan). healthchecks.io bepul tarifi yetarli.
 
@@ -107,8 +107,8 @@ Workflow: image → GHCR → serverga fayllar → `remote-deploy.sh`. Birinchi d
 2. `nano /opt/ai-tahlilchi/.env`: kalitlarni yozing. **Hali** `APP_SERVICES=real` qilmang.
 3. F0 probe (7-bo'lim): API reja nimani berishini tekshiring va `.env` ga `HANDICAP_CONVENTION=home_line` yoki `own_line` ni probe natijasiga qarab **aniq** yozing. Bu birinchi haqiqiy koeffitsientdan **oldin** bo'lishi shart va keyin **hech qachon o'zgartirilmaydi** (saqlangan chiziqlarni qayta o'qib bo'lmaydi). `APP_SERVICES=real` bu o'zgaruvchi `.env`/muhitda aniq berilmaguncha ishga tushmaydi (chiqish kodi `2`, xabar `HANDICAP_CONVENTION is not set`). Probe natijasi standart `home_line` ni tasdiqlasa ham, `HANDICAP_CONVENTION=home_line` ni o'zingiz yozing: bu tasdiq.
 4. `APP_SERVICES=real` ga o'zgartiring, `bin/dc up -d --no-build bot` (yangi muhit bilan qayta yaratiladi; `restart` yetmaydi).
-5. Loglarda `services_backend ... backend=real`, `scheduler_started jobs=[...]` (8 ta job: `settle`, `refresh`, `daily-tick`, `template-tick`, `recalc-tick`, `learning`, `feedback`, `lessons`; ro'yxat `app.scheduler.JOB_NAMES` da). Healthcheck endi rejalashtiruvchi tirikligini ham tekshiradi.
-6. Botda `/holat`: API limitlari va oxirgi ishlar ko'rinadi. Birinchi `refresh` 08:30 (Toshkent) da yoki qo'lda: `bin/dc exec bot python -m app.pipeline.refresh`.
+5. Loglarda `services_backend ... backend=real`, `scheduler_started jobs=[...]` (9 ta job: `settle`, `refresh`, `daily-tick`, `template-tick`, `recalc-tick`, `learning`, `feedback`, `lessons`, `retention`; ro'yxat `app.scheduler.JOB_NAMES` da; `retention` har yakshanba 04:00 (Toshkent) da 90 kundan eski oraliq narx suratlarini o'chiradi va `/holat` da ko'rinadi). Healthcheck endi rejalashtiruvchi tirikligini ham tekshiradi.
+6. Botda `/holat`: ishlayotgan versiya (`Versiya: ...`), API limitlari va oxirgi ishlar ko'rinadi. Birinchi `refresh` 08:30 (Toshkent) da yoki qo'lda: `bin/dc exec bot python -m app.pipeline.refresh`.
 
 ### 4.1 O'rganish halqasi rejimi (`LEARNING_MODE`)
 
@@ -233,6 +233,8 @@ Foydali maydonlar: `event`, `level`, `job`, `fixture_id`, `user_id`. Loglarda ka
 | Deploy workflow qizil, "did not become healthy" | yangi versiya sog'lom emas, rollback bajarildi | Actions logida server chiqishi; `cat deploy.env` oldingi image'ni ko'rsatadi; xatoni tuzatib yangi teg qo'ying |
 | `permission denied` docker'da | `deploy` foydalanuvchisi `docker` guruhida emas | `sudo usermod -aG docker deploy`, qayta kiring |
 | `ClientConnectorCertificateError` / `CERTIFICATE_VERIFY_FAILED` (Telegram, API-Football, Gemini) | TLS ni ushlab qoluvchi korporativ proksi o'z CA si bilan qayta imzolaydi (odatda lokal/ofis mashinasida; oddiy VPS da bo'lmaydi) | Pastdagi 11.1 bo'limi |
+| `startup_failed ... unexpected content from api.telegram.org (not JSON)` (**kod 2**) | tarmoq yoki firewall Telegram o'rniga HTML sahifa qaytaryapti (korporativ filtr, captive portal) | **Telegram is unreachable:** `curl -sS https://api.telegram.org/bot<TOKEN>/getMe` (token o'rniga o'zingiznikini, natijani hech kimga yubormang) JSON qaytarmasa, bu mashinadan Telegram'ga yo'l yopiq: serverda yoki boshqa tarmoqda ishga tushiring (VPS da bunday bo'lmaydi). Logda javobning faqat birinchi 300 belgisi chiqadi |
+| Kunlik xabar kelmadi, `/holat` da `daily` xato, admin ogohlantirishi "digest ... gave up" | Telegram ~6 soatdan uzoq ishlamadi (qayta urinishlar 1,2,4,8,15,30,60,120,120 daqiqada) yoki foydalanuvchi botni bloklagan | Signallar baribir saqlangan: botda "⚡ Bugungi signallar". Telegram qaytgach ertasi kuni xabar odatdagidek keladi. Bitta karta rad etilsa (logda `notify_card_rejected` va signal id), qolganlari baribir yuboriladi |
 | Botga hech kim javob olmayapti, container healthy | polling/tarmoq (api.telegram.org) | `bin/dc logs`, `curl -sS https://api.telegram.org`, `bin/dc restart bot` |
 
 ### 11.1 Korporativ proksi ortida (lokal mashina)
