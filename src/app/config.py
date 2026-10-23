@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator
+from pydantic import Field, HttpUrl, SecretStr, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.errors import ConfigurationError
@@ -25,6 +25,8 @@ type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 type SecretName = Literal[
     "telegram_bot_token", "api_football_key", "odds_api_key", "gemini_api_key"
 ]
+
+_HTTP_URL: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
 
 
 class Settings(BaseSettings):
@@ -69,7 +71,8 @@ class Settings(BaseSettings):
     learning_mode: LearningModeName = "shadow"
     # Days the loop leaves a segment or the calibration alone after a person rolled a change back.
     learning_manual_hold_days: int = Field(default=30, ge=0, le=365)
-    healthchecks_url: HttpUrl | None = None
+    # The ping URL's path is the credential of the check, so it is a secret (never logged).
+    healthchecks_url: SecretStr | None = None
     # Outbound HTTPS behind a TLS-intercepting corporate proxy (src/app/tls.py): either trust the
     # OS certificate store, or a PEM file with the proxy's CA. Both unset = library defaults.
     tls_ca_bundle: Path | None = None
@@ -80,6 +83,18 @@ class Settings(BaseSettings):
     def _normalise_log_level(cls, value: object) -> object:
         """Accept ``info`` as well as ``INFO``."""
         return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("healthchecks_url")
+    @classmethod
+    def _check_healthchecks_url(cls, value: SecretStr | None) -> SecretStr | None:
+        """Reject a malformed URL at startup without echoing it (it is a credential)."""
+        if value is not None:
+            try:
+                _HTTP_URL.validate_python(value.get_secret_value())
+            except ValidationError:
+                msg = "must be an http(s) URL such as https://hc-ping.com/<uuid>"
+                raise ValueError(msg) from None
+        return value
 
     @field_validator("admin_ids", mode="before")
     @classmethod

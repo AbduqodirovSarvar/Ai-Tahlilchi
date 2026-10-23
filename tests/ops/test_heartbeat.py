@@ -1,9 +1,13 @@
 """Heartbeat client: pings the right URL, retries briefly, never raises, never logs the URL."""
 
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import ClassVar
+
 import httpx
 import pytest
 import respx
-from pydantic import HttpUrl
+from pydantic import SecretStr
 
 from app.config import Settings
 from app.logging import configure_logging
@@ -83,13 +87,73 @@ async def test_the_secret_url_never_reaches_the_logs(capsys: pytest.CaptureFixtu
 
 
 @respx.mock
-async def test_long_detail_is_truncated() -> None:
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "x" * 5000,
+        "settle: OperationalError: no such table: bets /data/app.db",
+        "line one\nline two",
+        "päss",
+    ],
+)
+async def test_free_form_or_long_detail_is_withheld(detail: str) -> None:
     route = respx.post(URL).respond(200)
-    await heartbeat().ping(detail="x" * 5000)
-    assert len(route.calls.last.request.content) == 1000
+    await heartbeat().ping(detail=detail)
+    assert route.calls.last.request.content == b"detail_withheld"
+
+
+@respx.mock
+async def test_short_codes_are_sent_as_they_are() -> None:
+    route = respx.post(URL + "/fail").respond(200)
+    await heartbeat().ping(PingKind.FAIL, "refresh: ApiError")
+    assert route.calls.last.request.content == b"refresh: ApiError"
 
 
 def test_from_settings_uses_healthchecks_url() -> None:
-    enabled = Settings(_env_file=None, healthchecks_url=HttpUrl(URL))  # type: ignore[call-arg]
+    enabled = Settings(_env_file=None, healthchecks_url=SecretStr(URL))  # type: ignore[call-arg]
     assert Heartbeat.from_settings(enabled).enabled is True
     assert Heartbeat.from_settings(Settings(_env_file=None)).enabled is False  # type: ignore[call-arg]
+
+
+class _Recorder(BaseHTTPRequestHandler):
+    seen: ClassVar[list[str]] = []
+
+    def do_POST(self) -> None:
+        self.seen.append(self.path)
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature
+        """Keep the test server silent."""
+
+
+async def test_a_real_ping_never_logs_the_url_path_in_prod_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The httpx INFO line `HTTP Request: POST <url>` would leak the check's credential."""
+    secret_path = "/aaaa1111-bbbb-2222-cccc-333333333333"
+    server = HTTPServer(("127.0.0.1", 0), _Recorder)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}{secret_path}"
+    try:
+        settings = Settings(_env_file=None, healthchecks_url=SecretStr(url))  # type: ignore[call-arg]
+        configure_logging(level="DEBUG", app_env="prod", secret_values=settings.secret_values())
+        assert await Heartbeat.from_settings(settings).ping(PingKind.SUCCESS, "settle ok") is True
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+        configure_logging(level="INFO", app_env="dev")
+
+    output = capsys.readouterr().out
+    assert _Recorder.seen == [secret_path]
+    assert "heartbeat_sent" in output
+    assert "aaaa1111" not in output
+
+
+def test_the_ping_url_is_a_secret_value() -> None:
+    settings = Settings(_env_file=None, healthchecks_url=SecretStr(URL))  # type: ignore[call-arg]
+    assert URL in settings.secret_values()
+    assert URL not in repr(settings)

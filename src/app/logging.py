@@ -28,6 +28,11 @@ REDACTED: Final = "***"
 # (bot tokens, API keys) are far longer.
 MIN_SCRUBBED_SECRET_LENGTH: Final = 8
 
+# Libraries that log full request URLs at INFO (httpx: `HTTP Request: POST https://...`); a URL can
+# carry a credential (healthchecks.io ping path, Telegram bot token), so they stay at WARNING
+# whatever the application level is. Application code logs the outcome of its calls itself.
+QUIET_LIBRARY_LOGGERS: Final = ("httpx", "httpcore", "urllib3", "google_genai", "aiohttp.client")
+
 _SENSITIVE_KEYS: Final = frozenset(
     {"token", "secret", "password", "api_key", "apikey", "authorization"}
 )
@@ -143,6 +148,8 @@ def configure_logging(
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level)
+    for name in QUIET_LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(max(logging.WARNING, root.level))
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:

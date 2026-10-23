@@ -175,7 +175,7 @@ class PipelineJobs:
             logger.exception("heartbeat_status_unreadable", job=name)
             return
         if recorded is not None and not recorded.ok:
-            await self._ping(name, PingKind.FAIL, f"{name}: {recorded.detail or 'failed'}")
+            await self._ping(name, PingKind.FAIL, f"{name}: failed")
         else:
             await self._ping(name, PingKind.SUCCESS, f"{name} ok")
 
