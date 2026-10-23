@@ -16,6 +16,7 @@ match that was called off or abandoned voids it (settlement), a played one settl
 
 from collections.abc import Collection
 from datetime import datetime
+from typing import Final
 
 from sqlalchemy import ColumnElement, func, inspect, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,8 @@ from app.db.schema import (
 from app.domain import FixtureStatus
 from app.errors import DataError
 
+ID_CHUNK: Final = 500
+"""Ids per `IN (...)` query: far below SQLite's variable limit."""
 _VERSION_ATTEMPTS = 3
 _RESOLVED_FIXTURES = (FixtureStatus.FINISHED, FixtureStatus.CANCELLED, FixtureStatus.ABANDONED)
 """Fixture states in which a cancelled signal can still get a result (played or voided)."""
@@ -234,6 +237,18 @@ async def get_signal(
         conditions.append(SignalRow.user_id == user_id)
     records = await _load(session, *conditions)
     return records[0] if records else None
+
+
+async def get_signals_by_ids(
+    session: AsyncSession, signal_ids: Collection[int]
+) -> dict[int, SignalRecord]:
+    """Signals by id, 3 queries per :data:`ID_CHUNK` ids (lists of bets, exports)."""
+    ids = sorted(set(signal_ids))
+    found: dict[int, SignalRecord] = {}
+    for start in range(0, len(ids), ID_CHUNK):
+        records = await _load(session, SignalRow.id.in_(ids[start : start + ID_CHUNK]))
+        found.update((record.id, record) for record in records)
+    return found
 
 
 async def list_user_signals(  # noqa: PLR0913 - explicit filters instead of a query object

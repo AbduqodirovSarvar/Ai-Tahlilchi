@@ -1,4 +1,4 @@
-"""T6 findings pinned as strict xfails: each XPASSes (and fails the suite) when it is fixed.
+"""T6 findings, pinned as tests when found (strict xfails) and kept as regression tests once fixed.
 
 Deterministic on purpose: query counts, not wall-clock time.
 """
@@ -59,22 +59,12 @@ async def statements_for_get_bet(w: Week, bets: int) -> int:
     return counter.count
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T6 finding (performance): RealBetService.get_bet loads EVERY bet of the user and "
-    "then one signal per bet (N+1: src/app/services/real/signals.py _bets/get_bet), so opening "
-    "one bet costs O(bets) queries: ~3.6 ms per bet, 3.6 s at a thousand bets",
-)
 async def test_opening_one_bet_costs_a_constant_number_of_queries(week: Week) -> None:
     few = await statements_for_get_bet(week, 5)
     many = await statements_for_get_bet(week, 60)
     assert many <= few + 2, (few, many)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T6 finding (performance): the CSV bets export has the same N+1 (a get_signal per bet)",
-)
 async def test_the_bets_export_costs_a_constant_number_of_queries(week: Week) -> None:
     await add_bets(week, 5)
     counter = Counter(week.env.engine)
@@ -91,12 +81,6 @@ async def test_the_findings_fixture_is_alive(week: Week) -> None:
     assert placed.stake == Decimal(10)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T6 finding (hardening): aiogram's FSM middleware runs BEFORE the whitelist, so every "
-    "distinct stranger leaves a lock in SimpleEventIsolation._locks for the life of the process "
-    "(src/app/bot/dispatcher.py build_dispatcher: whitelist is registered after the FSM one)",
-)
 async def test_strangers_leave_nothing_behind_in_the_process(week: Week) -> None:
     from tests.e2e.bot_client import Client  # noqa: PLC0415
 

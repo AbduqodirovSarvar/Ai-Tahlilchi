@@ -294,13 +294,12 @@ class RealBetService:
     ) -> tuple[BetView, ...]:
         async with self._core.ctx.sessions() as session:
             bets = await data.list_bets(session, user_id, open_only=open_only, limit=limit)
-            views = []
-            for bet in bets:
-                if bet.signal_id is None:
-                    continue
-                record = await data.get_signal(session, bet.signal_id)
-                views.append(self._view(bet, record))
-        return tuple(views)
+            records = await data.get_signals_by_ids(
+                session, [bet.signal_id for bet in bets if bet.signal_id is not None]
+            )
+        return tuple(
+            self._view(bet, records.get(bet.signal_id)) for bet in bets if bet.signal_id is not None
+        )
 
     async def all_bets(self, user_id: int) -> tuple[BetView, ...]:
         """Every bet of the user, newest first (the CSV export; not part of the protocol)."""

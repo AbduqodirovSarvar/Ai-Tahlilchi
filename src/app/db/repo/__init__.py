@@ -80,6 +80,7 @@ from app.db.repo.records import (
 )
 from app.db.repo.signals import (
     get_signal,
+    get_signals_by_ids,
     list_user_signals,
     report_signals,
     set_result_note,
@@ -152,6 +153,7 @@ __all__ = [
     "get_learning_change",
     "get_saved_query",
     "get_signal",
+    "get_signals_by_ids",
     "get_team",
     "get_user",
     "get_user_settings",
