@@ -1,12 +1,17 @@
 """Tests for app.main (no network: Telegram calls and polling are replaced by mocks)."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import Bot, Dispatcher
-from aiogram.exceptions import TelegramNetworkError, TelegramUnauthorizedError
+from aiogram.exceptions import (
+    ClientDecodeError,
+    TelegramNetworkError,
+    TelegramUnauthorizedError,
+)
 from aiogram.methods import GetMe
 from aiogram.types import User
 
@@ -14,9 +19,17 @@ from app import main as main_module
 from app.bot.messaging import FloodControlMiddleware
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
+from app.pipeline.redaction import register_secrets, scrub_text
 from app.services.interfaces import Services
 
 TOKEN = "42:TEST-TOKEN-VALUE"
+
+
+@pytest.fixture(autouse=True)
+def _forget_registered_secrets() -> Iterator[None]:
+    """``main()`` registers process-wide secrets; do not leak them into other tests."""
+    yield
+    register_secrets(())
 
 
 @pytest.fixture
@@ -188,3 +201,65 @@ def test_main_logs_unexpected_errors_with_exit_code_1(
     assert record["event"] == "fatal_error"
     assert "RuntimeError" in json.dumps(record["exception"])
     assert TOKEN not in output  # configured secrets are scrubbed from tracebacks too
+
+
+FIREWALL_PAGE = (
+    "<html><head><style>body{color:red}</style></head><body><h1>Access blocked</h1>"
+    + "<p>Policy violation by the corporate firewall</p>" * 800
+    + "</body></html>"
+)
+
+
+async def test_a_firewall_page_instead_of_json_is_a_short_configuration_error(
+    monkeypatch: pytest.MonkeyPatch, start_polling: AsyncMock, session_close: AsyncMock
+) -> None:
+    error = ClientDecodeError("Failed to decode object", ValueError("not json"), FIREWALL_PAGE)
+    monkeypatch.setattr(Bot, "get_me", AsyncMock(side_effect=error))
+
+    with pytest.raises(ConfigurationError, match="blocking Telegram") as caught:
+        await main_module.run_bot(settings())
+
+    message = str(caught.value)
+    assert len(message) < 700  # not the 38 KB page
+    assert "Access blocked" in message
+    assert "<html>" not in message
+    assert "RUNBOOK" in message
+    assert TOKEN not in message
+    session_close.assert_awaited_once()
+    start_polling.assert_not_awaited()
+
+
+def test_main_exits_with_the_configuration_code_and_a_short_line_for_a_firewall_page(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    error = ClientDecodeError("Failed to decode object", ValueError("not json"), FIREWALL_PAGE)
+    monkeypatch.setattr(Bot, "get_me", AsyncMock(side_effect=error))
+    monkeypatch.setattr(main_module, "get_settings", settings)
+
+    assert main_module.main() == main_module.EXIT_CONFIGURATION_ERROR
+
+    output = capsys.readouterr().out
+    assert max(len(line) for line in output.splitlines()) < 1_500
+    assert "Policy violation" in output
+
+
+@pytest.mark.usefixtures("get_me")
+def test_main_registers_the_secrets_for_scrubbing(
+    monkeypatch: pytest.MonkeyPatch, start_polling: AsyncMock
+) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "get_settings",
+        lambda: settings(
+            gemini_api_key="gem-secret-value-12345",
+            healthchecks_url="https://hc-ping.com/very-secret-uuid",
+        ),
+    )
+
+    assert main_module.main() == main_module.EXIT_OK
+
+    text = scrub_text(f"{TOKEN} gem-secret-value-12345 https://hc-ping.com/very-secret-uuid")
+    assert TOKEN not in text
+    assert "gem-secret-value-12345" not in text
+    assert "very-secret-uuid" not in text
+    start_polling.assert_awaited_once()

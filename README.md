@@ -54,6 +54,7 @@ cp .env.example .env         # keyin .env ni to'ldiring
 | `APP_SERVICES` | yo'q | `fake` (standart) yoki `real` (kalitlar tayyor bo'lgach) |
 | `HANDICAP_CONVENTION` | `real` uchun | `home_line` yoki `own_line`: API-Football Osiyo fora chiziqlarini qanday yozishi. **F0 probe natijasiga qarab birinchi haqiqiy koeffitsientdan OLDIN yozing va keyin o'zgartirmang.** `APP_SERVICES=real` bu o'zgaruvchi aniq berilmaguncha ishga tushmaydi (kod `2`); `HANDICAP_CONVENTION=home_line` ni o'zingiz yozish tasdiq hisoblanadi |
 | `STAKING_MODE` | yo'q | `flat` (standart, 1 birlik) yoki `kelly` (bankning chegaralangan chorak Kelly ulushi; bank/unit yo'q foydalanuvchida `flat`) |
+| `INGEST_EXTRA_BOOKMAKERS` | yo'q | vergul bilan ajratilgan qo'shimcha bukmekerlar (masalan `bet365,unibet`); Pinnacle va 1xBet'dan tashqari koeffitsientlari saqlanadigan kontorlar. Standart bo'sh: har bir qo'shimcha kontor baza hajmini oshiradi ([ADR 0018](docs/adr/0018-t6-fix-round-a.md)) |
 | `GEMINI_MODEL` | yo'q | standart `gemini-flash-latest` |
 | `LEARNING_MODE` | yo'q | `off` / `shadow` (standart) / `apply`: haftalik o'rganish halqasi ([RUNBOOK 4.1](RUNBOOK.md), [ADR 0013](docs/adr/0013-learning-loop-math.md)) |
 | `LEARNING_MANUAL_HOLD_DAYS` | yo'q | qo'lda rollbackdan keyin segment/kalibratsiya muzlatiladigan kunlar, standart `30` |

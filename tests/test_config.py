@@ -331,3 +331,19 @@ def test_watchdog_limit_is_validated() -> None:
     assert make_settings().watchdog_stall_minutes == 10.0
     with pytest.raises(ValidationError):
         make_settings(watchdog_stall_minutes=0)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("bet365", frozenset({"bet365"})),
+        (" Bet365 , unibet,,", frozenset({"bet365", "unibet"})),
+        ("", frozenset()),
+    ],
+)
+def test_extra_bookmakers_parsing(raw: str, expected: frozenset[str]) -> None:
+    assert make_settings(ingest_extra_bookmakers=raw).ingest_extra_bookmakers == expected
+
+
+def test_no_extra_bookmakers_by_default() -> None:
+    assert make_settings().ingest_extra_bookmakers == frozenset()

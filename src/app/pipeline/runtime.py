@@ -75,7 +75,10 @@ async def open_runtime(
     settings: Settings, *, clock: Clock = system_clock, config: PipelineConfig | None = None
 ) -> AsyncIterator[Runtime]:
     """Build the context from ``settings`` and release its resources on exit."""
-    config = config or PipelineConfig(staking=StakingMode(settings.staking_mode))
+    config = config or PipelineConfig(
+        staking=StakingMode(settings.staking_mode),
+        extra_bookmakers=settings.ingest_extra_bookmakers,
+    )
     engine = create_engine_from_settings(settings)
     await Ledger.ensure_schema(engine)
     sessions = create_session_factory(engine)

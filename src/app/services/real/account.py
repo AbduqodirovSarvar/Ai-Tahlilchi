@@ -422,9 +422,14 @@ def _llm_quota(reviewer: CandidateReviewer) -> LlmQuota | None:
 class RealStatusService:
     """:class:`~app.services.interfaces.SystemStatusService` for ``/holat``."""
 
-    def __init__(self, core: Core) -> None:
-        """Share ``core`` with the other real services."""
+    def __init__(self, core: Core, *, build: str = "") -> None:
+        """Share ``core`` with the other real services; ``build`` labels the running build.
+
+        The label is injected by the composition root (``main.py``) so this layer need not
+        know where version information comes from.
+        """
         self._core = core
+        self._build = build
 
     async def system_status(self) -> SystemStatus:
         """See :meth:`SystemStatusService.system_status`."""
@@ -474,6 +479,7 @@ class RealStatusService:
             llm=_llm_quota(ctx.reviewer),
             learning_mode=mode,
             learning_missed=missed,
+            build=self._build,
         )
 
     async def _stored_quotas(self) -> list[ApiQuota]:

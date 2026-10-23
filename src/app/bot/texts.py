@@ -659,6 +659,7 @@ STATUS_MODE: Final[dict[str, str]] = {
     "fake": "🧪 Rejim: <b>namunaviy ma'lumot</b> (haqiqiy API ulanmagan)",
     "real": "🟢 Rejim: <b>haqiqiy ma'lumot</b>",
 }
+STATUS_BUILD: Final = "🏷 Versiya: <b>{build}</b>"
 STATUS_QUOTA_HEADER: Final = "📡 <b>API limitlari</b> (bugun):"
 STATUS_QUOTA_LINE: Final = (
     "• {provider}{sport}: ishlatilgan {used}/{limit} · qoldi {remaining}\n"

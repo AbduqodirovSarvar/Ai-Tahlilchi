@@ -6,14 +6,18 @@ from typing import Literal
 
 import pytest
 import structlog
+from hypothesis import given
+from hypothesis import strategies as st
 
 from app.logging import (
+    BODY_SUMMARY_LIMIT,
     REDACTED,
     SecretRedactor,
     configure_logging,
     get_logger,
     is_sensitive_key,
     redact_secrets,
+    summarise_body,
 )
 
 
@@ -280,3 +284,27 @@ def test_configured_secrets_are_scrubbed_from_events_and_tracebacks(
     assert "ConnectionError" in output
     assert CONFIGURED_SECRET not in output
     assert output.count(REDACTED) >= 3
+
+
+def test_summarise_body_strips_html_and_truncates() -> None:
+    page = "<html><script>alert(1)</script><style>p{}</style><body><p>Blocked</p>" + "x" * 5_000
+    summary = summarise_body(page)
+
+    assert summary.startswith("Blocked xxx")
+    assert "<" not in summary
+    assert "alert" not in summary
+    assert len(summary) < BODY_SUMMARY_LIMIT + 40
+    assert "(+" in summary
+
+
+def test_summarise_body_keeps_a_short_plain_text_as_it_is() -> None:
+    assert summarise_body("  rate   limited\n") == "rate limited"
+    assert summarise_body(None) == "None"
+
+
+@given(st.text(max_size=2_000))
+def test_summarise_body_is_always_short_and_one_line(body: str) -> None:
+    summary = summarise_body(body)
+
+    assert len(summary) <= BODY_SUMMARY_LIMIT + 40
+    assert "\n" not in summary
