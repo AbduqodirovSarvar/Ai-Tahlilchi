@@ -114,6 +114,7 @@
 - [x] F8.8 `/ozgarishlar` jurnali (kuzatuv/qo'llangan farqi, sahifalash, tasdiqli qaytarish, STALE tushuntirishi), haftalik "model nimani o'rgandi" xabari (`Notifier.send_learning_summary`, scheduler hook), `/holat` da rejim va "hafta yo'qolgan" ogohlantirishi ([ADR 0016](adr/0016-t5-bot-fix-and-f8-ui.md) §9)
 - [ ] To'liq e2e va qabul mezonlarini qayta tekshirish (test-engineer)
 - [ ] Butun kod bazasi sharhi (code-reviewer)
+- [x] TLS ishonch sozlamasi (infra-engineer, 2026-10-23): `TLS_USE_SYSTEM_TRUST_STORE` / `TLS_CA_BUNDLE`, `src/app/tls.py`, aiogram/httpx/Gemini ulanishi, `docker-compose.proxy.yml` ishga tushirishda ham CA ni ulaydi ([ADR 0017](adr/0017-tls-trust-configuration.md))
 - [ ] Production deploy va zaxiradan tiklash sinovi (infra-engineer)
 
 ## F10 — Paper trading

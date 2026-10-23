@@ -6,13 +6,23 @@
 #
 # (PowerShell: $env:CA_BUNDLE_FILE="C:/path/to/ca-bundle.pem"; docker compose -f ... up -d --build)
 #
-# The certificate is passed as a BuildKit secret: it is available only during the build and is
-# never stored in an image layer. Do not commit the certificate file.
+# The same file serves both phases and is never stored in an image layer or committed:
+#   - build: a BuildKit secret, so `uv sync` trusts the proxy while downloading packages;
+#   - run:   a read-only Compose secret mounted at /run/secrets/ca_bundle, which the app trusts
+#            through TLS_CA_BUNDLE (api.telegram.org, API-Football, Gemini, healthchecks.io).
+# Compose mounts a single file (bind mount of a file, works on Docker Desktop for Windows and on
+# Linux); on Windows use forward slashes in CA_BUNDLE_FILE. The bundle must be a PEM file; if
+# it cannot be loaded, the app stops with exit code 2 and says so (RUNBOOK.md, "Korporativ
+# proksi ortida").
 services:
   bot:
     build:
       secrets:
         - ca_bundle
+    secrets:
+      - ca_bundle
+    environment:
+      TLS_CA_BUNDLE: /run/secrets/ca_bundle
 
 secrets:
   ca_bundle:

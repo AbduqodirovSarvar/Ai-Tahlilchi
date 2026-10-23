@@ -209,7 +209,29 @@ Foydali maydonlar: `event`, `level`, `job`, `fixture_id`, `user_id`. Loglarda ka
 | healthchecks.io "late" xabari | job ishlamadi yoki ping ketmadi | `bin/dc logs bot \| grep -E 'job_failed\|heartbeat'`, `/holat`; server ishlayotganini tekshiring |
 | Deploy workflow qizil, "did not become healthy" | yangi versiya sog'lom emas, rollback bajarildi | Actions logida server chiqishi; `cat deploy.env` oldingi image'ni ko'rsatadi; xatoni tuzatib yangi teg qo'ying |
 | `permission denied` docker'da | `deploy` foydalanuvchisi `docker` guruhida emas | `sudo usermod -aG docker deploy`, qayta kiring |
+| `ClientConnectorCertificateError` / `CERTIFICATE_VERIFY_FAILED` (Telegram, API-Football, Gemini) | TLS ni ushlab qoluvchi korporativ proksi o'z CA si bilan qayta imzolaydi (odatda lokal/ofis mashinasida; oddiy VPS da bo'lmaydi) | Pastdagi 11.1 bo'limi |
 | Botga hech kim javob olmayapti, container healthy | polling/tarmoq (api.telegram.org) | `bin/dc logs`, `curl -sS https://api.telegram.org`, `bin/dc restart bot` |
+
+### 11.1 Korporativ proksi ortida (lokal mashina)
+
+Sozlamalar ixtiyoriy va standart o'chiq; sertifikat tekshiruvi hech qachon o'chirilmaydi ([ADR 0017](docs/adr/0017-tls-trust-configuration.md)).
+
+```bash
+# Lokal, Windows korporativ mashina: OS ombori (korporativ CA allaqachon ishonchli)
+#   .env:  TLS_USE_SYSTEM_TRUST_STORE=true
+python -m uv run python -m app.main
+
+# Lokal, PEM fayl bilan:   .env:  TLS_CA_BUNDLE=C:/certs/corp-ca.pem
+
+# Docker: build ham, ishga tushirish ham bitta fayl bilan
+CA_BUNDLE_FILE=C:/certs/corp-ca.pem \
+  docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+```
+- Docker'da fayl `/run/secrets/ca_bundle` ga faqat o'qiladigan qilib ulanadi (bitta faylni ulash Docker Desktop for Windows va Linux'da ishlaydi; yo'lda `/` ishlating) va `TLS_CA_BUNDLE` shunga o'rnatiladi. Fayl repoga yoki image'ga tushmaydi.
+- CA ni eksport qilish: `certmgr.msc` > Trusted Root Certification Authorities > CA > All Tasks > Export > Base-64 X.509 (.CER), keyin `.pem` deb nomlang.
+- Xabar `TLS_CA_BUNDLE ... missing file` yoki `could not be loaded` (kod 2): yo'l/faylni tuzating yoki `TLS_USE_SYSTEM_TRUST_STORE=true` ni sinang.
+- Sertifikat xatosi o'rniga `Application Blocked` / `FortiGate` HTML sahifasi (`ClientDecodeError`) kelsa: TLS ishlayapti, lekin firewall Telegram'ni siyosat bo'yicha bloklaydi. Bu IT yoki boshqa tarmoq masalasi.
+- Serverda (VPS) bu sozlamalar kerak emas.
 
 ## 12. Production'ga o'tishdan oldingi ro'yxat (F10/F11)
 
