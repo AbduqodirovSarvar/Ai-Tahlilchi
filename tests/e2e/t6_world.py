@@ -9,7 +9,8 @@ covered separately with respx); the language model is a scripted ``JsonGenerator
 
 import json
 import re
-from collections.abc import AsyncIterator, Sequence
+import sys
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -28,14 +29,15 @@ from app.bot.middleware import RateLimitMiddleware
 from app.bot.notifier import TelegramNotifier
 from app.bot.storage import SqliteStorage
 from app.clients.gemini import GeminiError, GeminiResponse, GeminiUsage
-from app.db.engine import create_engine, create_session_factory
+from app.db.engine import SQLITE_BUSY_TIMEOUT_MS, create_engine, create_session_factory
 from app.llm.budget import LlmBudget, LlmLimits
 from app.llm.service import LlmService
 from app.pipeline.context import PipelineContext
+from app.pipeline.experience import DbExperience
 from app.pipeline.learning_settings import LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger
 from app.pipeline.overlay import DbLearningSource, NoLearning
-from app.pipeline.review import LlmCandidateReviewer
+from app.pipeline.review import LlmCandidateReviewer, NoReview
 from app.scheduler import JOB_DAILY_TICK, JOB_RECALC_TICK, JOB_TEMPLATE_TICK, PipelineJobs
 from app.services.interfaces import Services, UserSettingsView
 from app.services.real import RealSystem, create_real_services
@@ -52,6 +54,19 @@ ADMINS = frozenset({USER, OTHER})
 CANDIDATE_ID = re.compile(r"\b(\d+:[a-z_0-9]+:[a-z_0-9]+:[-0-9.]+)\b")
 
 
+def emit(line: str) -> None:
+    """Write a measurement line to stdout (quoted in docs/qa/T6-acceptance.md; no print())."""
+    sys.stdout.write(line + "\n")
+
+
+SLEPT: list[float] = []
+
+
+async def instant_sleep(seconds: float) -> None:
+    """Flood-control waits cost no wall time in tests; they are recorded."""
+    SLEPT.append(seconds)
+
+
 class ScriptedGemini:
     """A ``JsonGenerator`` that confirms every candidate it is shown, or fails on demand."""
 
@@ -59,15 +74,20 @@ class ScriptedGemini:
 
     def __init__(self) -> None:
         self.requests = 0
+        self.prompts: list[str] = []  # the data block of every request, for prompt assertions
         self.down = False
         self.verdict = "tasdiq"
+        self.hook: Callable[[str], None] | None = None  # a chaos test's kill switch
 
     async def generate_json(
         self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
     ) -> GeminiResponse:
         """Answer from the candidate ids found in the prompt (the pipeline builds them)."""
         del system_instruction, response_schema
+        if self.hook is not None:
+            self.hook("gemini")
         self.requests += 1
+        self.prompts.append(contents)
         if self.down:
             msg = "Gemini request failed after 3 attempt(s): TimeoutError"
             raise GeminiError(msg)
@@ -157,16 +177,16 @@ class Week:
             replace(current, **changes),  # type: ignore[arg-type]
         )
 
-    async def restart(self) -> "Week":
+    async def restart(self, *, busy_timeout_ms: int = SQLITE_BUSY_TIMEOUT_MS) -> "Week":
         """A new process over the same database files: new engine, context, notifier, dispatcher.
 
         The Telegram session (the chat history), the clock and the scripted provider survive,
         like Telegram and the API do; everything in memory is rebuilt.
         """
-        engine = create_engine(self.tmp / "week.db")
+        engine = create_engine(self.tmp / "week.db", busy_timeout_ms=busy_timeout_ms)
         sessions = create_session_factory(engine)
         ctx = replace(self.ctx, sessions=sessions, ledger=Ledger(sessions))
-        notifier = TelegramNotifier(admin_ids=ADMINS, default_zone=TASHKENT)
+        notifier = TelegramNotifier(admin_ids=ADMINS, default_zone=TASHKENT, sleep=instant_sleep)
         notifier.bind(self.bot)
         system = create_real_services(ctx, notifier=notifier)
         notifier.attach_settings(system.services.settings)
@@ -178,6 +198,7 @@ class Week:
             clock=self.env.clock,
             rate_limit=RateLimitMiddleware(capacity=10_000),
         )
+        dispatcher["backend"] = "real"
         reborn = replace(
             self,
             ctx=ctx,
@@ -220,27 +241,31 @@ async def open_week(  # noqa: PLR0913 - one switch per thing a test may vary
         clock=lambda: clock_box[0]() if clock_box else datetime.now(UTC),
     )
     llm = LlmService(gemini, budget=budget)
-    reviewer = LlmCandidateReviewer(llm) if with_llm else None
     async with open_env(
         template,
         world,
         tmp / "week.db",
         provider_factory=lambda clock: scripted_provider(world, clock),
         reveal_results=False,
-        reviewer=reviewer,
     ) as env:
         clock_box.append(env.clock)
         provider = env.ctx.providers[next(iter(env.ctx.providers))]
         assert isinstance(provider, ScriptedProvider)
         # mirror app.pipeline.runtime: only "apply" lets the learned rules reach the analysis
+        reviewer = (
+            LlmCandidateReviewer(llm, experience=DbExperience(env.sessions, env.clock))
+            if with_llm
+            else NoReview()
+        )
         ctx = replace(
             env.ctx,
+            reviewer=reviewer,
             learning=DbLearningSource(env.sessions)
             if learning_mode is LearningMode.APPLY
             else NoLearning(),
             learning_settings=LearningSettings(mode=learning_mode),
         )
-        notifier = TelegramNotifier(admin_ids=ADMINS, default_zone=TASHKENT)
+        notifier = TelegramNotifier(admin_ids=ADMINS, default_zone=TASHKENT, sleep=instant_sleep)
         notifier.bind(bot)
         system = create_real_services(ctx, notifier=notifier)
         notifier.attach_settings(system.services.settings)
@@ -252,6 +277,7 @@ async def open_week(  # noqa: PLR0913 - one switch per thing a test may vary
             clock=env.clock,
             rate_limit=RateLimitMiddleware(capacity=10_000),
         )
+        dispatcher["backend"] = "real"  # as app.main.run_real does
         week = Week(
             env=env,
             provider=provider,
@@ -312,3 +338,27 @@ def sorted_ids(items: Sequence[Any]) -> list[int]:
 
 
 __all__ = ["ADMINS", "OTHER", "PERMISSIVE", "USER", "Week", "open_week", "timedelta"]
+
+
+async def play(week: Week, *, bets: int = 4) -> list[Any]:
+    """A compact first week: refresh, the digest, ``bets`` bets with own stakes, settlement.
+
+    Returns the placed bets. Enough data to exercise backup, migration and export drills.
+    """
+    from app.scheduler import JOB_REFRESH, JOB_SETTLE  # noqa: PLC0415
+    from app.services.interfaces import BetDraft, DateSpec  # noqa: PLC0415
+
+    await week.settings(USER, **PERMISSIVE)
+    await jobs(week).run(JOB_REFRESH)
+    await tick(week, 30)
+    signals = await week.services.signals.list_signals(USER, DateSpec.next_days(3))
+    placed = [
+        await week.services.bets.place_bet(
+            USER,
+            BetDraft(signal_id=s.signal_id, odds_taken=s.odds, stake=Decimal(10 * (index + 1))),
+        )
+        for index, s in enumerate(signals[:bets])
+    ]
+    at(week, 22, 3, 0)
+    await jobs(week).run(JOB_SETTLE)
+    return placed

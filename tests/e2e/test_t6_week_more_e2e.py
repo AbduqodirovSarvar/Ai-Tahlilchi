@@ -271,3 +271,62 @@ async def test_two_users_stay_isolated_through_the_whole_week(week: Week) -> Non
     ra = await w.services.reports.report(USER, ReportRequest.all_time())
     rb = await w.services.reports.report(OTHER, ReportRequest.all_time())
     assert (ra.signals, rb.signals) == (len(mine), len(theirs))
+
+
+async def test_two_users_betting_on_the_same_match_settle_to_their_own_money(week: Week) -> None:
+    from tests.e2e import t6_oracle as oracle  # noqa: PLC0415
+    from tests.e2e.test_t6_week_e2e import fixture_of, score_of  # noqa: PLC0415
+
+    w = week
+    await w.settings(USER, **PERMISSIVE)
+    await w.settings(OTHER, **{**PERMISSIVE, "bank": Decimal(5000), "unit": Decimal(100)})
+    await jobs(w).run(JOB_REFRESH)
+    await tick(w, 30)
+    mine = {
+        (s.home_team, s.market, s.selection): s
+        for s in await w.services.signals.list_signals(USER, DateSpec.next_days(3))
+    }
+    theirs = {
+        (s.home_team, s.market, s.selection): s
+        for s in await w.services.signals.list_signals(OTHER, DateSpec.next_days(3))
+    }
+    assert mine.keys() == theirs.keys()  # the same picks, owned separately
+    expected = {USER: Decimal(0), OTHER: Decimal(0)}
+    for index, key in enumerate(sorted(mine, key=str)[:5]):
+        for user, signals, stake, bonus in (
+            (USER, mine, Decimal(10 + index), 0.0),
+            (OTHER, theirs, Decimal(100 * (index + 1)), 0.10),
+        ):
+            signal = signals[key]
+            taken = round(signal.odds + bonus, 2)
+            await w.services.bets.place_bet(
+                user, BetDraft(signal_id=signal.signal_id, odds_taken=taken, stake=stake)
+            )
+            fixture = fixture_of(w, signal)
+            parts = oracle.legs(signal.market, signal.selection, *score_of(w, fixture.ref))
+            expected[user] += oracle.money(stake, parts, taken)
+    at(w, 22, 3, 0)
+    await jobs(w).run(JOB_SETTLE)
+    for user, start in ((USER, Decimal(1000)), (OTHER, Decimal(5000))):
+        bank = await w.services.bets.bank_summary(user)
+        assert bank.balance is not None
+        assert abs(bank.balance - (start + expected[user])) <= Decimal("0.05"), user
+        assert bank.totals.settled == 5
+        assert bank.open_bets == 0
+    assert expected[USER] != expected[OTHER]
+
+
+async def test_the_status_screen_after_a_working_week_lists_the_jobs_and_no_errors(
+    week: Week,
+) -> None:
+    w = week
+    await w.settings(USER, **PERMISSIVE)
+    await jobs(w).run(JOB_REFRESH)
+    await tick(w, 30)
+    at(w, 22, 3, 0)
+    await jobs(w).run(JOB_SETTLE)
+    reply = await w.client(USER).send("/holat")
+    text = "\n".join(m.text for m in reply if isinstance(m, SendMessage))
+    assert texts.STATUS_TITLE in text
+    assert "haqiqiy ma'lumot" in text  # real mode, not the sample data
+    assert not any(secret in text for secret in ("42:TEST", "api_key", "API_FOOTBALL"))
