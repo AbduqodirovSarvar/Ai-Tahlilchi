@@ -81,7 +81,7 @@ fi
 
 # Second, independent check of the finished file: gzip stream complete and database intact.
 # shellcheck disable=SC2086
-if ! $TOOL_CMD verify --input - < "$partial"; then
+if ! $TOOL_CMD verify --work-dir "$(dirname "$DB_PATH")" --input - < "$partial"; then
     die "the finished backup does not verify"
 fi
 

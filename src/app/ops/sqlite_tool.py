@@ -39,6 +39,8 @@ EXIT_USAGE: Final = 2
 STDIO: Final = "-"
 GZIP_MAGIC: Final = b"\x1f\x8b"
 SAFETY_DIR_NAME: Final = "pre-restore"
+SAFETY_COPIES_KEPT: Final = 5
+"""Before-restore copies kept; older ones are deleted so repeated restores cannot fill the disk."""
 CHUNK_BYTES: Final = 1024 * 1024
 LOCK_WAIT_SECONDS: Final = 30.0
 
@@ -79,7 +81,9 @@ def snapshot(source: Path, destination: Path) -> None:
 
 def backup(database: Path, output: BinaryIO) -> None:
     """Stream a verified, gzip-compressed snapshot of ``database`` into ``output``."""
-    with tempfile.TemporaryDirectory(prefix="backup-") as scratch:
+    # Scratch space next to the database (the data volume), never /tmp: in the container /tmp is
+    # a tmpfs that counts against the memory limit, and a database copy there would sit in RAM.
+    with tempfile.TemporaryDirectory(prefix=".backup-", dir=database.parent) as scratch:
         copy = Path(scratch) / "snapshot.db"
         snapshot(database, copy)
         check_integrity(copy)
@@ -127,9 +131,15 @@ class _Prefixed:
         return self._source.read(size)
 
 
-def verify(source: BinaryIO) -> str:
-    """Check a backup (gzip or plain) and describe it: ``ok`` plus the Alembic revision."""
-    with tempfile.TemporaryDirectory(prefix="verify-") as scratch:
+def verify(source: BinaryIO, work_dir: Path | None = None) -> str:
+    """Check a backup (gzip or plain) and describe it: ``ok`` plus the Alembic revision.
+
+    ``work_dir`` should be on the data volume (see :func:`backup`); the default is the system
+    temp directory, which suits tests and hosts with a disk-backed ``/tmp``.
+    """
+    if work_dir is not None:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".verify-", dir=work_dir) as scratch:
         copy = Path(scratch) / "backup.db"
         unpack(source, copy)
         check_integrity(copy)
@@ -159,6 +169,7 @@ def restore(database: Path, source: BinaryIO, safety_dir: Path | None = None) ->
         unpack(source, staged)
         check_integrity(staged)
         safety = _safety_copy(database, safety_dir)
+        _prune_safety_copies(safety_dir, keep=SAFETY_COPIES_KEPT)
         for suffix in ("-wal", "-shm"):
             database.with_name(database.name + suffix).unlink(missing_ok=True)
         staged.replace(database)
@@ -182,6 +193,13 @@ def _safety_copy(database: Path, safety_dir: Path) -> Path | None:
     return target
 
 
+def _prune_safety_copies(safety_dir: Path, *, keep: int) -> None:
+    """Delete all but the ``keep`` newest before-restore copies (names sort by timestamp)."""
+    copies = sorted(safety_dir.glob("*-before-restore-*.db"), reverse=True)
+    for stale in copies[keep:]:
+        stale.unlink(missing_ok=True)
+
+
 def _open_input(argument: str) -> BinaryIO:
     return sys.stdin.buffer if argument == STDIO else Path(argument).open("rb")
 
@@ -194,6 +212,9 @@ def _parser() -> argparse.ArgumentParser:
     backup_cmd.add_argument("--output", default=STDIO, help="file path, or - for stdout")
     verify_cmd = commands.add_parser("verify", help="check a backup file (gzip or plain)")
     verify_cmd.add_argument("--input", default=STDIO, help="file path, or - for stdin")
+    verify_cmd.add_argument(
+        "--work-dir", type=Path, default=None, help="scratch directory (default: system temp)"
+    )
     restore_cmd = commands.add_parser("restore", help="replace the database with a backup")
     restore_cmd.add_argument("--db", type=Path, required=True)
     restore_cmd.add_argument("--input", default=STDIO, help="file path, or - for stdin")

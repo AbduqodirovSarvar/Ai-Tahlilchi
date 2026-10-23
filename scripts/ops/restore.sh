@@ -48,7 +48,7 @@ STOP_CMD="${STOP_CMD:-$COMPOSE stop bot}"
 START_CMD="${START_CMD:-$COMPOSE up -d --no-build bot}"
 
 # shellcheck disable=SC2086  # TOOL_CMD is a command line made of several words on purpose
-if ! $TOOL_CMD verify --input - < "$BACKUP_FILE"; then
+if ! $TOOL_CMD verify --work-dir "$(dirname "$DB_PATH")" --input - < "$BACKUP_FILE"; then
     log "ERROR: $BACKUP_FILE does not verify; nothing was changed"
     exit 1
 fi

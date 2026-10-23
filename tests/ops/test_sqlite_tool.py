@@ -5,6 +5,7 @@ import io
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 from contextlib import closing
 from pathlib import Path
@@ -218,3 +219,54 @@ def test_cli_stdout_and_stdin_streams(tmp_path: Path) -> None:
     )
     assert b"restored" in restored.stderr
     assert names(target) == ["n0", "n1", "n2"]
+
+
+@pytest.fixture
+def forbidden_system_tmp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail loudly if a database copy would be placed in the system temp directory (tmpfs)."""
+    original = tempfile.mkdtemp
+
+    def guarded(suffix: str | None = None, prefix: str | None = None, dir: str | None = None) -> str:  # noqa: A002
+        if dir is None:
+            msg = "temporary directory requested without dir=: would land in /tmp"
+            raise AssertionError(msg)
+        return original(suffix, prefix, dir)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", guarded)
+
+
+def test_backup_scratch_space_is_next_to_the_database(
+    tmp_path: Path, forbidden_system_tmp: None
+) -> None:
+    (tmp_path / "data").mkdir()
+    source = make_db(tmp_path / "data" / "app.db")
+    archive = backup_bytes(source)
+    assert archive
+    assert not [p for p in source.parent.iterdir() if p.name.startswith(".backup-")]
+
+
+def test_verify_scratch_space_is_the_given_work_dir(
+    tmp_path: Path, forbidden_system_tmp: None
+) -> None:
+    archive = backup_bytes(make_db(tmp_path / "app.db"))
+    work_dir = tmp_path / "volume" / "scratch"
+    assert "abc123" in verify(io.BytesIO(archive), work_dir)
+    assert not list(work_dir.iterdir())
+
+
+def test_restore_keeps_only_the_newest_safety_copies(tmp_path: Path) -> None:
+    live = make_db(tmp_path / "app.db", rows=1)
+    safety_dir = tmp_path / "pre-restore"
+    safety_dir.mkdir()
+    for day in range(1, 9):
+        (safety_dir / f"app-before-restore-2026010{day}T000000Z.db").write_bytes(b"old")
+    other = safety_dir / "notes.txt"
+    other.write_text("keep me")
+
+    restore(live, io.BytesIO(backup_bytes(make_db(tmp_path / "b.db"))))
+
+    kept = sorted(p.name for p in safety_dir.glob("*-before-restore-*.db"))
+    assert len(kept) == 5
+    assert "app-before-restore-20260101T000000Z.db" not in kept
+    assert "app-before-restore-20260108T000000Z.db" in kept
+    assert other.exists()
