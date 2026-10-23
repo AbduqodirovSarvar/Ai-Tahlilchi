@@ -19,6 +19,7 @@ from app.ops.sqlite_tool import (
     backup_to_file,
     check_integrity,
     main,
+    query,
     restore,
     verify,
 )
@@ -272,3 +273,41 @@ def test_restore_keeps_only_the_newest_safety_copies(tmp_path: Path) -> None:
     assert "app-before-restore-20260101T000000Z.db" not in kept
     assert "app-before-restore-20260108T000000Z.db" in kept
     assert other.exists()
+
+
+def test_query_prints_tsv_and_cannot_write(tmp_path: Path) -> None:
+    source = make_db(tmp_path / "app.db", rows=3)
+    buffer = io.StringIO()
+
+    assert query(source, "SELECT id, name FROM items ORDER BY id", buffer) == 3
+    assert buffer.getvalue().splitlines() == ["id\tname", "1\tn0", "2\tn1", "3\tn2"]
+
+    with pytest.raises(DataError, match="query failed"):
+        query(source, "DELETE FROM items", io.StringIO())
+    with pytest.raises(DataError, match="query failed"):
+        query(source, "SELECT * FROM missing_table", io.StringIO())
+    assert len(names(source)) == 3
+
+
+def test_query_caps_rows_and_reports_a_missing_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = make_db(tmp_path / "app.db", rows=10)
+    monkeypatch.setattr("app.ops.sqlite_tool.QUERY_MAX_ROWS", 4)
+    assert query(source, "SELECT * FROM items", io.StringIO()) == 4
+    with pytest.raises(DataError, match="does not exist"):
+        query(tmp_path / "none.db", "SELECT 1", io.StringIO())
+
+
+def test_cli_query_and_work_dir(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = make_db(tmp_path / "app.db", rows=2)
+    assert main(["query", "--db", str(source), "SELECT count(*) AS n FROM items"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["n", "2"]
+    assert main(["query", "--db", str(source), "DROP TABLE items"]) == 1
+
+    archive = tmp_path / "a.db.gz"
+    assert main(["backup", "--db", str(source), "--output", str(archive)]) == 0
+    scratch = tmp_path / "fresh" / "scratch"
+    assert main(["verify", "--input", str(archive), "--work-dir", str(scratch)]) == 0
+    assert scratch.is_dir()
+    assert not list(scratch.iterdir())

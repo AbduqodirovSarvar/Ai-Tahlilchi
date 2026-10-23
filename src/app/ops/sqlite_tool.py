@@ -15,6 +15,8 @@ Safety properties:
   restored file is checked before it replaces anything, and the replacement is one atomic
   rename; stale ``-wal``/``-shm`` files are removed so they cannot be replayed onto it.
 
+``query`` answers "what is in this table?" without a ``sqlite3`` binary on the host.
+
 Exit codes: 0 success, 1 operation failed, 2 bad usage.
 """
 
@@ -29,7 +31,7 @@ from collections.abc import Sequence
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO, Final
+from typing import BinaryIO, Final, TextIO
 
 from app.errors import DataError
 
@@ -43,6 +45,7 @@ SAFETY_COPIES_KEPT: Final = 5
 """Before-restore copies kept; older ones are deleted so repeated restores cannot fill the disk."""
 CHUNK_BYTES: Final = 1024 * 1024
 LOCK_WAIT_SECONDS: Final = 30.0
+QUERY_MAX_ROWS: Final = 1000
 
 
 def check_integrity(path: Path) -> None:
@@ -200,6 +203,35 @@ def _prune_safety_copies(safety_dir: Path, *, keep: int) -> None:
         stale.unlink(missing_ok=True)
 
 
+def query(database: Path, sql: str, output: TextIO) -> int:
+    """Print the rows of one read-only statement as TSV (header first); returns the row count.
+
+    The ops answer to "what is in the table?" on a server that has no ``sqlite3`` binary. The
+    connection is read-only and ``query_only``, so a typo cannot change data; output is capped
+    at :data:`QUERY_MAX_ROWS` rows so a forgotten ``LIMIT`` cannot flood a terminal.
+    """
+    if not database.is_file():
+        msg = f"database {database} does not exist"
+        raise DataError(msg)
+    try:
+        with closing(
+            sqlite3.connect(
+                f"file:{database.as_posix()}?mode=ro", uri=True, timeout=LOCK_WAIT_SECONDS
+            )
+        ) as db:
+            db.execute("PRAGMA query_only = ON")
+            cursor = db.execute(sql)
+            columns = [column[0] for column in cursor.description or ()]
+            rows = cursor.fetchmany(QUERY_MAX_ROWS)
+    except sqlite3.Error as error:
+        msg = f"query failed: {error}"
+        raise DataError(msg) from error
+    output.write("\t".join(columns) + "\n")
+    for row in rows:
+        output.write("\t".join("" if value is None else str(value) for value in row) + "\n")
+    return len(rows)
+
+
 def _open_input(argument: str) -> BinaryIO:
     return sys.stdin.buffer if argument == STDIO else Path(argument).open("rb")
 
@@ -210,6 +242,9 @@ def _parser() -> argparse.ArgumentParser:
     backup_cmd = commands.add_parser("backup", help="verified gzip snapshot of a live database")
     backup_cmd.add_argument("--db", type=Path, required=True)
     backup_cmd.add_argument("--output", default=STDIO, help="file path, or - for stdout")
+    query_cmd = commands.add_parser("query", help="run one read-only SELECT, print TSV")
+    query_cmd.add_argument("--db", type=Path, required=True)
+    query_cmd.add_argument("sql", help="a single SELECT (or WITH ... SELECT) statement")
     verify_cmd = commands.add_parser("verify", help="check a backup file (gzip or plain)")
     verify_cmd.add_argument("--input", default=STDIO, help="file path, or - for stdin")
     verify_cmd.add_argument(
@@ -229,9 +264,11 @@ def _run(arguments: argparse.Namespace) -> None:
             backup(arguments.db, sys.stdout.buffer)
         else:
             backup_to_file(arguments.db, Path(arguments.output))
+    elif arguments.command == "query":
+        query(arguments.db, arguments.sql, sys.stdout)
     elif arguments.command == "verify":
         with _open_input(arguments.input) as source:
-            sys.stderr.write(verify(source) + "\n")
+            sys.stderr.write(verify(source, arguments.work_dir) + "\n")
     else:
         with _open_input(arguments.input) as source:
             safety = restore(arguments.db, source, arguments.safety_dir)

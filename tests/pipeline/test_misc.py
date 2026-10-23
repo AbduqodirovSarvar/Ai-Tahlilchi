@@ -157,7 +157,13 @@ async def test_main_runs_the_scheduler_beside_the_real_services(
         started.append(True)
 
     monkeypatch.setattr(main_module, "poll", poll)
-    config = settings(tmp_path, app_services="real", telegram_bot_token="42:TEST", admin_ids="1")
+    config = settings(
+        tmp_path,
+        app_services="real",
+        telegram_bot_token="42:TEST",
+        admin_ids="1",
+        handicap_convention="home_line",  # real services refuse to start without an explicit choice
+    )
 
     await main_module.run_bot(config)
 
