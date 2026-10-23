@@ -24,6 +24,7 @@ dependencies = [
     "structlog>=26.1",
     "tenacity>=9.1",
     # zoneinfo has no system tz database on Windows (and minimal containers).
+    "truststore>=0.10.5",
     "tzdata>=2026.5",
 ]
 
@@ -43,6 +44,7 @@ dev = [
     "respx>=0.23",
     "ruff>=0.17",
     "scipy-stubs>=1.18.1.1",
+    "trustme>=1.2.1",
 ]
 
 [build-system]
@@ -239,7 +241,7 @@ type = "forbidden"
 source_modules = ["app.models"]
 forbidden_modules = [
     "app.main", "app.bot", "app.services", "app.pipeline", "app.sports", "app.db", "app.llm",
-    "app.clients", "app.config", "app.logging",
+    "app.clients", "app.config", "app.logging", "app.tls",
     "aiogram", "httpx", "sqlalchemy", "aiosqlite", "apscheduler", "google",
 ]
 allow_indirect_imports = true
@@ -250,6 +252,6 @@ type = "forbidden"
 source_modules = ["app.domain", "app.errors"]
 forbidden_modules = [
     "app.main", "app.bot", "app.services", "app.pipeline", "app.models", "app.sports",
-    "app.db", "app.llm", "app.clients", "app.config", "app.logging",
+    "app.db", "app.llm", "app.clients", "app.config", "app.logging", "app.tls",
 ]
 allow_indirect_imports = true

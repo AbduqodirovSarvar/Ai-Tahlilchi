@@ -36,6 +36,7 @@ from tenacity import (
 from app.config import Settings
 from app.errors import ExternalServiceError
 from app.logging import get_logger
+from app.tls import get_ssl_context
 
 logger = get_logger(__name__)
 
@@ -265,7 +266,20 @@ def create_gemini_client(settings: Settings) -> GeminiClient:
         ConfigurationError: ``GEMINI_API_KEY`` is not set.
     """
     api_key = settings.require_secret("gemini_api_key")
-    return GeminiClient(genai.Client(api_key=api_key), settings.gemini_model)
+    return GeminiClient(
+        genai.Client(api_key=api_key, http_options=_http_options()), settings.gemini_model
+    )
+
+
+def _http_options() -> genai_types.HttpOptions | None:
+    """Pass the configured trust (``app.tls``) to both HTTP stacks the SDK may use."""
+    context = get_ssl_context()
+    if context is None:
+        return None
+    return genai_types.HttpOptions(
+        client_args={"verify": context},
+        async_client_args={"verify": context, "ssl": context},
+    )
 
 
 __all__ = [

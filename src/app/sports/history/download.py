@@ -26,6 +26,7 @@ from tenacity.wait import wait_base
 from app.errors import ExternalServiceError
 from app.logging import get_logger
 from app.sports.history.football_data import season_code
+from app.tls import get_ssl_context
 
 logger = get_logger(__name__)
 
@@ -104,6 +105,7 @@ def create_client() -> httpx.AsyncClient:
         timeout=REQUEST_TIMEOUT_SECONDS,
         headers={"User-Agent": USER_AGENT},
         follow_redirects=True,
+        verify=get_ssl_context() or True,
     )
 
 

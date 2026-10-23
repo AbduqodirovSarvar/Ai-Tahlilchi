@@ -38,6 +38,7 @@ from app.clients.quota import QuotaGuard, RequestPurpose, UsageKey
 from app.clients.rate_limit import Sleep, TokenBucket
 from app.errors import ExternalServiceError
 from app.logging import get_logger
+from app.tls import get_ssl_context
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,7 @@ def create_http_client(config: ProviderConfig, api_key: str) -> httpx.AsyncClien
         base_url=config.base_url,
         headers={config.auth_header: api_key, "accept": "application/json"},
         timeout=config.timeout_seconds,
+        verify=get_ssl_context() or True,
     )
 
 

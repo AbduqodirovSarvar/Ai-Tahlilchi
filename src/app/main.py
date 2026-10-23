@@ -8,10 +8,12 @@ will not help).
 """
 
 import asyncio
+import ssl
 import sys
 from typing import Final
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.utils.token import TokenValidationError
 
@@ -29,6 +31,7 @@ from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
 from app.services.real import create_real_services
+from app.tls import get_ssl_context
 
 # Not `__name__`: under `python -m app.main` that would be "__main__".
 logger = get_logger("app.main")
@@ -38,6 +41,26 @@ EXIT_UNEXPECTED_ERROR: Final = 1
 EXIT_CONFIGURATION_ERROR: Final = 2
 
 
+class TrustedAiohttpSession(AiohttpSession):
+    """aiogram session whose connector verifies against the configured SSL context.
+
+    aiogram exposes no public parameter for this (its connector is built from
+    ``_connector_init`` with a certifi-only context), so the supported extension point is a
+    subclass that replaces that one entry; verification stays on.
+    """
+
+    def __init__(self, ssl_context: ssl.SSLContext) -> None:
+        """Trust ``ssl_context`` instead of the certifi default."""
+        super().__init__()
+        self._connector_init["ssl"] = ssl_context
+
+
+def build_bot_session() -> AiohttpSession | None:
+    """The session for the configured trust, or ``None`` for aiogram's default."""
+    context = get_ssl_context()
+    return None if context is None else TrustedAiohttpSession(context)
+
+
 async def connect_bot(token: str) -> Bot:
     """Create the bot and prove the token is accepted by Telegram before polling.
 
@@ -45,7 +68,7 @@ async def connect_bot(token: str) -> Bot:
         ConfigurationError: the token is malformed or rejected by Telegram.
     """
     try:
-        bot = Bot(token=token)
+        bot = Bot(token=token, session=build_bot_session())
     except TokenValidationError:
         msg = (
             "TELEGRAM_BOT_TOKEN is malformed; expected the '<digits>:<text>' token from @BotFather"
