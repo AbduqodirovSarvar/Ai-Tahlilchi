@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -39,10 +39,13 @@ from app.pipeline.overlay import (
     segment_key,
 )
 from app.pipeline.profile import default_request, load_profile
+from app.pipeline.refresh import refresh
 from app.pipeline.valuation import Candidate, calibrate_candidates
 from tests.domain.factories import make_fixture
 from tests.pipeline.harness import Env
 from tests.pipeline.test_fix_round_money import hand_world, home_signal, push_prices, recalc_home
+from tests.pipeline.test_flows import USER as USER_ID
+from tests.pipeline.test_flows import tune
 
 NOW = datetime(2026, 11, 1, tzinfo=UTC)
 FIXTURE = make_fixture("Arsenal", "Chelsea")
@@ -392,3 +395,60 @@ async def test_a_recalculation_keeps_the_calibration_and_the_raw_probability(
     assert after.p_raw is not None
     assert after.p_model != after.p_raw
     assert after.ev == pytest.approx(after.p_model * after.odds - 1.0, abs=0.2)
+
+
+# ----------------------------------------------------------------------- failure and retro rules
+
+
+@dataclass(frozen=True)
+class BrokenLearning:
+    error: Exception
+
+    async def load(self) -> LearningOverlay:
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [AttributeError("params"), KeyError("x"), RuntimeError("boom")])
+async def test_a_learning_failure_never_stops_the_analysis(
+    seeded_env: Env, error: Exception
+) -> None:
+    _, baseline = await run_with(seeded_env, None)
+    assert baseline
+
+    ctx = replace(seeded_env.ctx, learning=BrokenLearning(error))
+    async with ctx.sessions() as session:
+        profile = await load_profile(session, USER)
+    today = ctx.clock().date()
+    outcome = await AnalysisEngine(ctx).run(
+        default_request(profile, today, today + timedelta(days=2))
+    )
+
+    assert len(outcome.cards) == len(baseline)  # the raw model answered as usual
+
+
+async def test_a_retro_card_never_gets_todays_calibration(provider_env: Env) -> None:
+    await tune(provider_env)
+    await refresh(provider_env.ctx)
+    provider_env.clock.advance(timedelta(hours=6, minutes=30))
+    await refresh(provider_env.ctx, force=True)
+    squeeze = version([0.0, 1.0], [0.05, 0.60])
+    ctx = replace(provider_env.ctx, learning=StaticLearning(LearningOverlay(calibration=squeeze)))
+    async with ctx.sessions() as session:
+        profile = await load_profile(session, USER_ID)
+    request = replace(
+        default_request(profile, date(2026, 10, 21), date(2026, 10, 21)),
+        min_probability=0.30,
+        min_ev=0.0,
+        max_signals=3,
+        fetch=False,
+        skip_retro=False,
+    )
+
+    outcome = await AnalysisEngine(ctx).run(request)
+
+    retro = [c.record for c in outcome.cards if c.record.retro]
+    live = [c.record for c in outcome.cards if not c.record.retro]
+    assert retro
+    assert live
+    assert all(record.p_raw is None for record in retro)  # what the model said back then
+    assert all(record.p_raw is not None for record in live)

@@ -2,6 +2,7 @@
 
 import random
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from itertools import pairwise
 
 import pytest
@@ -10,6 +11,7 @@ from hypothesis import strategies as st
 
 from app.models.segments import (
     DEFAULT_SEGMENT_POLICY,
+    Estimate,
     SegmentAction,
     SegmentKey,
     SegmentObservation,
@@ -19,7 +21,9 @@ from app.models.segments import (
     SegmentStats,
     SegmentStatus,
     compute_segment_stats,
+    fdr_significant,
     odds_bucket,
+    review_segments,
     segment_action,
     shrink,
 )
@@ -29,6 +33,8 @@ KEY = SegmentKey("football", "api-football:39", "totals", "1.80-2.20")
 OTHER = SegmentKey("football", "api-football:140", "1x2", "1.80-2.20")
 FAST = SegmentPolicy(resamples=300)
 FRESH = SegmentStatus()
+CONFIRMED = SegmentStatus(flagged=True)
+"""Last week's run already saw tightening evidence: this week may act on it."""
 
 
 def simulate(  # noqa: PLR0913 - a simulation knob per argument
@@ -153,22 +159,62 @@ def test_block_bootstrap_is_wider_than_naive_for_correlated_days() -> None:
 
 def test_a_real_negative_segment_is_disabled_only_with_enough_signals() -> None:
     rows = simulate(KEY, 120, hit_rate=0.30, clv_mean=-0.08)
-    early = decide(rows[:49])
+    early = decide(rows[:49], CONFIRMED)
     assert early.action is SegmentAction.KEEP
     assert early.reason is SegmentReason.TOO_FEW_SIGNALS
-    assert decide(rows[:50]).action in {SegmentAction.RAISE_THRESHOLD, SegmentAction.DISABLE}
-    full = decide(rows)
+    assert decide(rows[:50], CONFIRMED).action in {
+        SegmentAction.RAISE_THRESHOLD,
+        SegmentAction.DISABLE,
+    }
+    full = decide(rows, CONFIRMED)
     assert full.action is SegmentAction.DISABLE
     assert full.state is SegmentState.DISABLED
     assert full.reason is SegmentReason.SEVERE_NEGATIVE
 
 
-def test_mildly_negative_clv_raises_the_bar_not_disables() -> None:
-    rows = simulate(KEY, 150, hit_rate=0.52, odds=2.0, clv_mean=-0.04, seed=8)
-    decision = decide(rows)
+def test_evidence_must_repeat_on_a_second_run_before_anything_changes() -> None:
+    rows = simulate(KEY, 120, hit_rate=0.30, clv_mean=-0.08)
+    first = decide(rows)  # nothing was flagged before
+    assert first.action is SegmentAction.KEEP
+    assert first.state is SegmentState.ACTIVE
+    assert first.reason is SegmentReason.AWAITING_CONFIRMATION
+    assert first.flagged
+    assert decide(rows, SegmentStatus(flagged=first.flagged)).action is SegmentAction.DISABLE
+
+
+def test_evidence_that_disappears_clears_the_flag() -> None:
+    rows = simulate(KEY, 120, hit_rate=0.55, clv_mean=0.02)
+    decision = decide(rows, CONFIRMED)
+    assert decision.action is SegmentAction.KEEP
+    assert not decision.flagged
+
+
+@cache
+def mildly_negative() -> list[SegmentObservation]:
+    """ROI about -4% at odds 1.5 (hit rate 64%): too small to disable, real enough to raise."""
+    return simulate(KEY, 4000, hit_rate=0.64, odds=1.5, clv_mean=-0.04, seed=8)
+
+
+def test_mildly_negative_roi_with_negative_clv_raises_the_bar_not_disables() -> None:
+    decision = decide(mildly_negative(), CONFIRMED)
     assert decision.action is SegmentAction.RAISE_THRESHOLD
     assert decision.state is SegmentState.RAISED
     assert decision.ev_floor == DEFAULT_SEGMENT_POLICY.raised_ev_floor
+
+
+def test_negative_clv_alone_never_tightens_a_segment() -> None:
+    rows = simulate(KEY, 150, hit_rate=0.52, odds=2.0, clv_mean=-0.04, seed=8)
+    decision = decide(rows, CONFIRMED)
+    assert decision.action is SegmentAction.KEEP
+    assert decision.reason is SegmentReason.NO_SIGNIFICANT_EVIDENCE
+
+
+def test_fdr_veto_blocks_a_segment_whose_interval_alone_would_act() -> None:
+    rows = simulate(KEY, 120, hit_rate=0.30, clv_mean=-0.08)
+    stats = stats_of(rows)
+    blocked = segment_action(stats, FAST, status=CONFIRMED, now=NOW, fdr_ok=False)
+    assert blocked.action is SegmentAction.KEEP
+    assert blocked.reason is SegmentReason.NO_SIGNIFICANT_EVIDENCE
 
 
 def test_a_bad_streak_in_a_good_segment_triggers_nothing() -> None:
@@ -202,10 +248,14 @@ def test_raised_is_held_for_minimum_days_then_recovers() -> None:
     assert decision.state is SegmentState.ACTIVE
 
 
-def test_raised_escalates_to_disabled_even_during_hold() -> None:
+def test_raised_is_judged_after_the_hold_not_during_it() -> None:
     rows = simulate(KEY, 120, hit_rate=0.28, clv_mean=-0.09, seed=12)
-    status = SegmentStatus(SegmentState.RAISED, NOW - timedelta(days=1))
-    assert decide(rows, status).action is SegmentAction.DISABLE
+    during = SegmentStatus(SegmentState.RAISED, NOW - timedelta(days=1), flagged=True)
+    assert decide(rows, during).reason is SegmentReason.HELD
+    after = SegmentStatus(SegmentState.RAISED, NOW - timedelta(days=15), flagged=True)
+    assert decide(rows, after).action is SegmentAction.DISABLE
+    unconfirmed = SegmentStatus(SegmentState.RAISED, NOW - timedelta(days=15))
+    assert decide(rows, unconfirmed).reason is SegmentReason.AWAITING_CONFIRMATION
 
 
 def test_disabled_waits_for_cooldown_then_returns_on_probation() -> None:
@@ -242,18 +292,67 @@ def test_few_signals_keeps_current_state_and_floor() -> None:
 
 def test_no_flip_flop_over_weeks() -> None:
     """Re-running the review on unchanged data every week never oscillates."""
-    rows = simulate(KEY, 150, hit_rate=0.52, clv_mean=-0.04, seed=8)
+    rows = mildly_negative()
     status = SegmentStatus()
     history = []
-    for week in range(8):
+    for week in range(6):
         now = NOW + timedelta(weeks=week)
         decision = segment_action(stats_of(rows), FAST, status=status, now=now)
-        if decision.state is not status.state:
-            status = SegmentStatus(decision.state, now)
+        since = now if decision.state is not status.state else status.since
+        status = SegmentStatus(decision.state, since, flagged=decision.flagged)
         history.append(status.state)
     changes = sum(1 for a, b in pairwise(history) if a is not b)
-    assert changes == 0
-    assert history[0] is SegmentState.RAISED
+    assert history[0] is SegmentState.ACTIVE  # the first run only flags
+    assert history[1] is SegmentState.RAISED  # the second confirms
+    assert changes == 1
+
+
+def test_a_probation_segment_is_judged_only_on_data_since_the_probation_began() -> None:
+    """The pre-probation losses must not decide the verdict of the trial (T5-QA-2)."""
+    history = [SegmentObservation(KEY, -1.0, False, 0.5, block=i, clv=-0.2) for i in range(200)]
+    began = NOW - timedelta(days=15)
+    fresh_block = began.date().toordinal() + 1
+    trial = [SegmentObservation(KEY, 0.0, True, 0.5, block=fresh_block + i) for i in range(5)]
+    status = SegmentStatus(SegmentState.RAISED, began, flagged=True)
+
+    review = review_segments([*history, *trial], {KEY: status}, now=NOW, policy=FAST)
+
+    assert review.stats[KEY].n == 5  # only the trial counts
+    assert review.decisions[KEY].reason is SegmentReason.TOO_FEW_SIGNALS
+    assert review.decisions[KEY].state is SegmentState.RAISED
+
+
+def test_review_keeps_a_fully_filtered_probation_segment_in_the_result() -> None:
+    history = [SegmentObservation(KEY, -1.0, False, 0.5, block=i) for i in range(60)]
+    status = SegmentStatus(SegmentState.RAISED, NOW - timedelta(days=15))
+    review = review_segments(history, {KEY: status}, now=NOW, policy=FAST)
+    assert review.stats[KEY].n == 0
+    assert review.decisions[KEY].state is SegmentState.RAISED
+
+
+def with_p_value(index: int, p_value: float) -> tuple[SegmentKey, SegmentStats]:
+    key = SegmentKey("football", f"L{index}", "1x2", "1.80-2.20")
+    roi = Estimate(n=100, raw=-0.1, shrunk=-0.1, low=-0.2, high=-0.01, p_value=p_value)
+    return key, SegmentStats(key, 100, 100, roi, Estimate(n=0), Estimate(n=0))
+
+
+def test_fdr_guard_matches_the_benjamini_hochberg_textbook_example() -> None:
+    p_values = [0.001, 0.008, 0.039, 0.041, 0.042, 0.06, 0.074, 0.205, 0.212, 0.216]
+    family = dict(with_p_value(i, p) for i, p in enumerate(p_values))
+    flagged = fdr_significant(family, SegmentPolicy(fdr_level=0.05))
+    assert flagged == {SegmentKey("football", f"L{i}", "1x2", "1.80-2.20") for i in (0, 1)}
+
+
+def test_fdr_guard_is_stricter_with_many_segments() -> None:
+    """The same borderline p-value passes alone and fails among many segments."""
+    alone = dict([with_p_value(0, 0.04)])
+    crowd = dict([with_p_value(0, 0.04), *(with_p_value(i, 0.5) for i in range(1, 20))])
+    assert len(fdr_significant(alone)) == 1
+    assert fdr_significant(crowd) == frozenset()
+
+
+def test_fdr_on_nothing_flags_nothing() -> None:
+    assert fdr_significant({}) == frozenset()
 
 
 @settings(max_examples=40, deadline=None)

@@ -56,7 +56,8 @@ async def test_only_one_calibration_is_active_and_none_is_possible(
     db_session: AsyncSession,
 ) -> None:
     await add_calibration_version(db_session, calibration(1, active=True))
-    await add_calibration_version(db_session, calibration(2, gate=False))
+    await add_calibration_version(db_session, calibration(2))
+    await add_calibration_version(db_session, calibration(3, gate=False))
     active = await active_calibration(db_session)
     assert active is not None
     assert active.version == 1
@@ -65,11 +66,27 @@ async def test_only_one_calibration_is_active_and_none_is_possible(
     active = await active_calibration(db_session)
     assert active is not None
     assert active.version == 2
-    assert [v.active for v in await list_calibration_versions(db_session)] == [False, True]
+    assert [v.active for v in await list_calibration_versions(db_session)] == [
+        False,
+        True,
+        False,
+    ]
 
     await set_active_calibration(db_session, None)
     assert await active_calibration(db_session) is None
-    assert [v.passed_gate for v in await list_calibration_versions(db_session)] == [True, False]
+    assert [v.passed_gate for v in await list_calibration_versions(db_session)] == [
+        True,
+        True,
+        False,
+    ]
+
+
+async def test_a_version_that_never_passed_its_gate_is_never_the_active_one(
+    db_session: AsyncSession,
+) -> None:
+    await add_calibration_version(db_session, calibration(1, gate=False))
+    await set_active_calibration(db_session, 1)  # flagged active, but never earned it
+    assert await active_calibration(db_session) is None
 
 
 async def test_segment_rows_upsert_by_their_key(db_session: AsyncSession) -> None:

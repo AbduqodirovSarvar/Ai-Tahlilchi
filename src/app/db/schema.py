@@ -32,6 +32,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     text,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -554,6 +555,8 @@ class SegmentStatRow(Base):
     # review must leave the segment alone after a manual rollback (0008).
     state_since: Mapped[datetime | None]
     hold_until: Mapped[datetime | None]
+    # The weekly review saw tightening evidence last week; it must repeat to act (0009).
+    flagged: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 class CalibrationVersionRow(CreatedAtMixin, Base):
@@ -592,6 +595,8 @@ class LearningChangeRow(CreatedAtMixin, Base):
     after: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     reason: Mapped[str] = mapped_column(Text)
     rolled_back: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # False = a shadow-mode entry: what the loop *would* have changed (0009).
+    applied: Mapped[bool] = mapped_column(default=True, server_default=true())
 
 
 # --------------------------------------------------------------------------- operations

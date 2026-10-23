@@ -96,8 +96,8 @@
 - [x] F7.8 Ekspress tuzuvchi: `/ekspress` va bugungi signallar ostidagi tugma, `ExpressService` (shartnoma v1.6), 34% ogohlantirishi
 - [ ] F8.3 Post-mortem
 - [ ] F8.4 Saboqlar
-- [x] F8.5 `segment_stats` (T5: `models/segments.py`, `pipeline/learning.py`, Alembic 0008, ADR 0013)
-- [x] F8.6 Kalibratsiya (T5: `models/calibration.py`, `pipeline/overlay.py`, ADR 0013)
+- [x] F8.5 `segment_stats` (T5: `models/segments.py`, `pipeline/learning.py`, Alembic 0008, ADR 0013). T5 fix: 99.5% oraliq + BH FDR + ketma-ket 2 run, sinov davri oynasi, `LEARNING_MODE=shadow` standart, Alembic 0009 (ADR 0013 qo'shimchasi)
+- [x] F8.6 Kalibratsiya (T5: `models/calibration.py`, `pipeline/overlay.py`, ADR 0013). T5 fix: 0.995 + ketma-ket 2 run, push bozorlari chiqarilgan, rollback muzlatish va STALE, `passed_gate`, retro xom model
 - [ ] F8.7 Promptga "Tajriba konteksti"
 - [x] F9.1 VPS xavfsizligi: `deploy/bootstrap.sh` (kalit-faqat SSH, ufw, fail2ban, unattended-upgrades, `--dry-run`, shellcheck toza). Serverda bajarish foydalanuvchida ([RUNBOOK 3.2](../RUNBOOK.md))
 - [x] F9.2 Docker va `/opt/ai-tahlilchi`: bootstrap (Docker, papkalar, bo'sh `.env` chmod 600), `restart: unless-stopped` + entrypoint (migratsiya oldin, SIGTERM, exit 2 kechiktirish), `bin/dc`; image Docker'da qurildi va smoke-test qilindi ([ADR 0014](adr/0014-deploy-and-ops.md))
