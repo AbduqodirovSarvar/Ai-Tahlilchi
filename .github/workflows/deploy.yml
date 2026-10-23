@@ -1,8 +1,12 @@
 name: Deploy
 
 # Runs on a version tag (v*) or by hand. Without the server secrets (SSH_HOST, SSH_USER,
-# SSH_KEY) every job is skipped and the workflow still succeeds, so the repository can be
+# SSH_KNOWN_HOSTS) every job is skipped and the workflow still succeeds, so the repository can be
 # used before a server exists. Setup and secrets: RUNBOOK.md ("Deploy").
+#
+# Safety gates, in order: the server is configured -> CI is green for the exact commit being
+# deployed -> the image is built -> a person approves the `production` environment (required
+# reviewers; SSH_KEY lives in that environment) -> the deploy runs with a pinned host key.
 on:
   push:
     tags: ["v*"]
@@ -39,21 +43,68 @@ jobs:
     steps:
       - id: check
         # Secrets are not available in `if:`; test them here. Values are never printed.
+        # SSH_KEY is deliberately not checked here: it lives in the `production` environment,
+        # which only the deploy job (after approval) can read; that job fails clearly without it.
+        # The host key is mandatory: there is no trust-on-first-use fallback.
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
-          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KEY" ]; then
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_USER" ] && [ -n "$SSH_KNOWN_HOSTS" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SSH_HOST, SSH_USER and SSH_KEY are not all set: deploy skipped (see RUNBOOK.md)."
+            echo "::notice::SSH_HOST, SSH_USER and SSH_KNOWN_HOSTS are not all set: deploy skipped (see RUNBOOK.md)."
           fi
+
+  ci:
+    name: CI is green for this commit
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - name: Require the CI checks of the deployed commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          # Names of the jobs in ci.yml (a test pins this list to the workflow).
+          REQUIRED_CHECKS: |
+            Lint, format, types, layers, deps
+            Tests (fast) and coverage
+            Tests (slow)
+            Vulnerabilities and secrets
+            Docker image builds
+        run: |
+          sha="$(git rev-parse HEAD)"
+          runs="$(gh api --paginate "repos/$REPOSITORY/commits/$sha/check-runs?per_page=100" \
+            --jq '.check_runs[] | [.name, .status, (.conclusion // "none"), .started_at] | @tsv')"
+          failed=0
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            # The newest run of that name wins, so a re-run after a flaky failure counts.
+            latest="$(printf '%s\n' "$runs" | awk -F'\t' -v n="$name" '$1 == n' | sort -t$'\t' -k4 | tail -n 1)"
+            conclusion="$(printf '%s' "$latest" | cut -f3)"
+            if [ "$conclusion" = "success" ]; then
+              echo "ok: $name"
+            else
+              echo "::error::CI check '$name' is not green for $sha (${conclusion:-missing}); deploy refused."
+              failed=1
+            fi
+          done <<< "$REQUIRED_CHECKS"
+          exit "$failed"
 
   image:
     name: Build and push image
-    needs: gate
+    needs: [gate, ci]
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -77,8 +128,20 @@ jobs:
           # Registry names must be lower case; tags may not contain "/".
           name="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
           tag="$(printf '%s' "$REF_NAME" | tr '/' '-')"
-          echo "reference=${name}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "sha_reference=${name}:sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          reference="${name}:${tag}"
+          # The reference ends up inside a remote shell command: refuse anything but the
+          # characters a registry reference can contain (a tag name is attacker-influenced).
+          re='^[A-Za-z0-9._:/@-]+$'
+          if [[ ! "$reference" =~ $re ]]; then
+            echo "::error::image reference contains unexpected characters; refusing"
+            exit 1
+          fi
+          {
+            echo "reference=${reference}"
+            echo "sha_reference=${name}:sha-$(git rev-parse --short=12 HEAD)"
+            echo "version=${tag#v}"
+            echo "commit=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
         env:
           ACTOR: ${{ github.actor }}
@@ -92,16 +155,20 @@ jobs:
           tags: |
             ${{ steps.ref.outputs.reference }}
             ${{ steps.ref.outputs.sha_reference }}
+          build-args: |
+            APP_VERSION=${{ steps.ref.outputs.version }}
+            GIT_SHA=${{ steps.ref.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy:
     name: Deploy to the server
-    needs: [gate, image]
+    needs: [gate, ci, image]
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # Add required reviewers to this environment for a manual approval step.
+    # Required reviewers on this environment are the manual approval step, and the SSH_* secrets
+    # belong in it (RUNBOOK.md, "Deploy"): then only an approved run can read the key.
     environment: production
     permissions:
       contents: read
@@ -111,21 +178,37 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
+      - name: Validate inputs
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          IMAGE_REFERENCE: ${{ needs.image.outputs.reference }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          # Runs before any value enters a command string for the remote shell.
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::SSH_KEY is not available to the production environment (RUNBOOK.md, Deploy)."
+            exit 1
+          fi
+          image_re='^[A-Za-z0-9._:/@-]+$'
+          user_re='^[A-Za-z0-9._-]+(\[bot\])?$'
+          if [[ ! "$IMAGE_REFERENCE" =~ $image_re ]]; then
+            echo "::error::IMAGE_REFERENCE has unexpected characters; refusing to deploy."
+            exit 1
+          fi
+          if [[ ! "$GHCR_USER" =~ $user_re ]]; then
+            echo "::error::GHCR_USER has unexpected characters; refusing to deploy."
+            exit 1
+          fi
       - name: Prepare SSH
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
+          # The host key is pinned (mandatory secret); there is no trust-on-first-use fallback.
           umask 077
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          if [ -n "$SSH_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::SSH_KNOWN_HOSTS is not set: trusting the host key on first use. Pin it (RUNBOOK.md)."
-            ssh-keyscan -T 10 -- "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
       - name: Upload deployment files
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -152,7 +235,8 @@ jobs:
           flags=""
           if [ "$SKIP_BACKUP" = "true" ]; then flags="--skip-backup"; fi
           # The registry token travels on stdin, not in the command line or the remote environment.
-          # The remote command is meant to expand on this (client) side.
+          # The remote command is meant to expand on this (client) side; both values were
+          # validated against a strict character set in "Validate inputs".
           # shellcheck disable=SC2029
           printf '%s\n' "$GHCR_TOKEN" | ssh "${opts[@]}" "$SSH_USER@$SSH_HOST" \
             "GHCR_USER='$GHCR_USER' /opt/ai-tahlilchi/bin/remote-deploy.sh $flags '$IMAGE_REFERENCE'"
