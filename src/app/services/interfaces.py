@@ -20,6 +20,7 @@ Conventions:
 import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -1630,6 +1631,8 @@ class SystemStatus:
     learning_mode: LearningMode | None = None
     learning_missed: bool = False
     """True when the weekly learning run is overdue (v1.8): it ran before but not this week."""
+    build: str = ""
+    """The running build, e.g. ``v1.0.0-rc1 (abc1234)`` (v1.10); empty when unknown."""
 
 
 # --------------------------------------------------------------------------- notifications
@@ -1671,6 +1674,40 @@ class DeliveryKey:
     subject: str
 
 
+@dataclass(frozen=True, slots=True)
+class DigestResume:
+    """What an earlier, interrupted delivery of a digest already did (v1.10).
+
+    ``header`` is the reference of the digest's first message when it was sent; ``handled``
+    holds the positions of the later messages (cards) that were sent or permanently rejected
+    by Telegram, so a retry sends only the rest.
+    """
+
+    header: MessageRef | None = None
+    handled: frozenset[int] = frozenset()
+
+
+class DigestProgress(Protocol):
+    """Where a notifier records how far a multi-message digest got (v1.10, T6-F-1/F-4).
+
+    The pipeline implements it over its ledger. A notifier that sends several messages for one
+    digest calls :meth:`header_sent` once and :meth:`part_handled` after each later message, so
+    a crash or a transient failure repeats at most the message in flight, never earlier ones.
+    """
+
+    async def resume(self) -> DigestResume:
+        """The progress stored by earlier attempts."""
+        ...
+
+    async def header_sent(self, header: MessageRef) -> None:
+        """The first message was delivered (stored together with the cards' references)."""
+        ...
+
+    async def part_handled(self, position: int) -> None:
+        """The message at ``position`` was delivered or permanently rejected."""
+        ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DailyDigest:
     """The morning message (plan §4 step 5): today's candidates, preceded by yesterday's tally.
@@ -1686,6 +1723,8 @@ class DailyDigest:
     yesterday: DaySummary | None = None
     template_name: str | None = None
     loss_limit: LossLimitNotice | None = None
+    progress: DigestProgress | None = dataclass_field(default=None, compare=False, repr=False)
+    """v1.10: the pipeline's delivery bookkeeping; a notifier may ignore it."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

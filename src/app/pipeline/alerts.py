@@ -59,15 +59,15 @@ async def fail_key(
     *,
     what: str,
 ) -> Failure:
-    """Record a failed attempt of ``key`` and alert the administrators (throttled, per ``key.job``).
+    """Record a failed attempt of a delivery ``key`` and alert the admins (throttled per job).
 
-    The ledger counts the attempt and sets the backoff; the error is kept for ``/holat``;
-    after the last attempt ``what`` is reported as given up under its own throttle key, so that
-    alert is never swallowed by the milder one of an earlier attempt.
+    The ledger counts the attempt and sets the (long) delivery backoff; the error is kept for
+    ``/holat``; after the last attempt ``what`` is reported as given up under its own throttle
+    key, so that alert is never swallowed by the milder one of an earlier attempt.
     """
     job = key.job
     now = ctx.clock()
-    failure = await ctx.ledger.fail(key, now=now, detail=str(error)[:200])
+    failure = await ctx.ledger.fail(key, now=now, detail=str(error)[:200], delivery=True)
     await ctx.ledger.record_error(job, f"user {key.user_id}: {error}", now=now)
     state = "gave up" if failure.exhausted else "failed"
     await alert_throttled(

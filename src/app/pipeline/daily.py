@@ -28,7 +28,7 @@ from app.pipeline.alerts import alert_throttled, fail_key
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import DailyDelivery, Delivery
-from app.pipeline.digest_store import outcome_for, remember_announcement
+from app.pipeline.digest_store import LedgerDigestProgress, outcome_for, remember_announcement
 from app.pipeline.errors import DeliveryNotConfirmedError
 from app.pipeline.ledger import LedgerKey
 from app.pipeline.limit_notice import LIMIT_DETAIL, announce_loss_limit
@@ -64,9 +64,18 @@ async def run_due_digests(ctx: PipelineContext, delivery: Delivery) -> DigestRep
     held: list[int] = []
     failed: list[int] = []
     for user_id in ids:
-        outcome = await _serve(ctx, delivery, user_id)
+        outcome = await _serve_safely(ctx, delivery, user_id)
         {"sent": sent, "held": held, "failed": failed}.get(outcome, []).append(user_id)
     return DigestReport(tuple(sent), tuple(held), tuple(failed))
+
+
+async def _serve_safely(ctx: PipelineContext, delivery: Delivery, user_id: int) -> str:
+    """:func:`_serve`, but bookkeeping that fails too (a locked database) skips only this user."""
+    try:
+        return await _serve(ctx, delivery, user_id)
+    except Exception as error:  # the next tick retries; the other users must still be served
+        logger.error("daily_user_unrecorded", user_id=user_id, error=repr(error))
+        return "failed"
 
 
 async def _serve(ctx: PipelineContext, delivery: Delivery, user_id: int) -> str:
@@ -116,7 +125,9 @@ async def _send(
     outcome = await outcome_for(
         ctx, key, lambda: AnalysisEngine(ctx).run(default_request(profile, day, day))
     )
-    reference = await delivery.daily(profile.user_id, DailyDelivery(day=day, outcome=outcome), key)
+    progress = LedgerDigestProgress(ctx, key, profile.user_id, outcome)
+    message = DailyDelivery(day=day, outcome=outcome, progress=progress)
+    reference = await delivery.daily(profile.user_id, message, key)
     if reference is None:
         raise DeliveryNotConfirmedError(f"daily digest of user {profile.user_id}")
     await remember_announcement(ctx, profile.user_id, outcome, reference)

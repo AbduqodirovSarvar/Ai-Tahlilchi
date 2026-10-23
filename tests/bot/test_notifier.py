@@ -25,6 +25,8 @@ from app.services.fake import create_fake_services
 from app.services.interfaces import (
     AdminAlert,
     CancelReason,
+    DailyDigest,
+    DigestResume,
     FixtureOption,
     MessageRef,
     SettledNotice,
@@ -135,6 +137,84 @@ async def test_digest_stops_when_the_user_blocks_midway(harness: Harness) -> Non
 
     assert ref == MessageRef(USER, 1)  # the header went out
     assert len(harness.sent) == 2  # the day header failed; no cards were tried after it
+
+
+class MemoryProgress:
+    """A digest progress kept in memory (the pipeline keeps it in the ledger)."""
+
+    def __init__(self, header: MessageRef | None = None, handled: frozenset[int] = frozenset()):
+        self.header = header
+        self.handled = set(handled)
+        self.header_marks = 0
+
+    async def resume(self) -> DigestResume:
+        return DigestResume(self.header, frozenset(self.handled))
+
+    async def header_sent(self, header: MessageRef) -> None:
+        self.header = header
+        self.header_marks += 1
+
+    async def part_handled(self, position: int) -> None:
+        self.handled.add(position)
+
+
+def with_progress(digest: DailyDigest, progress: MemoryProgress) -> DailyDigest:
+    return replace(digest, progress=progress)
+
+
+def bad_request() -> TelegramBadRequest:
+    return TelegramBadRequest(METHOD, "Bad Request: can't parse entities")
+
+
+async def test_a_rejected_card_is_skipped_and_marked_handled(harness: Harness) -> None:
+    progress = MemoryProgress()
+    harness.session.script.extend([None, None, bad_request()])  # header, day header, card 1
+    digest = with_progress(make_digest((make_signal(1), make_signal(2))), progress)
+
+    ref = await harness.notifier.send_daily_digest(USER, digest, key=key())
+
+    assert ref == MessageRef(USER, 1)  # delivered: a rejected card is never retried
+    assert len(harness.sent) == 4  # header, day header, rejected card, second card
+    assert progress.header == MessageRef(USER, 1)
+    assert progress.handled == {0, 1, 2}  # positions: day header, card 1 (rejected), card 2
+
+
+@pytest.mark.parametrize("failure", [retry_after(MAX_RETRY_AFTER_SECONDS + 1), "network"])
+async def test_a_card_that_fails_for_now_is_left_out_of_the_progress(
+    harness: Harness, failure: object
+) -> None:
+    error = failure if isinstance(failure, Exception) else TelegramNetworkError(METHOD, "timeout")
+    harness.session.script.extend([None, None, error])  # type: ignore[list-item]
+    progress = MemoryProgress()
+    digest = with_progress(make_digest((make_signal(1), make_signal(2))), progress)
+
+    ref = await harness.notifier.send_daily_digest(USER, digest, key=key())
+
+    assert ref is None  # "not delivered": the pipeline retries later
+    assert len(harness.sent) == 4  # the second card was still tried
+    assert progress.handled == {0, 2}  # the failed card (position 1) is missing
+    assert progress.header == MessageRef(USER, 1)
+
+
+async def test_a_retry_sends_only_what_the_progress_says_is_missing(harness: Harness) -> None:
+    progress = MemoryProgress(header=MessageRef(USER, 77), handled=frozenset({0, 2}))
+    digest = with_progress(make_digest((make_signal(1), make_signal(2))), progress)
+
+    ref = await harness.notifier.send_daily_digest(USER, digest, key=key())
+
+    assert ref == MessageRef(USER, 77)  # the stored header reference, nothing re-sent for it
+    assert [m.text.splitlines()[0] for m in harness.sent] == [
+        "⚽ <b>Arsenal — Chelsea</b>   🕒 20:00  🏆 Premier League"
+    ]
+    assert progress.handled == {0, 1, 2}
+    assert progress.header_marks == 0
+
+
+async def test_a_digest_without_progress_behaves_as_before(harness: Harness) -> None:
+    ref = await harness.notifier.send_daily_digest(USER, make_digest((make_signal(1),)), key=key())
+
+    assert ref == MessageRef(USER, 1)
+    assert len(harness.sent) == 3
 
 
 # --------------------------------------------------------------------------- updates

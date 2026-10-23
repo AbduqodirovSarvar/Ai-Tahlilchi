@@ -16,7 +16,7 @@ from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.config import StakingMode
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import DailyDelivery, Delivery, NullDelivery
-from app.pipeline.ledger import MAX_ATTEMPTS, LedgerKey, backoff
+from app.pipeline.ledger import DELIVERY_MAX_ATTEMPTS, LedgerKey, backoff
 from app.pipeline.refresh import EXIT_CONFIGURATION, refresh
 from app.pipeline.review import LlmCandidateReviewer
 from app.pipeline.runtime import open_runtime
@@ -238,18 +238,22 @@ async def test_a_digest_gives_up_after_the_attempt_limit_and_alerts_once(
 ) -> None:
     await tune(provider_env)
     delivery = ScriptedDelivery()
-    delivery.daily_script = [ConnectionError("down")] * (MAX_ATTEMPTS + 3)
+    delivery.daily_script = [ConnectionError("down")] * (DELIVERY_MAX_ATTEMPTS + 3)
 
-    for attempt in range(1, MAX_ATTEMPTS + 3):
+    for attempt in range(1, DELIVERY_MAX_ATTEMPTS + 3):
         await run_due_digests(provider_env.ctx, delivery)
-        provider_env.clock.advance(backoff(attempt))  # just past each backoff
+        provider_env.clock.advance(backoff(attempt, delivery=True))  # just past each backoff
 
-    assert len(delivery.daily_calls) == MAX_ATTEMPTS  # then it stopped trying
-    # the failures share one throttled alert; giving up has its own, never swallowed
-    assert [component for component, _ in delivery.alerts] == ["daily", "daily"]
-    assert "gave up" in delivery.alerts[-1][1]
+    assert len(delivery.daily_calls) == DELIVERY_MAX_ATTEMPTS  # then it stopped trying
+    # the failures are alerted at most once per throttle window (they spread over six hours,
+    # so a few alerts, not one per attempt); giving up has its own, never swallowed
+    assert {component for component, _ in delivery.alerts} == {"daily"}
+    assert len(delivery.alerts) < DELIVERY_MAX_ATTEMPTS
+    assert [message for _, message in delivery.alerts if "gave up" in message] == [
+        delivery.alerts[-1][1]
+    ]
     errors = await provider_env.ctx.ledger.recent_errors()
-    assert len(errors) == MAX_ATTEMPTS
+    assert len(errors) == DELIVERY_MAX_ATTEMPTS
 
 
 async def test_one_broken_profile_does_not_stop_the_other_digests(
@@ -326,3 +330,28 @@ async def test_a_refresh_job_failure_alerts_through_the_throttle(provider_env: E
 
     assert len(delivery.alerts) == 1
     assert [e[1] for e in await provider_env.ctx.ledger.recent_errors()] == [JOB_REFRESH] * 3
+
+
+async def test_extra_bookmakers_come_from_the_settings(tmp_path: Path) -> None:
+    extra = Settings(  # type: ignore[call-arg]
+        _env_file=None, db_path=tmp_path / "a.db", ingest_extra_bookmakers="bet365,unibet"
+    )
+    plain = Settings(_env_file=None, db_path=tmp_path / "b.db")  # type: ignore[call-arg]
+
+    async with open_runtime(extra) as runtime:
+        assert runtime.ctx.config.extra_bookmakers == frozenset({"bet365", "unibet"})
+        assert {"pinnacle", "bet365", "unibet"} <= runtime.ctx.config.ingest_bookmakers
+    async with open_runtime(plain) as runtime:
+        assert runtime.ctx.config.extra_bookmakers == frozenset()
+
+
+async def test_the_status_carries_the_build_label_given_by_the_composition_root(
+    provider_env: Env,
+) -> None:
+    from app.services.real import create_real_services  # noqa: PLC0415
+
+    labelled = create_real_services(provider_env.ctx, build="1.0.0-rc1 (abc123)")
+    plain = create_real_services(provider_env.ctx)
+
+    assert (await labelled.services.status.system_status()).build == "1.0.0-rc1 (abc123)"
+    assert (await plain.services.status.system_status()).build == ""

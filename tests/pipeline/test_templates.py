@@ -9,7 +9,7 @@ import pytest
 
 from app.db.enums import DateMode, QueryScope
 from app.pipeline.analyze import AnalysisEngine
-from app.pipeline.ledger import MAX_ATTEMPTS, LedgerKey, backoff
+from app.pipeline.ledger import DELIVERY_MAX_ATTEMPTS, LedgerKey, backoff
 from app.pipeline.profile import DEFAULT_SETTINGS, UserProfile
 from app.pipeline.provider import AUTOMATIC
 from app.pipeline.templates import (
@@ -458,9 +458,9 @@ async def test_a_template_gives_up_after_the_attempt_limit_and_alerts(seeded_env
     delivery.fail_if = lambda _m: ConnectionError("down")
     await schedule(seeded_env)
 
-    for _ in range(MAX_ATTEMPTS + 2):
+    for attempt in range(1, DELIVERY_MAX_ATTEMPTS + 3):
         await run_templates(seeded_env.ctx, delivery)
-        seeded_env.clock.advance(backoff(MAX_ATTEMPTS))
+        seeded_env.clock.advance(backoff(attempt, delivery=True))
 
     assert delivery.digests == []
     assert any("gave up" in message for _, message in delivery.alerts)

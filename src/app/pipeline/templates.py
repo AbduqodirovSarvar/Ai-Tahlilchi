@@ -34,7 +34,7 @@ from app.pipeline.alerts import fail_key
 from app.pipeline.analyze import AnalysisEngine
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import DailyDelivery, Delivery
-from app.pipeline.digest_store import outcome_for, remember_announcement
+from app.pipeline.digest_store import LedgerDigestProgress, outcome_for, remember_announcement
 from app.pipeline.errors import DeliveryNotConfirmedError
 from app.pipeline.ledger import LedgerKey
 from app.pipeline.limit_notice import LIMIT_DETAIL, announce_loss_limit
@@ -240,7 +240,8 @@ async def _run(
     outcome = await outcome_for(
         ctx, key, lambda: AnalysisEngine(ctx).run(template_request(profile, record.query, window))
     )
-    message = DailyDelivery(day=today, outcome=outcome, label=record.query.name)
+    progress = LedgerDigestProgress(ctx, key, profile.user_id, outcome)
+    message = DailyDelivery(day=today, outcome=outcome, label=record.query.name, progress=progress)
     reference = await delivery.daily(profile.user_id, message, key)
     if reference is None:
         raise DeliveryNotConfirmedError(f"template {record.id} of user {profile.user_id}")
