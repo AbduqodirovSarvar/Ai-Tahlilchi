@@ -119,11 +119,11 @@ def make_overview(**overrides: object) -> DatabaseOverview:
 class WithOverrides:
     """A service that delegates to ``inner`` except for the named async overrides."""
 
-    def __init__(self, inner: object, **overrides: Any) -> None:  # noqa: ANN401
+    def __init__(self, inner: object, **overrides: Any) -> None:
         self._inner = inner
         self._overrides = overrides
 
-    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
+    def __getattr__(self, name: str) -> Any:
         if name in self._overrides:
             return self._overrides[name]
         return getattr(self._inner, name)

@@ -12,7 +12,6 @@ from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot import texts
-from app.bot.call_log_types import CallLogPage, call_log_of
 from app.bot.callbacks import CallsCb
 from app.bot.calls_ui import (
     calls_keyboard,
@@ -28,6 +27,7 @@ from app.bot.draft import StaleDraftError
 from app.bot.flow import FlowContext, FlowContextMiddleware
 from app.bot.messaging import answer_callback, callback_message, edit_html, send_html
 from app.bot.states import BrowseFlow
+from app.services.interfaces import CallLogPage
 
 COMMAND: Final = "sorovlar"
 FILE_ENCODING: Final = "utf-8"
@@ -41,13 +41,13 @@ def _message_of(callback: CallbackQuery) -> Message:
 
 
 async def _stats_screen(flow: FlowContext) -> tuple[str, InlineKeyboardMarkup]:
-    stats = await call_log_of(flow.services).call_stats(flow.user_id, days=1)
+    stats = await flow.services.calls.call_stats(flow.user_id, days=1)
     return format_stats(stats), stats_keyboard()
 
 
 async def _page(flow: FlowContext, filter_code: str, number: int) -> CallLogPage:
     """The page asked for; one past the end (the log shrank) falls back to the last page."""
-    log = call_log_of(flow.services)
+    log = flow.services.calls
     page = await log.list_calls(flow.user_id, request_for(filter_code, number))
     if not page.items and page.total and page.page_count:
         page = await log.list_calls(flow.user_id, request_for(filter_code, page.page_count - 1))
@@ -84,7 +84,7 @@ async def on_list(callback: CallbackQuery, callback_data: CallsCb, flow: FlowCon
 async def on_item(callback: CallbackQuery, callback_data: CallsCb, flow: FlowContext) -> None:
     """One call in full: header, request and response; the keyboard sits under the last part."""
     await answer_callback(callback)
-    detail = await call_log_of(flow.services).get_call(flow.user_id, callback_data.i)
+    detail = await flow.services.calls.get_call(flow.user_id, callback_data.i)
     parts = format_detail(detail, await flow.zone())
     markup = detail_keyboard(detail, callback_data.f, callback_data.p)
     message = _message_of(callback)
@@ -97,7 +97,7 @@ async def on_item(callback: CallbackQuery, callback_data: CallsCb, flow: FlowCon
 async def on_file(callback: CallbackQuery, callback_data: CallsCb, flow: FlowContext) -> None:
     """📄 To'liq matnni fayl sifatida: the whole request and response as a ``.txt`` document."""
     await answer_callback(callback, texts.CALLS_FILE_SENDING)
-    detail = await call_log_of(flow.services).get_call(flow.user_id, callback_data.i)
+    detail = await flow.services.calls.get_call(flow.user_id, callback_data.i)
     content = format_call_file(detail, await flow.zone()).encode(FILE_ENCODING)
     await _message_of(callback).answer_document(
         BufferedInputFile(content, filename=f"call_{detail.call_id}.txt"),

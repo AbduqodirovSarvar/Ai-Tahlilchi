@@ -16,18 +16,18 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot import texts
 from app.bot.browse_ui import size_label
-from app.bot.call_log_types import (
+from app.bot.callbacks import CallsCb
+from app.bot.formatters import escape
+from app.bot.keyboards import markup_of, single_button
+from app.bot.paging import Page, pager_row
+from app.domain import MAX_LOGGED_TEXT, CallOutcome, Provider
+from app.services.interfaces import (
     CallLogDetail,
     CallLogEntry,
     CallLogPage,
     CallLogRequest,
     CallLogStat,
 )
-from app.bot.callbacks import CallsCb
-from app.bot.formatters import escape
-from app.bot.keyboards import markup_of, single_button
-from app.bot.paging import Page, pager_row
-from app.domain import MAX_LOGGED_TEXT, CallOutcome, Provider
 
 CALLS_PAGE_SIZE: Final = 10
 FILTER_ALL: Final = "a"

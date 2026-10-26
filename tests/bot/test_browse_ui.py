@@ -76,7 +76,7 @@ def labels(markup: InlineKeyboardMarkup) -> list[str]:
     return [b.text for row in markup.inline_keyboard for b in row]
 
 
-def fixtures_page(*items: object, total: int | None = None, page: int = 0, pages: int = 1):  # noqa: ANN201
+def fixtures_page(*items: object, total: int | None = None, page: int = 0, pages: int = 1):
     return StoredFixturePage(
         items=tuple(items),  # type: ignore[arg-type]
         page=page,
@@ -190,8 +190,12 @@ def test_league_without_fixtures_has_no_span() -> None:
 # --------------------------------------------------------------------------- teams
 def test_teams_page_query_empty_and_no_match() -> None:
     team = StoredTeam(
-        team_id="tm1", sport=make_stored_league().sport, name="Man <U>", country=None,
-        source="x", fixtures=4,
+        team_id="tm1",
+        sport=make_stored_league().sport,
+        name="Man <U>",
+        country=None,
+        source="x",
+        fixtures=4,
     )
     page = StoredTeamPage(items=(team,), page=0, page_count=1, total=1)
 
@@ -385,11 +389,7 @@ def test_card_without_prices_and_with_truncated_history() -> None:
 def test_card_escapes_provider_text() -> None:
     detail = make_detail(
         fixture=make_stored_fixture(home_team="A<b>", away_team="C&D", league="L<i>", source="s&"),
-        odds=(
-            BookmakerOdds(
-                bookmaker="Bet<365>", quotes=(make_quote(Selection.DRAW, 3.4),)
-            ),
-        ),
+        odds=(BookmakerOdds(bookmaker="Bet<365>", quotes=(make_quote(Selection.DRAW, 3.4),)),),
     )
 
     text = format_fixture_card(detail, TASHKENT)
@@ -444,12 +444,18 @@ def test_card_and_odds_keyboards() -> None:
         texts.BTN_DB_HOME,
     ]
     odds_nav = replace(nav, screen="odds")
-    assert labels(odds_keyboard(page, odds_nav)) == ["1/3", texts.BTN_NEXT_PAGE, texts.BTN_DB_BACK_CARD]
+    assert labels(odds_keyboard(page, odds_nav)) == [
+        "1/3",
+        texts.BTN_NEXT_PAGE,
+        texts.BTN_DB_BACK_CARD,
+    ]
 
 
 def test_odds_history_lists_local_times_and_has_an_empty_state() -> None:
     fixture = make_stored_fixture()
-    page = StoredOddsPage(items=(make_quote(), make_quote(Selection.AWAY, 4.2)), page=0, page_count=1, total=2)
+    page = StoredOddsPage(
+        items=(make_quote(), make_quote(Selection.AWAY, 4.2)), page=0, page_count=1, total=2
+    )
     empty = StoredOddsPage(items=(), page=0, page_count=0, total=0)
 
     text = format_odds_history(page, fixture, TASHKENT)
@@ -492,16 +498,17 @@ def test_apply_action_walks_leagues_to_odds_and_back() -> None:
 
     fixtures = apply_action(leagues, "pick", 0)
     assert (fixtures.screen, fixtures.scope, fixtures.scope_id, fixtures.parent_page) == (
-        SCREEN_FIXTURES, SCOPE_LEAGUE, "lg1", 2,
+        SCREEN_FIXTURES,
+        SCOPE_LEAGUE,
+        "lg1",
+        2,
     )
     card = apply_action(replace(fixtures, ids=("fx9",), labels=("X",)), "pick", 0)
     assert (card.screen, card.fixture_id) == (SCREEN_FIXTURE, "fx9")
     assert apply_action(card, "odds", 0).screen == "odds"
     assert apply_action(apply_action(card, "odds", 0), "back", 0).screen == SCREEN_FIXTURE
     assert apply_action(card, "back", 0).screen == SCREEN_FIXTURES
-    assert apply_action(fixtures, "back", 0) == replace(
-        fixtures, screen=SCREEN_LEAGUES, page=2
-    )
+    assert apply_action(fixtures, "back", 0) == replace(fixtures, screen=SCREEN_LEAGUES, page=2)
 
 
 def test_apply_action_day_calendar_and_unknown_actions() -> None:
@@ -519,7 +526,9 @@ def test_apply_action_day_calendar_and_unknown_actions() -> None:
 
 
 @given(
-    entity_id=st.text(min_size=1, max_size=40).filter(lambda s: s.strip() and len(s.encode()) <= 40),
+    entity_id=st.text(min_size=1, max_size=40).filter(
+        lambda s: s.strip() and len(s.encode()) <= 40
+    ),
     page=st.integers(min_value=0, max_value=10_000),
     day=st.integers(min_value=0, max_value=800_000),
 )
@@ -528,6 +537,12 @@ def test_callback_data_never_depends_on_entity_ids_and_fits_the_limit(
 ) -> None:
     nav = BrowseNav(token=999, screen=SCREEN_FIXTURES, ids=(entity_id,), scope_id=entity_id)
 
-    for action, value in (("pick", 0), ("page", page), ("day", day), ("back", 0), ("month", 202610)):
+    for action, value in (
+        ("pick", 0),
+        ("page", page),
+        ("day", day),
+        ("back", 0),
+        ("month", 202610),
+    ):
         data = nav.button(action, value).pack()
         assert len(data.encode()) <= CALLBACK_LIMIT
