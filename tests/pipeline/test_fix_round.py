@@ -124,7 +124,6 @@ async def test_a_retro_card_of_today_does_not_eat_the_manual_cut(provider_env: E
         min_probability=0.30,
         min_ev=0.0,
         max_signals=3,
-        fetch=False,
     )
 
     without_retro = await engine.run(base)  # what the real picks alone give

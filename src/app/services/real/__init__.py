@@ -18,6 +18,7 @@ from app.services.real.account import (
     RealWatchlistService,
 )
 from app.services.real.analysis import RealAnalysisService
+from app.services.real.browser import RealDataBrowserService
 from app.services.real.core import Core
 from app.services.real.learning import RealLearningService
 from app.services.real.notifier import LogOnlyNotifier, NotifierDelivery
@@ -39,13 +40,18 @@ class RealSystem:
 
 
 def create_real_services(
-    ctx: PipelineContext, notifier: Notifier | None = None, *, build: str = ""
+    ctx: PipelineContext,
+    notifier: Notifier | None = None,
+    *,
+    build: str = "",
+    admin_ids: frozenset[int] | None = None,
 ) -> RealSystem:
     """Wire every real service over ``ctx``; without a ``notifier`` messages are only logged.
 
-    ``build`` is the label of the running build, shown by ``/holat``.
+    ``build`` is the label of the running build, shown by ``/holat``. ``admin_ids`` limits who
+    may refresh the database; ``None`` trusts the bot's whitelist (which is the admin list).
     """
-    core = Core(ctx)
+    core = Core(ctx, admin_ids=admin_ids)
     services = Services(
         analysis=RealAnalysisService(core),
         signals=RealSignalService(core),
@@ -59,5 +65,6 @@ def create_real_services(
         status=RealStatusService(core, build=build),
         express=RealExpressService(core),
         learning=RealLearningService(core),
+        browser=RealDataBrowserService(core),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

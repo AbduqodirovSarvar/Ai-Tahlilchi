@@ -4,6 +4,7 @@ import pytest
 
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
+from tests.services.browser_contract import BrowserContract
 from tests.services.contract_suite import (
     AnalysisContract,
     BetContract,
@@ -101,4 +102,8 @@ class TestExportBets(ExportBetsContract):
 
 
 class TestExpress(ExpressContract):
+    pass
+
+
+class TestBrowser(BrowserContract):
     pass

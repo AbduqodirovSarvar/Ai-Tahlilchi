@@ -243,7 +243,7 @@ async def test_settlement_closes_a_bet_that_slipped_in_after_the_result(tmp_path
 
 # ------------------------------------------------------------------------------ R6: prices
 async def test_a_stale_bookmaker_price_is_skipped_and_counted(tmp_path: Path) -> None:
-    stale = utc(2026, 10, 20, 20)  # ten hours before "now"
+    stale = utc(2026, 10, 19, 20)  # 34 hours before "now": older than max_quote_age (30 h)
     async with hand_world(tmp_path / "stale.db", taken=stale) as bare:
         views = await analyse(bare)
         assert views == {}
@@ -292,7 +292,7 @@ async def test_an_anchor_far_from_the_bet_price_in_time_is_not_used(tmp_path: Pa
 async def test_recalc_without_a_fresh_price_is_no_price_not_valid(tmp_path: Path) -> None:
     async with hand_world(tmp_path / "noprice-recalc.db") as bare:
         record = await home_signal(bare)
-        bare.clock.now += timedelta(hours=7)  # the stored quote is now older than 6 hours
+        bare.clock.now += timedelta(hours=31)  # the stored quote is now older than 30 hours
 
         result = await recalc_home(bare, record)
 

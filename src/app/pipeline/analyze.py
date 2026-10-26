@@ -2,8 +2,8 @@
 
 ``AnalysisEngine.run`` is the whole chain for one user:
 
-1. load the fixtures of the window and keep those in the request's scope;
-2. fetch what is missing from the provider within the budget (``plan`` estimates it first);
+1. check that the database was refreshed recently (a manual request is refused otherwise);
+2. load the fixtures of the window from the database and keep those in the request's scope;
 3. fit the leagues (cached), price every fixture (:mod:`app.pipeline.valuation`) and apply the
    thresholds, caps and watchlist rules (:mod:`app.pipeline.selection`);
 4. have the LLM hook review the recommendations (optional) and store the signals
@@ -13,41 +13,33 @@ Only fixtures that have not kicked off give real signals; finished fixtures give
 signals (what the model would have said, never a recommendation) unless the request asks to
 ``skip_retro`` (the daily digest); in-play and postponed/cancelled fixtures are skipped. One
 bad fixture is logged and counted, never fatal. Fixtures the user's bookmaker has no (fresh)
-price for are counted too (``skipped_no_price`` / ``skipped_stale_price``), and a run whose
-provider data could not be refreshed says so (``data_stale``): "0 signals" is then not the
+price for are counted too (``skipped_no_price`` / ``skipped_stale_price``), and a run on a
+database that was not refreshed lately says so (``data_stale``): "0 signals" is then not the
 same as "nothing to bet on".
+
+The engine never calls the data provider: fixtures, prices and results come from the daily
+refresh (:mod:`app.pipeline.refresh`) and the administrator's manual refresh (ADR 0021).
 """
 
-from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
 
-from app.clients.cost import FetchPlan, estimate_requests
 from app.db.enums import QueryScope
 from app.db.repo import FixtureRecord, league_refs, list_fixtures, team_refs
-from app.domain import ExternalRef, FixtureStatus, OddsKind, OddsSnapshot, Sport
+from app.domain import ExternalRef, FixtureStatus, OddsSnapshot, Sport
 from app.logging import get_logger
 from app.pipeline.context import PipelineContext
-from app.pipeline.errors import BudgetExhaustedError, PipelineError
-from app.pipeline.ingest import (
-    ODDS_COVERAGE,
-    ingest_fixtures,
-    ingest_odds,
-    ingest_results,
-    is_covered,
-    utc_days,
-)
+from app.pipeline.freshness import freshness, require_fresh
 from app.pipeline.modeling import FittedLeague
 from app.pipeline.odds import current_quotes, load_decision_snapshots
 from app.pipeline.overlay import EMPTY_OVERLAY, LearningOverlay, load_overlay
 from app.pipeline.persist import store_picks
-from app.pipeline.provider import MANUAL, QuotaSnapshot
+from app.pipeline.provider import MANUAL
 from app.pipeline.selection import Pick, assemble, picks_for_fixture
 from app.pipeline.types import AnalysisOutcome, AnalysisRequest, DataPlan
 from app.pipeline.valuation import SKIP_NO_PRICE, SKIP_STALE_PRICE, ValuationInput, value_fixture
-from app.sports.football_leagues import seasons_between
 
 logger = get_logger(__name__)
 
@@ -58,7 +50,6 @@ STAGE_COLLECTING: Final = "collecting"
 STAGE_ANALYSING: Final = "analysing"
 STAGE_REVIEWING: Final = "reviewing"
 STAGE_FINISHED: Final = "finished"
-MIN_FIXTURES_FOR_LEAGUE_ODDS: Final = 2
 _NOT_PLAYABLE: Final = frozenset(
     {FixtureStatus.POSTPONED, FixtureStatus.CANCELLED, FixtureStatus.ABANDONED}
 )
@@ -90,32 +81,6 @@ class WindowItem:
 
     record: FixtureRecord
     watched: bool
-
-
-@dataclass(frozen=True, slots=True)
-class DataNeeds:
-    """What a window still needs from the provider."""
-
-    sport: Sport
-    fixture_days: tuple[date, ...] = ()
-    odds_refs: tuple[ExternalRef, ...] = ()
-    odds_days: tuple[date, ...] = ()
-    odds_league_days: int = 0
-    odds_singles: int = 0
-    result_refs: tuple[ExternalRef, ...] = ()
-    fixture_requests: int = 0
-
-    @property
-    def requests(self) -> int:
-        """Provider requests the fetch would spend (an upper bound)."""
-        return estimate_requests(
-            FetchPlan(
-                days=self.fixture_requests,
-                odds_league_days=self.odds_league_days,
-                odds_fixtures=self.odds_singles,
-                fixtures_by_id=len(self.result_refs),
-            )
-        )
 
 
 def classify(record: FixtureRecord, now: datetime) -> str | None:
@@ -157,30 +122,22 @@ class AnalysisEngine:
 
     # ------------------------------------------------------------------ planning
     async def plan(self, request: AnalysisRequest) -> DataPlan:
-        """Fixtures in scope and the provider requests a run would spend (nothing is spent)."""
+        """Fixtures in scope; a run spends no provider requests (nothing is fetched)."""
         now = self._ctx.clock()
         items, _ = await self._collect(request)
-        needs = await self._needs(request, items, now)
+        current = await freshness(self._ctx, request.end)
         return DataPlan(
             fixtures_found=sum(1 for item in items if classify(item.record, now) is not None),
-            api_requests=needs.requests,
-            budget_remaining=(await self._quota(request)).available(request.purpose),
+            api_requests=0,
+            budget_remaining=await self._budget(request),
+            data_stale=current.stale,
+            last_refresh_at=current.last_refresh_at,
         )
 
-    async def _quota(self, request: AnalysisRequest) -> QuotaSnapshot:
+    async def _budget(self, request: AnalysisRequest) -> int:
+        """Provider requests the request's purpose may still spend today (display only)."""
         provider = self._ctx.providers.get(Sport.FOOTBALL)
-        if provider is None:
-            return QuotaSnapshot(
-                provider="none",
-                sport=None,
-                used=0,
-                limit=0,
-                manual_used=0,
-                remaining=0,
-                automatic_available=0,
-            )
-        _ = request
-        return await provider.quota()
+        return 0 if provider is None else (await provider.quota()).available(request.purpose)
 
     # ------------------------------------------------------------------ running
     async def run(
@@ -189,18 +146,16 @@ class AnalysisEngine:
         """The whole chain (see the module docstring).
 
         Raises:
-            BudgetExhaustedError: a manual request needs more than the quota allows.
-            ProviderUnavailableError: a manual request could not fetch what it needs.
+            StaleDataError: a manual request reaches into the future and the database was not
+                refreshed lately.
         """
         ctx = self._ctx
-        used_before = (await self._quota(request)).used
+        if request.purpose is MANUAL:
+            current = await require_fresh(ctx, request.end)
+        else:
+            current = await freshness(ctx, request.end)
         items, _ = await self._collect(request)
         now = ctx.clock()
-        data_stale = False
-        if request.fetch:
-            data_stale = not await self._ensure(request, await self._needs(request, items, now))
-            items, _ = await self._collect(request)
-        used = max((await self._quota(request)).used - used_before, 0)
         analysable = [item for item in items if _analysable(item.record, request, now)]
         await _emit(progress, STAGE_COLLECTING, 0, len(analysable))
         by_fixture, tally = await self._value(request, analysable, now, progress)
@@ -213,11 +168,11 @@ class AnalysisEngine:
             fixtures_analyzed=_real_count(analysable, now),
             matched=stored.matched,
             requested=request.max_signals,
-            api_requests_used=used,
+            api_requests_used=0,
             failed_fixtures=tally.failed,
             skipped_no_price=tally.no_price,
             skipped_stale_price=tally.stale_price,
-            data_stale=data_stale,
+            data_stale=current.stale,
         )
 
     async def _value(
@@ -360,112 +315,6 @@ class AnalysisEngine:
                 return fixture.home.ref in scope.teams or fixture.away.ref in scope.teams
             case QueryScope.FIXTURES:
                 return record.id in request.fixture_ids
-
-    # ------------------------------------------------------------------ provider data
-    async def _needs(
-        self, request: AnalysisRequest, items: Sequence[WindowItem], now: datetime
-    ) -> DataNeeds:
-        ctx = self._ctx
-        provider = ctx.providers.get(Sport.FOOTBALL)
-        if provider is None or not request.fetch or Sport.FOOTBALL not in request.sports:
-            return DataNeeds(sport=Sport.FOOTBALL)
-        source = provider.source
-        days = [day for day in utc_days(request.start, request.end) if day >= now.date()]
-        uncovered = [
-            day
-            for day in days
-            if not await is_covered(
-                ctx, "cover.fixtures", day, ttl=ctx.config.fixtures_ttl, sport=provider.sport
-            )
-        ]
-        seasons = len(seasons_between(request.start.date(), request.end.date()))
-        leagues = len(ctx.leagues.canonical_refs())
-        fixture_requests = min(len(uncovered), leagues * seasons)
-        odds_refs, odds_days = await self._odds_needs(items, now, source)
-        groups: defaultdict[tuple[ExternalRef, date], int] = defaultdict(int)
-        for _, league, day in odds_refs:
-            groups[(league, day)] += 1
-        # Days not fetched yet have no stored fixtures to name: assume one odds request per
-        # league and day (an upper bound).
-        league_days = len(uncovered) * leagues + sum(
-            1 for count in groups.values() if count >= MIN_FIXTURES_FOR_LEAGUE_ODDS
-        )
-        singles = sum(count for count in groups.values() if count < MIN_FIXTURES_FOR_LEAGUE_ODDS)
-        result_refs = tuple(
-            item.record.fixture.ref
-            for item in items
-            if item.record.fixture.ref.source == source
-            and item.record.fixture.status in {FixtureStatus.SCHEDULED, FixtureStatus.LIVE}
-            and item.record.fixture.kickoff + ctx.config.match_duration <= now
-        )
-        return DataNeeds(
-            sport=provider.sport,
-            fixture_days=tuple(uncovered),
-            odds_refs=tuple(ref for ref, _, _ in odds_refs),
-            odds_days=tuple(odds_days),
-            odds_league_days=league_days,
-            odds_singles=singles,
-            result_refs=result_refs,
-            fixture_requests=fixture_requests,
-        )
-
-    async def _odds_needs(
-        self, items: Sequence[WindowItem], now: datetime, source: str
-    ) -> tuple[list[tuple[ExternalRef, ExternalRef, date]], list[date]]:
-        ctx = self._ctx
-        refs: list[tuple[ExternalRef, ExternalRef, date]] = []
-        days: set[date] = set()
-        fresh: dict[date, bool] = {}
-        for item in items:
-            fixture = item.record.fixture
-            if fixture.ref.source != source or classify(item.record, now) != "upcoming":
-                continue
-            day = fixture.kickoff.date()
-            if day not in fresh:
-                fresh[day] = await is_covered(ctx, ODDS_COVERAGE, day, ttl=ctx.config.odds_ttl)
-            if not fresh[day]:
-                refs.append((fixture.ref, fixture.league.ref, day))
-                days.add(day)
-        return refs, sorted(days)
-
-    async def _ensure(self, request: AnalysisRequest, needs: DataNeeds) -> bool:
-        """Fetch what is missing; ``False`` when an automatic run had to go without it."""
-        ctx = self._ctx
-        if needs.requests == 0:
-            return True
-        quota = await ctx.providers[needs.sport].quota()
-        available = quota.available(request.purpose)
-        if needs.requests > available:
-            if request.purpose is MANUAL:
-                raise BudgetExhaustedError(needs.requests, available)
-            logger.warning("analysis_data_skipped", needed=needs.requests, available=available)
-            return False
-        try:
-            await self._fetch(request, needs)
-        except PipelineError:
-            if request.purpose is MANUAL:
-                raise
-            logger.exception("analysis_fetch_failed")
-            return False
-        return True
-
-    async def _fetch(self, request: AnalysisRequest, needs: DataNeeds) -> None:
-        ctx = self._ctx
-        sport, purpose = needs.sport, request.purpose
-        await ingest_results(ctx, sport, needs.result_refs, purpose=purpose)
-        refs, days = list(needs.odds_refs), needs.odds_days
-        if needs.fixture_days:
-            await ingest_fixtures(
-                ctx, sport, min(needs.fixture_days), max(needs.fixture_days), purpose=purpose
-            )
-            # Fixtures just stored may need prices that the plan could not name yet.
-            items, _ = await self._collect(request)
-            fresh, fresh_days = await self._odds_needs(
-                items, ctx.clock(), ctx.providers[sport].source
-            )
-            refs, days = [ref for ref, _, _ in fresh], tuple(fresh_days)
-        kind = OddsKind.RECALC if purpose is MANUAL else OddsKind.MORNING
-        await ingest_odds(ctx, sport, refs, kind=kind, purpose=purpose, days=days)
 
 
 async def _emit(progress: ProgressSink | None, stage: str, done: int, total: int) -> None:

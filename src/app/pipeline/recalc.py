@@ -8,6 +8,9 @@ same chain as a new analysis, store a new ``signal_versions`` entry and judge th
 against the thresholds the signal was *created* with (not today's settings). A postponed,
 cancelled or abandoned match cancels its signals. When the budget is spent nothing is fetched:
 the stored numbers are re-evaluated and ``data_as_of`` says how old they are.
+
+Only the scheduled 24-hour and pre-match updates fetch (``RecalcOptions.fetch``); a recalculation
+the user asked for re-prices from the database alone (ADR 0021).
 """
 
 from collections import defaultdict

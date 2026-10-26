@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from app.domain import Sport, normalize_name
 from app.logging import get_logger
+from app.services._fake_browser import FakeDataBrowserService
 from app.services._fake_learning import FakeLearningService, FakeLearningState
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
@@ -1492,8 +1493,13 @@ class FakeNotifier:
         self._record("alert_admin", None, alert, None)
 
 
-def create_fake_services(*, clock: Clock = system_clock) -> Services:
-    """All fake services over one shared in-memory state."""
+def create_fake_services(
+    *, clock: Clock = system_clock, admin_ids: frozenset[int] | None = None
+) -> Services:
+    """All fake services over one shared in-memory state.
+
+    ``admin_ids`` limits who may refresh the database (``None`` = everyone).
+    """
     state = FakeState(clock)
     bets = FakeBetService(state)
     return Services(
@@ -1509,4 +1515,5 @@ def create_fake_services(*, clock: Clock = system_clock) -> Services:
         status=FakeSystemStatusService(state),
         express=FakeExpressService(state),
         learning=FakeLearningService(state.learning),
+        browser=FakeDataBrowserService(state, admin_ids=admin_ids),
     )

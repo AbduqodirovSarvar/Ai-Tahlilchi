@@ -6,6 +6,7 @@ needs a secret asks for it via :meth:`Settings.require_secret`, which fails with
 :class:`~app.errors.ConfigurationError` only at the moment the component starts.
 """
 
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Final, Literal
@@ -84,6 +85,11 @@ class Settings(BaseSettings):
     # The in-app watchdog restarts the process (exit code 3, Docker restarts it) when the
     # scheduler's tick has not run for this many minutes; the scheduler is stuck or dead.
     watchdog_stall_minutes: float = Field(default=10.0, ge=1.0, le=1440.0)
+    # The daily database refresh (the only scheduled provider fetch; analyses read the database
+    # only, ADR 0021): local wall-clock time in DISPLAY_TZ, and the shortest gap between two
+    # administrator-triggered "Bazani yangilash" runs (protects the daily API quota).
+    refresh_at: time = time(8, 30)
+    manual_refresh_min_minutes: int = Field(default=30, ge=0, le=1440)
     # Outbound HTTPS behind a TLS-intercepting corporate proxy (src/app/tls.py): either trust the
     # OS certificate store, or a PEM file with the proxy's CA. Both unset = library defaults.
     tls_ca_bundle: Path | None = None

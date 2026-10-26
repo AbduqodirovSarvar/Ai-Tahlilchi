@@ -58,6 +58,8 @@ cp .env.example .env         # keyin .env ni to'ldiring
 | `GEMINI_MODEL` | yo'q | standart `gemini-flash-latest` |
 | `LEARNING_MODE` | yo'q | `off` / `shadow` (standart) / `apply`: haftalik o'rganish halqasi ([RUNBOOK 4.1](RUNBOOK.md), [ADR 0013](docs/adr/0013-learning-loop-math.md)) |
 | `LEARNING_MANUAL_HOLD_DAYS` | yo'q | qo'lda rollbackdan keyin segment/kalibratsiya muzlatiladigan kunlar, standart `30` |
+| `REFRESH_AT` | yo'q | kunlik baza yangilanishi vaqti (`DISPLAY_TZ` bo'yicha), standart `08:30`; tahlil faqat bazadan o'qiydi ([ADR 0021](docs/adr/0021-db-only-analysis.md)) |
+| `MANUAL_REFRESH_MIN_MINUTES` | yo'q | adminning "Bazani yangilash" tugmasi ikki bosish orasidagi eng kam masofa (daqiqa), standart `30` |
 | `WATCHDOG_STALL_MINUTES` | yo'q | rejalashtiruvchi `daily-tick` shuncha daqiqa ishlamasa jarayon kod `3` bilan chiqadi va Docker qayta ko'taradi; standart `10` |
 | `APP_VERSION`, `GIT_SHA` | yo'q | image build argumentlari bilan o'rnatiladi (quyida); `app_started` logida chiqadi |
 | `TLS_USE_SYSTEM_TRUST_STORE` (`true`/`false`), `TLS_CA_BUNDLE` (PEM fayl yo'li) | yo'q | korporativ TLS-proksi uchun, standart o'chiq; tekshiruv hech qachon o'chirilmaydi, [bo'lim](#korporativ-proksi-ortida) |

@@ -26,7 +26,6 @@ from app.domain import FixtureStatus, HistoryBatch, Market, OddsKind, Selection,
 from app.pipeline.delivery import NullDelivery
 from app.pipeline.refresh import refresh
 from app.pipeline.settle import run_settlement
-from app.services.errors import BudgetExceededError, ServiceUnavailableError
 from app.services.interfaces import AnalysisQuery, DateSpec, ResultMark
 from app.sports.football_mapping import map_fixture
 from tests.integration.t4_api import LEAGUE_IDS, Api, api_over_respx, record
@@ -77,14 +76,16 @@ async def test_a_daily_refresh_of_ten_leagues_stays_within_forty_requests(tmp_pa
                 page = await list_fixtures(session, start=NOW, end=NOW + timedelta(days=4))
 
     assert summary.ok, summary
-    # 3 day-requests + 1 results request (20 ids) + 10 xG (xg_per_refresh) + 20 league-day odds
-    assert spent == 3 + 1 + 10 + 20
+    # 4 day-requests (the three local days of Tashkent touch four UTC days: ADR 0021) + 1 results
+    # request (20 ids) + 10 xG (xg_per_refresh) + 20 league-day odds
+    assert spent == 4 + 1 + 10 + 20
     assert spent <= REQUEST_BUDGET
-    assert api.wire.count("/fixtures") == 4
+    assert api.wire.count("/fixtures") == 5
     assert api.wire.count("/fixtures/statistics") == 10
     assert api.wire.count("/odds") == 20
-    # 20 results; 60 fixtures; 20 league-days x 2 fixtures x 2 bookmakers x 3 selections
-    assert (summary.fixtures, summary.results, summary.odds) == (60, 20, 240)
+    # 20 results; 80 fixtures (yesterday's 20 are re-listed by the wider fetch); 20 league-days
+    # x 2 fixtures x 2 bookmakers x 3 selections
+    assert (summary.fixtures, summary.results, summary.odds) == (80, 20, 240)
     assert len(page.items) == 60
     # only the automatic budget was used; the user's reserve is whole
     assert status.counts.requests_used == spent
@@ -142,7 +143,7 @@ async def test_busy_leagues_with_paged_odds_can_pass_forty_but_never_the_automat
         status = await api.harness.quota.status()
 
     spent = len(api.wire.seen)
-    assert spent == 3 + 1 + 10 + 20 * 2  # documented finding: the 40 budget assumes one page
+    assert spent == 4 + 1 + 10 + 20 * 2  # documented finding: the 40 budget assumes one page
     assert spent > REQUEST_BUDGET
     assert summary.ok  # still inside the automatic quota (70)
     assert status.counts.requests_used == spent <= int(100 * AUTOMATIC_SHARE)
@@ -153,7 +154,7 @@ async def test_busy_leagues_with_paged_odds_can_pass_forty_but_never_the_automat
 async def test_budget_exhaustion_mid_refresh_keeps_partial_results_and_the_reserve(
     tmp_path: Path,
 ) -> None:
-    async with api_over_respx(NOW, daily_limit=20) as (api, _):  # automatic budget: 14
+    async with api_over_respx(NOW, daily_limit=22) as (api, _):  # automatic budget: 15
         yesterday = fill(api)
         async with open_bare(
             tmp_path / "partial.db",
@@ -173,17 +174,17 @@ async def test_budget_exhaustion_mid_refresh_keeps_partial_results_and_the_reser
 
     assert not summary.ok
     assert summary.skipped == ["odds"]  # a clear list of what was dropped
-    assert (summary.fixtures, summary.results) == (60, 20)  # earlier steps' data is kept
+    assert (summary.fixtures, summary.results) == (80, 20)  # earlier steps' data is kept
     assert len(stored.items) == 60
     assert sum(len(v) for v in prices.values()) == 0  # a step is never half written
     assert status.counts.manual_used == 0
-    assert status.reserve_remaining == int(20 * 0.30)  # the manual reserve is untouched
+    assert status.reserve_remaining == round(22 * 0.30)  # the manual reserve is untouched
     assert not runs["refresh"].ok
     assert "skipped=" in (runs["refresh"].detail or "")
     assert any(job.name == "refresh" and not job.ok for job in system.jobs)
 
 
-async def test_a_manual_analysis_beyond_the_reserve_is_a_clear_error_and_spends_nothing(
+async def test_a_manual_analysis_never_spends_the_reserve_even_when_it_is_tiny(
     tmp_path: Path,
 ) -> None:
     async with api_over_respx(NOW, daily_limit=4) as (api, _):  # reserve = 1 request
@@ -197,17 +198,17 @@ async def test_a_manual_analysis_beyond_the_reserve_is_a_clear_error_and_spends_
             services = bare.system.services
             query = AnalysisQuery(dates=DateSpec.next_days(3), min_probability=0.3, min_ev=0.0)
             estimate = await services.analysis.estimate_cost(1, query)
-            with pytest.raises(BudgetExceededError) as raised:
-                await services.analysis.analyze(1, query)
+            result = await services.analysis.analyze(1, query)
         used = len(api.wire.seen)
 
-    assert not estimate.within_budget
-    assert raised.value.needed > raised.value.available
-    assert used == 0
+    assert estimate.api_requests == 0
+    assert estimate.within_budget
+    assert result.api_requests_used == 0
+    assert used == 0  # an analysis reads the database: the reserve is for the admin refresh
 
 
 # ------------------------------------------------------------------------------ outage
-async def test_a_provider_outage_is_a_service_error_for_a_manual_analysis(tmp_path: Path) -> None:
+async def test_a_provider_outage_does_not_reach_a_manual_analysis(tmp_path: Path) -> None:
     async with api_over_respx(NOW) as (api, _):
         fill(api)
         api.wire.fail_with = 503
@@ -218,11 +219,11 @@ async def test_a_provider_outage_is_a_service_error_for_a_manual_analysis(tmp_pa
             now=NOW,
         ) as bare:
             query = AnalysisQuery(dates=DateSpec.next_days(2), min_probability=0.3, min_ev=0.0)
-            with pytest.raises(ServiceUnavailableError) as raised:
-                await bare.system.services.analysis.analyze(1, query)
+            result = await bare.system.services.analysis.analyze(1, query)
+        used = len(api.wire.seen)
 
-    assert raised.value.component == "api-football"
-    assert "unavailable" in str(raised.value) or raised.value.detail
+    assert result.signals == ()  # nothing stored, nothing asked: the outage is not in the path
+    assert used == 0
 
 
 # ------------------------------------------------------------------------------ the CLI
@@ -340,7 +341,7 @@ async def test_a_refresh_that_lost_its_provider_is_marked_done_for_the_day_and_n
     assert set(broken.skipped) == {"fixtures", "results"}  # no fixtures stored: no odds to ask
     assert retry.already_done  # the provider is back, but the day's refresh is not repeated
     assert forced.ok
-    assert forced.fixtures == 60
+    assert forced.fixtures == 80
 
 
 async def test_the_api_key_never_reaches_the_logs_or_the_ledger(

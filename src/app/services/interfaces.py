@@ -27,7 +27,7 @@ from enum import StrEnum
 from typing import Final, Protocol, Self, runtime_checkable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.domain import Market, MarketType, Selection, Sport
+from app.domain import FixtureStatus, Market, MarketType, OddsKind, Selection, Sport
 from app.services.errors import ValidationFailedError
 
 type SignalId = int
@@ -59,6 +59,8 @@ PRELIMINARY_AFTER: Final = timedelta(days=3)
 """Signals further away are preliminary: lineups/injuries unknown, confidence lowered."""
 RECALC_COOLDOWN: Final = timedelta(minutes=10)
 """Manual recalculation of one fixture is allowed once per this period."""
+MANUAL_REFRESH_MIN_INTERVAL: Final = timedelta(minutes=30)
+"""Default shortest gap between two administrator database refreshes (v1.11; configurable)."""
 MANUAL_RESERVE_SHARE: Final = 0.30
 """Share of the daily provider API limit reserved for manual requests."""
 QUERY_MAX_SIGNALS_UPPER: Final = 100
@@ -655,6 +657,10 @@ class CostEstimate:
     fixtures_found: int
     api_requests: int
     budget_remaining: int
+    data_stale: bool = False
+    """v1.11: the database was not refreshed lately; ``analyze`` would raise ``DataStaleError``."""
+    last_refresh_at: datetime | None = None
+    """v1.11: when the database was last refreshed completely (UTC); ``None`` = never."""
 
     @property
     def within_budget(self) -> bool:
@@ -1635,6 +1641,294 @@ class SystemStatus:
     """The running build, e.g. ``v1.0.0-rc1 (abc1234)`` (v1.10); empty when unknown."""
 
 
+# ----------------------------------------------------------------- database browser (v1.11)
+MAX_STORED_ODDS_IN_DETAIL: Final = 500
+"""Most price snapshots :meth:`DataBrowserService.get_stored_fixture` returns; use
+:meth:`DataBrowserService.list_stored_odds` for the rest."""
+MAX_STORED_TEAM_SEARCH_LENGTH: Final = 64
+
+
+def _check_optional_utc(value: datetime | None, field: str) -> None:
+    """Require ``value`` to be ``None`` or a UTC instant."""
+    if value is not None:
+        _check_utc(value, field)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredTable:
+    """One table of the database: its row count and when its newest row was written.
+
+    ``own``: the count covers only the asking user's rows (signals, bets); the other tables
+    are shared reference and provider data.
+    """
+
+    name: str
+    rows: int
+    last_updated_at: datetime | None = None
+    own: bool = False
+
+    def __post_init__(self) -> None:
+        """Counts are non-negative; instants are UTC."""
+        _check(self.rows >= 0, "rows", "must not be negative")
+        _check_optional_utc(self.last_updated_at, "last_updated_at")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DatabaseOverview:
+    """What the database holds (``/baza``): tables, size and how current the provider data is."""
+
+    tables: tuple[StoredTable, ...]
+    size_bytes: int
+    last_refresh_at: datetime | None
+    earliest_kickoff: datetime | None
+    latest_kickoff: datetime | None
+    upcoming_fixtures: int
+    data_stale: bool = False
+
+    def __post_init__(self) -> None:
+        """Instants are UTC."""
+        _check_optional_utc(self.last_refresh_at, "last_refresh_at")
+        _check_optional_utc(self.earliest_kickoff, "earliest_kickoff")
+        _check_optional_utc(self.latest_kickoff, "latest_kickoff")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredLeague:
+    """A league as stored: how many of its fixtures the database holds and their time span."""
+
+    league_id: EntityId
+    sport: Sport
+    name: str
+    country: str | None
+    source: str
+    fixtures: int
+    upcoming: int
+    first_kickoff: datetime | None
+    last_kickoff: datetime | None
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``; instants are UTC."""
+        _check(is_valid_entity_id(self.league_id), "league_id", "invalid entity id")
+        _check_optional_utc(self.first_kickoff, "first_kickoff")
+        _check_optional_utc(self.last_kickoff, "last_kickoff")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredFixtureRequest:
+    """A filtered, paged look at the fixtures in the database (earliest kick-off first).
+
+    ``date_from``/``date_to`` are inclusive *local* dates in the user's time zone (``None`` =
+    open); filters combine with AND (a team in a league). Unlike analysis windows there is no
+    horizon or look-back limit: everything stored can be browsed.
+    """
+
+    date_from: date | None = None
+    date_to: date | None = None
+    league_ids: frozenset[EntityId] = frozenset()
+    team_ids: frozenset[EntityId] = frozenset()
+    statuses: frozenset[FixtureStatus] = frozenset()
+    with_odds: bool | None = None
+    page: int = 0
+    page_size: int = DEFAULT_PAGE_SIZE
+
+    def __post_init__(self) -> None:
+        """Dates in order, pages bounded by Telegram keyboard limits."""
+        if self.date_from is not None and self.date_to is not None:
+            _check(self.date_from <= self.date_to, "date_to", "must not precede date_from")
+        _check(self.page >= 0, "page", "must not be negative")
+        _check(1 <= self.page_size <= MAX_PAGE_SIZE, "page_size", f"must be 1..{MAX_PAGE_SIZE}")
+        _check_entity_ids(self.league_ids, "league_ids")
+        _check_entity_ids(self.team_ids, "team_ids")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredFixture:
+    """A stored fixture as the database holds it (instants in UTC; the bot localises)."""
+
+    fixture_id: EntityId
+    sport: Sport
+    league_id: EntityId
+    league: str
+    country: str | None
+    home_team: str
+    away_team: str
+    home_team_id: EntityId
+    away_team_id: EntityId
+    kickoff: datetime
+    status: FixtureStatus
+    home_score: int | None
+    away_score: int | None
+    has_odds: bool
+    source: str
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``; the kick-off is UTC like every instant."""
+        _check(is_valid_entity_id(self.fixture_id), "fixture_id", "invalid entity id")
+        _check(is_valid_entity_id(self.league_id), "league_id", "invalid entity id")
+        _check(is_valid_entity_id(self.home_team_id), "home_team_id", "invalid entity id")
+        _check(is_valid_entity_id(self.away_team_id), "away_team_id", "invalid entity id")
+        _check_utc(self.kickoff, "kickoff")
+
+    @property
+    def label(self) -> str:
+        """``Home — Away``."""
+        return f"{self.home_team} — {self.away_team}"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredFixturePage:
+    """A page of stored fixtures; ``page_count`` is 0 when nothing matched."""
+
+    items: tuple[StoredFixture, ...]
+    page: int
+    page_count: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredOdds:
+    """One stored price snapshot (``line`` is 0 for markets without a line)."""
+
+    bookmaker: str
+    market: MarketType
+    selection: Selection
+    line: float
+    odds: float
+    kind: OddsKind
+    taken_at: datetime
+
+    def __post_init__(self) -> None:
+        """Instants are UTC."""
+        _check_utc(self.taken_at, "taken_at")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BookmakerOdds:
+    """The stored snapshots of one bookmaker for a fixture, oldest first."""
+
+    bookmaker: str
+    quotes: tuple[StoredOdds, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredFixtureDetail:
+    """Everything stored about one fixture: result, prices by bookmaker, the user's signals.
+
+    ``signals`` are the *asking user's* signals on the fixture only. ``odds`` holds at most
+    :data:`MAX_STORED_ODDS_IN_DETAIL` snapshots (the newest ones); ``odds_total`` is the full
+    count and ``truncated`` says some were left out.
+    """
+
+    fixture: StoredFixture
+    season: int
+    home_ht_score: int | None
+    away_ht_score: int | None
+    home_xg: float | None
+    away_xg: float | None
+    odds: tuple[BookmakerOdds, ...]
+    odds_total: int
+    truncated: bool
+    signals: tuple[SignalView, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredTeamRequest:
+    """A paged team list, optionally filtered by name text, sport or league."""
+
+    text: str = ""
+    sport: Sport | None = None
+    league_ids: frozenset[EntityId] = frozenset()
+    page: int = 0
+    page_size: int = DEFAULT_PAGE_SIZE
+
+    def __post_init__(self) -> None:
+        """Bounded text and pages."""
+        _check(len(self.text) <= MAX_STORED_TEAM_SEARCH_LENGTH, "text", "too long")
+        _check(self.page >= 0, "page", "must not be negative")
+        _check(1 <= self.page_size <= MAX_PAGE_SIZE, "page_size", f"must be 1..{MAX_PAGE_SIZE}")
+        _check_entity_ids(self.league_ids, "league_ids")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredTeam:
+    """A stored team and how many fixtures of it the database holds."""
+
+    team_id: EntityId
+    sport: Sport
+    name: str
+    country: str | None
+    source: str
+    fixtures: int
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``."""
+        _check(is_valid_entity_id(self.team_id), "team_id", "invalid entity id")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredTeamPage:
+    """A page of stored teams; ``page_count`` is 0 when nothing matched."""
+
+    items: tuple[StoredTeam, ...]
+    page: int
+    page_count: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredOddsRequest:
+    """A paged look at the price snapshots of one fixture (newest first)."""
+
+    fixture_id: EntityId
+    bookmaker: str | None = None
+    market: MarketType | None = None
+    page: int = 0
+    page_size: int = DEFAULT_PAGE_SIZE
+
+    def __post_init__(self) -> None:
+        """Ids end up in ``callback_data``; pages are bounded."""
+        _check(is_valid_entity_id(self.fixture_id), "fixture_id", "invalid entity id")
+        _check(self.page >= 0, "page", "must not be negative")
+        _check(1 <= self.page_size <= MAX_PAGE_SIZE, "page_size", f"must be 1..{MAX_PAGE_SIZE}")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredOddsPage:
+    """A page of stored price snapshots; ``page_count`` is 0 when nothing matched."""
+
+    items: tuple[StoredOdds, ...]
+    page: int
+    page_count: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RefreshReport:
+    """What an administrator's "Bazani yangilash" stored and cost.
+
+    ``skipped`` names the steps (``fixtures``, ``results``, ``odds``) that could not run
+    (quota spent, provider down); the rest was stored.
+    """
+
+    started_at: datetime
+    finished_at: datetime
+    fixtures: int
+    results: int
+    odds: int
+    api_requests: int
+    skipped: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Instants are UTC."""
+        _check_utc(self.started_at, "started_at")
+        _check_utc(self.finished_at, "finished_at")
+
+    @property
+    def complete(self) -> bool:
+        """True when no step was skipped."""
+        return not self.skipped
+
+
 # --------------------------------------------------------------------------- notifications
 class UpdateKind(StrEnum):
     """Which automatic recalculation produced a :class:`SignalUpdate` (plan §4 step 5)."""
@@ -1881,9 +2175,11 @@ class AnalysisService(Protocol):
         Raises:
             ValidationFailedError: the window ends beyond the horizon or starts before the
                 retro look-back (:meth:`DateWindow.ensure_allowed`).
-            BudgetExceededError: the manual API reserve cannot cover the request.
+            BudgetExceededError: no longer raised (v1.11: analysis never calls the provider).
             BusyError: the user's previous ``analyze`` has not finished (v1.2).
-            ServiceUnavailableError: the data provider or the database is down (v1.2).
+            ServiceUnavailableError: the database is down (v1.2).
+            DataStaleError: the window reaches into the future and the database was not
+                refreshed lately (v1.11); look-backs never raise it.
         """
         ...
 
@@ -2220,6 +2516,63 @@ class LearningService(Protocol):
         ...
 
 
+class DataBrowserService(Protocol):
+    """A read-only look at what the database holds, and the administrator's refresh (v1.11).
+
+    Only stored data is shown; nothing here calls the provider except
+    :meth:`refresh_database`. Instants are UTC. Shared provider data (leagues, teams, fixtures,
+    prices) is visible to every user; signals are always the asking user's own.
+    """
+
+    async def database_overview(self, user_id: int) -> DatabaseOverview:
+        """Row counts per table, newest-write times, file size and the last refresh."""
+        ...
+
+    async def list_stored_leagues(
+        self, user_id: int, *, sport: Sport | None = None
+    ) -> tuple[StoredLeague, ...]:
+        """Stored leagues with their fixture counts and time span, ordered by name."""
+        ...
+
+    async def list_stored_fixtures(
+        self, user_id: int, request: StoredFixtureRequest
+    ) -> StoredFixturePage:
+        """A page of stored fixtures; a page past the end is empty, not an error."""
+        ...
+
+    async def get_stored_fixture(self, user_id: int, fixture_id: EntityId) -> StoredFixtureDetail:
+        """One fixture with its result, price snapshots by bookmaker and the user's signals.
+
+        Raises:
+            NotFoundError: unknown fixture id.
+        """
+        ...
+
+    async def list_stored_teams(self, user_id: int, request: StoredTeamRequest) -> StoredTeamPage:
+        """A page of stored teams, ordered by name."""
+        ...
+
+    async def list_stored_odds(self, user_id: int, request: StoredOddsRequest) -> StoredOddsPage:
+        """A page of the price snapshots of one fixture, newest first.
+
+        Raises:
+            NotFoundError: unknown fixture id.
+        """
+        ...
+
+    async def refresh_database(self, user_id: int) -> RefreshReport:
+        """Fetch fixtures, results and prices now, on the manual API quota (administrators).
+
+        Raises:
+            NotAuthorizedError: the user is not an administrator.
+            CooldownActiveError: refreshed less than ``MANUAL_REFRESH_MIN_MINUTES`` ago
+                (``retry_after`` is the remaining wait).
+            BudgetExceededError: the manual quota cannot cover the refresh (nothing was sent).
+            ServiceUnavailableError: no data provider is configured or it is down.
+        """
+        ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Services:
     """Everything the bot needs, injected at startup (fake now, real services in F4)."""
@@ -2236,3 +2589,4 @@ class Services:
     status: SystemStatusService
     express: ExpressService
     learning: LearningService
+    browser: DataBrowserService

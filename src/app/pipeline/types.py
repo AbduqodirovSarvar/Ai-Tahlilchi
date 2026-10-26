@@ -48,7 +48,7 @@ class AnalysisRequest:
     unit: Decimal | None = None
     prematch_minutes: int | None = None
     purpose: Purpose = MANUAL
-    fetch: bool = True
+    """``MANUAL`` (a user action) refuses a stale database; ``AUTOMATIC`` only flags it."""
     skip_retro: bool = False
     """Leave out fixtures that already started (the daily digest has no use for look-backs)."""
 
@@ -90,16 +90,18 @@ class AnalysisOutcome:
     skipped_stale_price: int = 0
     """Fixtures left out because the bookmaker's price is too old to decide on."""
     data_stale: bool = False
-    """Provider data the run wanted could not be refreshed (budget spent or provider down)."""
+    """The database was not refreshed lately (an automatic run goes on and says so)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DataPlan:
-    """What an analysis would need from the provider (nothing is spent by planning)."""
+    """What an analysis would use: fixtures from the database, no provider requests (ADR 0021)."""
 
     fixtures_found: int
     api_requests: int
     budget_remaining: int
+    data_stale: bool = False
+    last_refresh_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

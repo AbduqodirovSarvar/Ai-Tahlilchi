@@ -78,6 +78,9 @@ async def open_runtime(
     config = config or PipelineConfig(
         staking=StakingMode(settings.staking_mode),
         extra_bookmakers=settings.ingest_extra_bookmakers,
+        display_zone=settings.display_timezone,
+        refresh_at=settings.refresh_at,
+        manual_refresh_min_interval=timedelta(minutes=settings.manual_refresh_min_minutes),
     )
     engine = create_engine_from_settings(settings)
     await Ledger.ensure_schema(engine)

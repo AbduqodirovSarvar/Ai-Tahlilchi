@@ -440,7 +440,6 @@ async def test_a_retro_card_never_gets_todays_calibration(provider_env: Env) -> 
         min_probability=0.30,
         min_ev=0.0,
         max_signals=3,
-        fetch=False,
         skip_retro=False,
     )
 

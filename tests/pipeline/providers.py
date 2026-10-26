@@ -71,6 +71,7 @@ class ScriptedAdapter:
 
     def _check(self, call: str) -> None:
         self.provider.calls.append((call, self.purpose))
+        self.provider.used += 1
         if self.provider.fail_with is not None:
             raise self.provider.fail_with
         if self.provider.exhausted:
@@ -79,6 +80,7 @@ class ScriptedAdapter:
     async def fetch_fixtures(self, query: FixtureQuery) -> list[Fixture]:
         """Fixtures whose kick-off day is inside the query."""
         self._check("fixtures")
+        self.provider.queries.append(query)
         return [
             f
             for f in self.provider.fixtures
@@ -125,6 +127,7 @@ class ScriptedProvider:
     results: dict[ExternalRef, FixtureResult]
     kickoffs: dict[ExternalRef, datetime]
     calls: list[tuple[str, Purpose]] = field(default_factory=list)
+    queries: list[FixtureQuery] = field(default_factory=list)
     fail_with: ExternalServiceError | ProviderUnavailableError | None = None
     exhausted: bool = False
     lineups: bool = False
