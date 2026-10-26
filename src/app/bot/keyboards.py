@@ -147,6 +147,7 @@ MAIN_MENU_LAYOUT: Final = (
     (texts.MENU_TEMPLATES, texts.MENU_TODAY),
     (texts.MENU_WATCHLIST, texts.MENU_BETS),
     (texts.MENU_REPORT, texts.MENU_SETTINGS),
+    (texts.MENU_DB, texts.MENU_CALLS),
     (texts.MENU_HELP,),
 )
 

@@ -93,6 +93,12 @@ class ExpressFlow(StatesGroup):
     pick = State()
 
 
+class BrowseFlow(StatesGroup):
+    """🗄 Baza: waiting for a team name to search the stored teams."""
+
+    team_query = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 

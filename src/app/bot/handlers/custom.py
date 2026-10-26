@@ -59,7 +59,7 @@ from app.bot.messaging import (
     edit_html,
     send_html,
 )
-from app.bot.middleware import user_message_for
+from app.bot.middleware import ErrorReply, error_reply
 from app.bot.parsing import parse_fixture_text
 from app.bot.states import CustomFlow, drop_draft
 from app.bot.wizard import sport_options, supported_markets
@@ -465,24 +465,24 @@ async def _execute(run: _Run) -> None:
         await _publish(run, result)
     except ServiceError as error:
         logger.info("custom_rejected", error_type=type(error).__name__, detail=str(error))
-        await _fail(run, user_message_for(error))
+        await _fail(run, await error_reply(error, flow.services, flow.user_id))
     except Exception:
         logger.exception("custom_analysis_failed")
-        await _fail(run, texts.UNEXPECTED_ERROR)
+        await _fail(run, ErrorReply(texts.UNEXPECTED_ERROR))
     else:
         async with flow.jobs.lock(flow.state.key):
             if await flow.state.get_state() == CustomFlow.running.state:
                 await drop_custom(flow.state)
 
 
-async def _fail(run: _Run, message: str) -> None:
+async def _fail(run: _Run, reply: ErrorReply) -> None:
     """Close the progress message, explain, and give the pick screen back for a retry."""
     flow = run.flow
     await _quietly(edit_html(run.progress, texts.CANCELLED))
     async with flow.jobs.lock(flow.state.key):
         if await flow.state.get_state() == CustomFlow.running.state:
             await flow.state.set_state(CustomFlow.pick)
-    await _quietly(send_html(run.message, message))
+    await _quietly(send_html(run.message, reply.text, reply.markup))
 
 
 async def _publish(run: _Run, result: AnalysisResult) -> None:

@@ -190,7 +190,7 @@ def test_retro_card_has_no_bet_or_recalc() -> None:
 
 def test_main_menu_texts_are_known() -> None:
     assert texts.MENU_ANALYSIS in keyboards.MENU_TEXTS
-    assert len(keyboards.MENU_TEXTS) == 9
+    assert len(keyboards.MENU_TEXTS) == 11
 
 
 def test_calendar_end_is_limited_to_the_longest_window_after_the_start() -> None:

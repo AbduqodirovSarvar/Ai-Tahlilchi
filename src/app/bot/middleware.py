@@ -8,12 +8,21 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Final
+from zoneinfo import ZoneInfo
 
 import structlog
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import CallbackQuery, Chat, Message, TelegramObject, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardMarkup,
+    Message,
+    TelegramObject,
+    Update,
+    User,
+)
 
 from app.bot import texts
 from app.bot.draft import StaleDraftError
@@ -27,16 +36,20 @@ from app.bot.messaging import (
     track_answers,
 )
 from app.bot.parsing import InputError
+from app.bot.refresh_ui import format_data_stale, stale_keyboard
 from app.logging import get_logger
 from app.services.errors import (
     BudgetExceededError,
     BusyError,
     CooldownActiveError,
+    DataStaleError,
+    NotAuthorizedError,
     NotFoundError,
     ServiceError,
     ServiceUnavailableError,
     ValidationFailedError,
 )
+from app.services.interfaces import DEFAULT_TIMEZONE, Services
 
 logger = get_logger(__name__)
 
@@ -157,29 +170,65 @@ class RateLimitMiddleware(BaseMiddleware):
         return None
 
 
+_FIXED_MESSAGES: Final[tuple[tuple[type[Exception], str], ...]] = (
+    (StaleDraftError, texts.STALE_BUTTON_HINT),
+    (BusyError, texts.BUSY),
+    (NotFoundError, texts.NOT_FOUND),
+    (NotAuthorizedError, texts.NOT_AUTHORIZED),
+)
+"""Errors whose message needs nothing from the error itself."""
+
+
 def user_message_for(error: Exception) -> str:
     """The Uzbek message for an error a handler let escape."""
+    for kind, fixed in _FIXED_MESSAGES:
+        if isinstance(error, kind):
+            return fixed
+    return _computed_message(error)
+
+
+def _computed_message(error: Exception) -> str:
+    """Messages that quote something from the error (waits, limits, components, fields)."""
     message: str
     match error:
         case InputError():
             message = error.message
-        case StaleDraftError():
-            message = texts.STALE_BUTTON_HINT
         case CooldownActiveError():
             message = cooldown_message(error)
         case BudgetExceededError():
             message = budget_message(error)
-        case BusyError():
-            message = texts.BUSY
         case ServiceUnavailableError():
             message = texts.SERVICE_UNAVAILABLE.format(component=escape(error.component))
         case ValidationFailedError():
             message = validation_message(error)
-        case NotFoundError():
-            message = texts.NOT_FOUND
+        case DataStaleError():
+            message = format_data_stale(error.last_refresh_at, ZoneInfo(DEFAULT_TIMEZONE))
         case _:
             message = texts.UNEXPECTED_ERROR
     return message
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorReply:
+    """What to tell the user about a failure: the text and, when there is a fix, its button."""
+
+    text: str
+    markup: InlineKeyboardMarkup | None = None
+
+
+async def error_reply(error: Exception, services: Services, user_id: int) -> ErrorReply:
+    """The message for ``error`` in the user's time zone, with the refresh button if stale.
+
+    A stale database is the one failure with a fix at hand (the administrator's refresh), so
+    every analysis path offers the button right under the notice instead of only naming it.
+    """
+    if not isinstance(error, DataStaleError):
+        return ErrorReply(user_message_for(error))
+    try:
+        zone = (await services.settings.get_settings(user_id)).zone
+    except ServiceError:
+        zone = ZoneInfo(DEFAULT_TIMEZONE)
+    return ErrorReply(format_data_stale(error.last_refresh_at, zone), stale_keyboard())
 
 
 class ErrorMiddleware(BaseMiddleware):
@@ -197,33 +246,46 @@ class ErrorMiddleware(BaseMiddleware):
             return await handler(event, data)
         except (InputError, StaleDraftError, ServiceError) as error:
             logger.info("handler_rejected", error_type=type(error).__name__, detail=str(error))
-            await self._report(event, user_message_for(error), tracker)
+            await self._report(event, await self._reply(error, data), tracker)
         except Exception:
             logger.exception("handler_failed", event_type=type(event).__name__)
-            await self._report(event, texts.UNEXPECTED_ERROR, tracker)
+            await self._report(event, ErrorReply(texts.UNEXPECTED_ERROR), tracker)
         return None
 
-    async def _report(self, event: TelegramObject, text: str, tracker: AnswerTracker) -> None:
+    @staticmethod
+    async def _reply(error: Exception, data: dict[str, Any]) -> ErrorReply:
+        services: Services | None = data.get("services")
+        user_id: int | None = data.get("user_id")
+        if services is None or user_id is None:
+            return ErrorReply(user_message_for(error))
+        return await error_reply(error, services, user_id)
+
+    async def _report(
+        self, event: TelegramObject, reply: ErrorReply, tracker: AnswerTracker
+    ) -> None:
         try:
             if isinstance(event, Message):
-                await send_html(event, text)
+                await send_html(event, reply.text, reply.markup)
             elif isinstance(event, CallbackQuery):
                 # A handler may have answered before it failed (e.g. a toggle answers
                 # "Saqlandi" and then edits the message); a second answer is rejected by
                 # Telegram, so the error has to go out as a message.
-                await self._report_callback(event, text, answered=tracker.answered)
+                await self._report_callback(event, reply, answered=tracker.answered)
         except TelegramAPIError:
             logger.warning("error_report_failed", exc_info=True)
 
     @staticmethod
-    async def _report_callback(callback: CallbackQuery, text: str, *, answered: bool) -> None:
+    async def _report_callback(
+        callback: CallbackQuery, reply: ErrorReply, *, answered: bool
+    ) -> None:
         message = callback_message(callback)
-        if message is None or (len(text) <= CALLBACK_ALERT_LIMIT and not answered):
-            await answer_callback(callback, _plain(text), alert=True)
+        fits_alert = len(reply.text) <= CALLBACK_ALERT_LIMIT and reply.markup is None
+        if message is None or (fits_alert and not answered):
+            await answer_callback(callback, _plain(reply.text), alert=True)
             return
         if not answered:
             await answer_callback(callback)
-        await send_html(message, text)
+        await send_html(message, reply.text, reply.markup)
 
 
 def _plain(text: str) -> str:

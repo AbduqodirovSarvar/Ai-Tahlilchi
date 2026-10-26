@@ -15,6 +15,7 @@ from aiogram.fsm.state import State
 from aiogram.types import InlineKeyboardMarkup
 
 from app.bot import keyboards, texts
+from app.bot.browse_ui import refresh_button
 from app.bot.draft import Option, WizardDraft
 from app.bot.formatters import (
     clock,
@@ -29,6 +30,7 @@ from app.bot.formatters import (
 from app.bot.keyboards import PickerRow
 from app.bot.notices import OnceNotices
 from app.bot.parsing import InputError
+from app.bot.refresh_ui import format_data_stale
 from app.bot.states import AnalysisFlow
 from app.domain import MarketType, Sport
 from app.services.interfaces import (
@@ -415,11 +417,16 @@ async def _confirm(draft: WizardDraft, ctx: WizardContext) -> Screen:
                 requests=estimate.api_requests, remaining=estimate.budget_remaining
             )
         )
+    if estimate.data_stale:
+        notes.append(format_data_stale(estimate.last_refresh_at, ctx.zone))
     if notes:
         text = "\n\n".join([text, *notes])
-    can_start = estimate.within_budget and estimate.fixtures_found > 0
+    can_start = estimate.within_budget and estimate.fixtures_found > 0 and not estimate.data_stale
+    markup = keyboards.confirm_keyboard(can_start=can_start)
+    if estimate.data_stale:
+        markup = keyboards.markup_of([[refresh_button()], *markup.inline_keyboard])
     draft = replace(draft, editing=False)
-    return Screen("confirm", text, keyboards.confirm_keyboard(can_start=can_start), draft)
+    return Screen("confirm", text, markup, draft)
 
 
 async def _edit(draft: WizardDraft, ctx: WizardContext) -> Screen:

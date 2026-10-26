@@ -7,7 +7,7 @@
 
 Errors a recalculation can raise (cooldown, budget, busy, provider down) are plain
 :class:`~app.services.errors.ServiceError` s: the error middleware or the job maps them to
-Uzbek messages (:func:`app.bot.middleware.user_message_for`).
+Uzbek messages (:func:`app.bot.middleware.error_reply`).
 """
 
 from collections.abc import Awaitable, Callable
@@ -24,7 +24,7 @@ from app.bot.formatters import escape, format_signal_card, local_today
 from app.bot.handlers.analysis_run import ProgressReporter
 from app.bot.jobs import BackgroundJobs
 from app.bot.messaging import answer_callback, callback_message, edit_html, send_html
-from app.bot.middleware import user_message_for
+from app.bot.middleware import ErrorReply, error_reply
 from app.bot.notify_formatters import format_recalc_batch, format_recalc_diff
 from app.bot.parsing import InputError, parse_quick_query
 from app.logging import get_logger
@@ -118,21 +118,21 @@ async def _run_batch(
     try:
         batch = await call(reporter)
         zone = (await services.settings.get_settings(user_id)).zone
-        summary = format_recalc_batch(batch, zone)
+        summary = ErrorReply(format_recalc_batch(batch, zone))
     except ServiceError as error:
         logger.info("recalc_rejected", error_type=type(error).__name__, detail=str(error))
-        summary = user_message_for(error)
+        summary = await error_reply(error, services, user_id)
     except Exception:
         logger.exception("recalc_failed", user_id=user_id)
-        summary = texts.UNEXPECTED_ERROR
+        summary = ErrorReply(texts.UNEXPECTED_ERROR)
     await _publish(message, progress_message, summary)
 
 
-async def _publish(message: Message, progress_message: Message, summary: str) -> None:
+async def _publish(message: Message, progress_message: Message, summary: ErrorReply) -> None:
     """Close the progress message and post the summary; an unreachable chat is only logged."""
     try:
         await edit_html(progress_message, texts.RECALC_DONE)
-        await send_html(message, summary)
+        await send_html(message, summary.text, summary.markup)
     except TelegramAPIError as error:
         logger.warning("recalc_publish_failed", error=error.message)
 

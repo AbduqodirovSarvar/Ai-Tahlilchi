@@ -471,11 +471,15 @@ def format_settings(settings: UserSettingsView, league_names: dict[str, str]) ->
 
 
 # --------------------------------------------------------------------------- errors
+def cooldown_minutes(error: CooldownActiveError) -> int:
+    """The wait in whole minutes, rounded up (at least one)."""
+    seconds = max(error.retry_after.total_seconds(), 1.0)
+    return int(-(-seconds // SECONDS_PER_MINUTE))
+
+
 def cooldown_message(error: CooldownActiveError) -> str:
     """``⏳ N daqiqadan keyin...`` (rounded up, at least one minute)."""
-    seconds = max(error.retry_after.total_seconds(), 1.0)
-    minutes = int(-(-seconds // SECONDS_PER_MINUTE))
-    return texts.COOLDOWN.format(minutes=minutes)
+    return texts.COOLDOWN.format(minutes=cooldown_minutes(error))
 
 
 def budget_message(error: BudgetExceededError) -> str:
