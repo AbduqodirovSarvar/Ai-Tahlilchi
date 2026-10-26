@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.clients.api_football import create_api_football_client
 from app.config import Settings
 from app.db.api_usage import SqlUsageStore
-from app.db.engine import create_engine_from_settings, create_session_factory
+from app.db.call_log import SqlCallRecorder
+from app.db.engine import (
+    create_engine_from_settings,
+    create_session_factory,
+    create_usage_engine,
+)
 from app.llm.service import LlmService, create_llm_service
 from app.logging import get_logger
 from app.pipeline.clock import Clock, system_clock
@@ -30,6 +35,7 @@ from app.pipeline.learning_settings import LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger
 from app.pipeline.overlay import DbLearningSource, LearningSource, NoLearning
 from app.pipeline.provider import FootballProvider
+from app.pipeline.redaction import scrub_text
 from app.pipeline.review import LlmCandidateReviewer, LlmPostmortemAnalyst
 from app.sports.football_mapping import HandicapConvention
 
@@ -42,6 +48,11 @@ class Runtime:
 
     ctx: PipelineContext
     http: httpx.AsyncClient | None
+
+
+def _scrub_for_call_log(text: str) -> str:
+    """Mask credentials in a logged request or answer, keeping all of its length."""
+    return scrub_text(text, limit=len(text))
 
 
 def build_reviewer(
@@ -78,10 +89,14 @@ async def open_runtime(
     config = config or PipelineConfig(
         staking=StakingMode(settings.staking_mode),
         extra_bookmakers=settings.ingest_extra_bookmakers,
+        call_log_retention=timedelta(days=settings.call_log_retention_days),
     )
     engine = create_engine_from_settings(settings)
     await Ledger.ensure_schema(engine)
     sessions = create_session_factory(engine)
+    # The call log writes on the request path, so it waits for the database lock only briefly.
+    log_engine = create_usage_engine(settings.db_path)
+    recorder = SqlCallRecorder(create_session_factory(log_engine), scrub=_scrub_for_call_log)
     http: httpx.AsyncClient | None = None
     providers = {}
     key = settings.api_football_key
@@ -89,6 +104,7 @@ async def open_runtime(
         client, http = create_api_football_client(
             key.get_secret_value(),
             SqlUsageStore(sessions),
+            recorder=recorder,
         )
         provider = FootballProvider(
             client,
@@ -99,7 +115,8 @@ async def open_runtime(
         providers[provider.sport] = provider
     else:
         logger.warning("pipeline_without_provider", reason="API_FOOTBALL_KEY is not set")
-    llm = create_llm_service(settings)  # one service: reviews and post-mortems share its budget
+    # One service: reviews and post-mortems share its budget.
+    llm = create_llm_service(settings, recorder=recorder)
     learning_settings = LearningSettings(
         mode=LearningMode(settings.learning_mode),
         manual_hold=timedelta(days=settings.learning_manual_hold_days),
@@ -125,4 +142,5 @@ async def open_runtime(
     finally:
         if http is not None:
             await http.aclose()
+        await log_engine.dispose()
         await engine.dispose()

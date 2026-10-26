@@ -9,6 +9,9 @@ grows by far the most of all. What the system keeps for good:
 What is dropped is the intermediate ``morning``/``recalc``/``prematch`` captures of finished
 matches that nobody decided on, once the match is older than :data:`RETENTION_DAYS`.
 
+The same weekly run also prunes the provider call log (``provider_calls``: prompts and bodies,
+the second heavy table) older than ``PipelineConfig.call_log_retention``.
+
 Failure modes. The job claims a weekly ledger key, so a second call in the same week does
 nothing and a crash lets the lease expire for a retry. Deletes run in batches of
 :data:`DELETE_BATCH`, each in its own short transaction (SQLite allows one writer, and a long
@@ -17,6 +20,7 @@ table, and the next run continues. No ``VACUUM``: freed pages are reused by late
 rebuild of the file is an operator action (``sqlite_tool``), not a weekly job.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
@@ -24,6 +28,7 @@ from typing import Final
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.repo import purge_calls_older_than
 from app.db.schema import FixtureRow, OddsSnapshotRow, SignalRow
 from app.domain import FixtureStatus, OddsKind
 from app.logging import get_logger
@@ -49,6 +54,7 @@ class RetentionReport:
 
     skipped: bool = False
     deleted: int = 0
+    calls_deleted: int = 0
 
 
 async def run_retention(ctx: PipelineContext) -> RetentionReport:
@@ -59,20 +65,40 @@ async def run_retention(ctx: PipelineContext) -> RetentionReport:
         logger.info("retention_skipped", reason="already_done_this_week")
         return RetentionReport(skipped=True)
     cutoff = now - timedelta(days=RETENTION_DAYS)
+    calls_cutoff = now - ctx.config.call_log_retention
     try:
-        deleted = 0
-        for _ in range(MAX_BATCHES):
-            async with ctx.sessions.begin() as session:
-                batch = await _delete_batch(session, cutoff)
-            deleted += batch
-            if batch < DELETE_BATCH:
-                break
+        deleted = await _in_batches(lambda session: _delete_batch(session, cutoff), ctx)
+        calls_deleted = await _in_batches(
+            lambda session: purge_calls_older_than(session, calls_cutoff, limit=DELETE_BATCH), ctx
+        )
     except Exception as error:
         await ctx.ledger.fail(key, now=ctx.clock(), detail=repr(error)[:200])
         raise
-    await ctx.ledger.complete(key, now=ctx.clock(), detail=f"deleted={deleted}")
-    logger.info("retention_done", job=JOB, deleted=deleted, cutoff=cutoff.isoformat())
-    return RetentionReport(deleted=deleted)
+    detail = f"deleted={deleted} calls_deleted={calls_deleted}"
+    await ctx.ledger.complete(key, now=ctx.clock(), detail=detail)
+    logger.info(
+        "retention_done",
+        job=JOB,
+        deleted=deleted,
+        calls_deleted=calls_deleted,
+        cutoff=cutoff.isoformat(),
+        calls_cutoff=calls_cutoff.isoformat(),
+    )
+    return RetentionReport(deleted=deleted, calls_deleted=calls_deleted)
+
+
+async def _in_batches(
+    delete_batch: Callable[[AsyncSession], Awaitable[int]], ctx: PipelineContext
+) -> int:
+    """Run ``delete_batch`` in short transactions until a batch comes back short; the total."""
+    total = 0
+    for _ in range(MAX_BATCHES):
+        async with ctx.sessions.begin() as session:
+            batch = await delete_batch(session)
+        total += batch
+        if batch < DELETE_BATCH:
+            break
+    return total
 
 
 async def _delete_batch(session: AsyncSession, cutoff: datetime) -> int:
