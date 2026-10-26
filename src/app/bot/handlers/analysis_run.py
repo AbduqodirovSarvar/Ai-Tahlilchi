@@ -23,7 +23,7 @@ from app.bot.formatters import (
 )
 from app.bot.jobs import BackgroundJobs
 from app.bot.messaging import edit_html, send_html
-from app.bot.middleware import user_message_for
+from app.bot.middleware import ErrorReply, error_reply
 from app.bot.session import WizardSession
 from app.bot.states import AnalysisFlow, drop_draft, load_draft, next_results
 from app.bot.wizard import render, summary_fields
@@ -135,11 +135,12 @@ async def _execute(run: _Run) -> None:
         await _deliver(run, result, reporter)
     except ServiceError as error:
         logger.info("analysis_rejected", error_type=type(error).__name__, detail=str(error))
-        await _abort(run, user_message_for(error), progress_text=texts.CANCELLED)
+        reply = await error_reply(error, session.ctx.services, session.ctx.user_id)
+        await _abort(run, reply, progress_text=texts.CANCELLED)
     except Exception:
         # Whatever it was, the user must not stay "running" under a frozen progress message.
         logger.exception("analysis_failed")
-        await _abort(run, texts.UNEXPECTED_ERROR, progress_text=texts.UNEXPECTED_ERROR)
+        await _abort(run, ErrorReply(texts.UNEXPECTED_ERROR), progress_text=texts.UNEXPECTED_ERROR)
 
 
 async def _deliver(run: _Run, result: AnalysisResult, reporter: ProgressReporter) -> None:
@@ -161,7 +162,7 @@ async def _deliver(run: _Run, result: AnalysisResult, reporter: ProgressReporter
     await send_result_page(run.wizard_message, ordered, session.ctx.zone, 0, stored.token)
 
 
-async def _abort(run: _Run, message: str, *, progress_text: str) -> None:
+async def _abort(run: _Run, reply: ErrorReply, *, progress_text: str) -> None:
     """Close the progress message, give the user back the confirmation, explain the error."""
     await _quietly(edit_html(run.progress_message, progress_text))
     session = run.session
@@ -169,7 +170,7 @@ async def _abort(run: _Run, message: str, *, progress_text: str) -> None:
         # A wizard the user started meanwhile is theirs now: leave it alone.
         if await _is_current_wizard(session, run.draft.message_id):
             await _restore_confirmation(run)
-    await _quietly(send_html(run.wizard_message, message))
+    await _quietly(send_html(run.wizard_message, reply.text, reply.markup))
 
 
 async def _restore_confirmation(run: _Run) -> None:

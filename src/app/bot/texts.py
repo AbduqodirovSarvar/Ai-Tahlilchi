@@ -27,6 +27,8 @@ MENU_BETS: Final = "🎟 Mening stavkalarim"
 MENU_REPORT: Final = "📈 Hisobot"
 MENU_SETTINGS: Final = "⚙️ Sozlamalar"
 MENU_HELP: Final = "ℹ️ Holat / Yordam"
+MENU_DB: Final = "🗄 Baza"
+MENU_CALLS: Final = "📡 So'rovlar"
 MENU_PLACEHOLDER_HINT: Final = "Menyudan bo'limni tanlang 👇"
 
 WELCOME: Final = (
@@ -56,6 +58,8 @@ HELP: Final = (
     "/natijalar — natijasi aniqlanmagan signallarni bir bosishda belgilash\n"
     "/ozgarishlar — model o'zgarishlari jurnali va orqaga qaytarish\n"
     "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
+    "/baza — bazadagi ligalar, o'yinlar, jamoalar va koeffitsientlar\n"
+    "/sorovlar — API-Football va Gemini ga yuborilgan so'rovlar (admin)\n"
     "/sozlamalar — sozlamalar\n"
     "/bekor — joriy amalni bekor qilish\n"
     "/yordam — shu yordam\n\n"
@@ -1218,3 +1222,249 @@ STATUS_LEARNING_MISSED: Final = (
     "⚠️ Haftalik o'rganish bu hafta ishlamagan (hafta yo'qolgan): model yangilanmayapti. "
     "Serverni tekshiring."
 )
+
+# --------------------------------------------------------------------------- database browser
+DB_STALE_SCREEN: Final = (
+    "⌛ Bu ekran eskirgan (bot qayta ishga tushgan yoki yangi ekran ochilgan). "
+    "Qaytadan boshlash uchun /baza ni yuboring."
+)
+DB_TITLE: Final = "🗄 <b>Baza</b> — botda saqlanayotgan ma'lumotlar"
+DB_EMPTY: Final = (
+    "🗄 <b>Baza bo'sh.</b>\n"
+    "Admin '🔄 Bazani yangilash' ni bosing: o'yinlar va koeffitsientlar yuklanadi."
+)
+DB_REFRESHED: Final = "🔄 Oxirgi yangilanish: <b>{time}</b> ({age})"
+DB_NEVER_REFRESHED: Final = "🔄 Baza hali to'liq yangilanmagan."
+DB_STALE_WARNING: Final = (
+    "⚠️ <b>Baza eskirgan:</b> kelgusi o'yinlar tahlili to'xtaydi. "
+    "Admin '🔄 Bazani yangilash' ni bosing."
+)
+DB_SIZE: Final = "💽 Hajmi: <b>{size}</b>"
+DB_SIZE_UNITS: Final = ("B", "KB", "MB", "GB")
+DB_SPAN: Final = "📅 O'yinlar: {first} — {last} · kelgusi: <b>{upcoming}</b> ta"
+DB_SPAN_NONE: Final = "📅 O'yinlar: yo'q"
+DB_ZONE_NOTE: Final = "🕒 Vaqtlar {zone} bo'yicha."
+DB_TABLES_HEADER: Final = "<b>Jadvallar:</b>"
+DB_TABLE_LINE: Final = "• {label}: <b>{rows}</b>{own}{when}"
+DB_TABLE_OWN: Final = " (faqat sizniki)"
+DB_TABLE_WHEN: Final = " · yozilgan {time}"
+DB_TABLE_LABELS: Final[dict[str, str]] = {
+    "leagues": "🏆 Ligalar",
+    "teams": "👥 Jamoalar",
+    "fixtures": "⚽ O'yinlar",
+    "odds_snapshots": "💱 Koeffitsient yozuvlari",
+    "signals": "⚡ Signallar",
+    "user_bets": "🎟 Stavkalar",
+}
+BTN_DB_LEAGUES: Final = "🏆 Ligalar"
+BTN_DB_TEAMS: Final = "👥 Jamoalar"
+BTN_DB_ALL: Final = "⚽ Hamma o'yinlar"
+BTN_DB_REFRESH: Final = "🔄 Bazani yangilash"
+BTN_DB_HOME: Final = "🗄 Baza"
+BTN_DB_BACK_LEAGUES: Final = "⬅️ Ligalarga"
+BTN_DB_BACK_TEAMS: Final = "⬅️ Jamoalarga"
+BTN_DB_BACK_FIXTURES: Final = "⬅️ O'yinlar ro'yxatiga"
+BTN_DB_BACK_CARD: Final = "⬅️ O'yin kartasiga"
+BTN_DB_SEARCH: Final = "🔎 Qidirish"
+BTN_DB_ODDS: Final = "💱 Narxlar tarixi"
+BTN_DB_DAY_ALL: Final = "📅 Hammasi"
+BTN_DB_DAY_PICK: Final = "🗓 Sana"
+DB_CHOICE_ROW_WIDTH: Final = 5
+DB_CALENDAR_PROMPT: Final = "🗓 Kunni tanlang (faqat bazadagi o'yinlar oralig'i)."
+DB_LEAGUES_TITLE: Final = "🏆 <b>Ligalar</b> — bazada {total} ta"
+DB_LEAGUE_LINE: Final = (
+    "{n}. <b>{name}</b>{country}\n   ⚽ {fixtures} ta o'yin · kelgusi {upcoming}{span}"
+)
+DB_LEAGUE_SPAN: Final = " · {first} — {last}"
+DB_COUNTRY: Final = " ({country})"
+DB_LEAGUES_EMPTY: Final = "🏆 Bazada liga yo'q. Admin '🔄 Bazani yangilash' ni bosing."
+DB_FIXTURES_TITLE: Final = "⚽ <b>{scope}</b> — {total} ta o'yin"
+DB_SCOPE_ALL: Final = "Hamma o'yinlar"
+DB_DAY_ALL: Final = "📅 Barcha kunlar"
+DB_DAY_ONE: Final = "📅 Kun: <b>{day}</b>"
+DB_DAY_HEADER: Final = "📅 <b>{day}, {weekday}</b>"
+DB_FIXTURE_LINE: Final = "{n}. <b>{time}</b> {label}"
+DB_FIXTURE_META: Final = "   🏆 {league} · {state}{odds}"
+DB_FIXTURE_ODDS_MARK: Final = " · 💱"
+DB_FIXTURES_EMPTY_FILTER: Final = (
+    "⚽ Bu filtr bo'yicha o'yin yo'q. Boshqa kunni tanlang yoki '📅 Hammasi' ni bosing."
+)
+DB_FIXTURES_EMPTY: Final = "⚽ Bazada o'yin yo'q. Admin '🔄 Bazani yangilash' ni bosing."
+DB_STATES: Final[dict[str, str]] = {
+    "scheduled": "⏳ kutilmoqda",
+    "live": "🔴 jonli",
+    "finished": "✅ tugagan",
+    "postponed": "⏸ qoldirilgan",
+    "cancelled": "🚫 bekor qilingan",
+    "abandoned": "⛔ to'xtatilgan",
+}
+DB_STATE_SCORE: Final = "{state} {home}:{away}"
+DB_TEAMS_TITLE: Final = "👥 <b>Jamoalar</b> — {total} ta"
+DB_TEAMS_QUERY: Final = "🔎 Qidiruv: <b>{text}</b>"
+DB_TEAM_LINE: Final = "{n}. <b>{name}</b>{country} · ⚽ {fixtures} ta o'yin"
+DB_TEAMS_EMPTY: Final = "👥 Bazada jamoa yo'q. Admin '🔄 Bazani yangilash' ni bosing."
+DB_TEAMS_NO_MATCH: Final = (
+    "👥 '{text}' bo'yicha jamoa topilmadi. Boshqa nom yozing yoki '🔎 Qidirish' ni qayta bosing."
+)
+DB_TEAM_SEARCH_PROMPT: Final = (
+    "🔎 Jamoa nomini yozing (kamida {min_length} ta harf). Bekor qilish: /bekor."
+)
+DB_TEAM_SEARCH_TOO_LONG: Final = (
+    "🔎 Qidiruv matni {max_length} belgidan oshmasin. Qisqaroq nom yozing."
+)
+DB_TEAM_SEARCH_TOO_SHORT: Final = "🔎 Kamida {min_length} ta harf yozing."
+DB_TEAM_SEARCH_MIN_LENGTH: Final = 2
+DB_CARD_TITLE: Final = "⚽ <b>{label}</b>"
+DB_CARD_LEAGUE: Final = "🏆 {league}{country}"
+DB_CARD_TIME: Final = "🕒 <b>{local}</b> ({zone}) · UTC {utc}"
+DB_CARD_STATE: Final = "📌 Holat: {state}"
+DB_CARD_SCORE: Final = "🔢 Hisob: <b>{home}:{away}</b>{half}"
+DB_CARD_HALF: Final = " (birinchi bo'lim {home}:{away})"
+DB_CARD_XG: Final = "📈 xG: {home} — {away}"
+DB_CARD_SOURCE: Final = "🏷 Manba: {source} · mavsum {season}"
+DB_CARD_ODDS_HEADER: Final = (
+    "💱 <b>Koeffitsientlar</b> (har bozorning oxirgisi; bazada jami {total} ta yozuv):"
+)
+DB_CARD_BOOKMAKER: Final = "<b>{bookmaker}</b>"
+DB_CARD_ODDS_LINE: Final = "• {selection}: <b>{odds}</b> · {time} · {kind}"
+DB_CARD_ODDS_MORE: Final = "  …yana {count} ta (to'liq ro'yxat: 💱 Narxlar tarixi)"
+DB_CARD_ODDS_NONE: Final = "💱 Bu o'yin uchun koeffitsient bazada yo'q."
+DB_CARD_TRUNCATED: Final = (
+    "ℹ️ Faqat eng yangi {shown} ta yozuv hisobga olingan; to'liq ro'yxat: 💱 Narxlar tarixi."
+)
+DB_CARD_SIGNALS_HEADER: Final = "👤 <b>Mening signallarim:</b>"
+DB_CARD_SIGNAL: Final = "• {selection} · {odds} · ehtimollik {probability} · EV {ev}"
+DB_CARD_SIGNALS_NONE: Final = "👤 Bu o'yin bo'yicha signalingiz yo'q."
+DB_ODDS_KINDS: Final[dict[str, str]] = {
+    "opening": "ochilish",
+    "morning": "ertalabki",
+    "recalc": "qayta hisob",
+    "prematch": "match oldi",
+    "closing": "yopilish",
+}
+DB_ODDS_TITLE: Final = (
+    "💱 <b>Narxlar tarixi</b> — {label}\nJami {total} ta yozuv (yangisi birinchi)"
+)
+DB_ODDS_LINE: Final = "{time} · {bookmaker} · {selection} · <b>{odds}</b> · {kind}"
+DB_ODDS_EMPTY: Final = "💱 Bu o'yin uchun narx yozuvi yo'q."
+DB_REFRESHING: Final = (
+    "⏳ <b>Baza yangilanmoqda:</b> o'yinlar, natijalar va koeffitsientlar yuklanyapti. "
+    "Bu bir necha daqiqa olishi mumkin; tugagach shu xabar yangilanadi."
+)
+DB_REFRESH_ALREADY: Final = "⏳ Yangilash allaqachon ketmoqda, tugashini kuting."
+DB_REFRESH_DONE: Final = (
+    "✅ <b>Baza yangilandi</b>\n"
+    "⚽ O'yinlar: <b>{fixtures}</b>\n"
+    "🏁 Natijalar: <b>{results}</b>\n"
+    "💱 Narxlar: <b>{odds}</b>\n"
+    "📡 API so'rovlari: <b>{requests}</b>\n"
+    "⏱ {seconds} soniya"
+)
+DB_REFRESH_PARTIAL: Final = (
+    "⚠️ Bajarilmagan qadamlar: <b>{steps}</b>. Qolgani yozildi; keyinroq qayta urinib ko'ring."
+)
+DB_REFRESH_STEPS: Final[dict[str, str]] = {
+    "fixtures": "o'yinlar",
+    "results": "natijalar",
+    "odds": "narxlar",
+}
+DB_REFRESH_COOLDOWN: Final = (
+    "⏳ Baza yaqinda yangilangan: yana {minutes} daqiqadan keyin yangilash mumkin."
+)
+DB_REFRESH_BUDGET: Final = (
+    "💸 Qo'lda so'rovlar limiti yetmaydi: kerak ≈{needed} ta, qoldi {available} ta. "
+    "Hech narsa yuborilmadi. Baza har kuni o'zi ham yangilanadi; yoki limit tiklangach "
+    "qayta urinib ko'ring."
+)
+DB_REFRESH_UNAVAILABLE: Final = (
+    "🔌 Ma'lumot manbai ({component}) hozir ishlamayapti. Birozdan keyin qayta urinib ko'ring."
+)
+NOT_AUTHORIZED: Final = "🔒 Bu amal faqat administrator uchun."
+DATA_STALE: Final = (
+    "🗄 <b>Baza yangilanmagan</b> (oxirgi: {when}). Tahlil faqat bazadagi ma'lumotdan "
+    "ishlaydi. Admin '🔄 Bazani yangilash' ni bosing, so'ng qayta urinib ko'ring."
+)
+DATA_STALE_NEVER: Final = (
+    "🗄 <b>Baza hali yangilanmagan.</b> Tahlil faqat bazadagi ma'lumotdan ishlaydi. "
+    "Admin '🔄 Bazani yangilash' ni bosing, so'ng qayta urinib ko'ring."
+)
+
+# --------------------------------------------------------------------------- provider call log
+CALLS_TITLE: Final = "📡 <b>Tashqi so'rovlar</b> — so'nggi 24 soat"
+CALLS_PROVIDERS: Final[dict[str, str]] = {"api_football": "🏟 API-Football", "gemini": "🤖 Gemini"}
+CALLS_PROVIDER_ICONS: Final[dict[str, str]] = {"api_football": "🏟", "gemini": "🤖"}
+CALLS_DURATION_MS: Final = "{value} ms"
+CALLS_DURATION_S: Final = "{value} s"
+CALLS_LINE_HTTP: Final = " · HTTP {status}"
+CALLS_STAT_PROVIDER: Final = (
+    "{provider}: <b>{calls}</b> ta · ❌ {errors} · 💾 keshdan {cached} · 🚫 bloklangan {blocked}"
+    " · kvota <b>{quota}</b>"
+)
+CALLS_STAT_OPERATION: Final = "   • <code>{operation}</code> — {calls} ta{average}{errors}"
+CALLS_STAT_AVERAGE: Final = " · ~{duration}"
+CALLS_STAT_ERRORS: Final = " · ❌ {errors}"
+CALLS_STATS_EMPTY: Final = (
+    "So'nggi 24 soatda tashqi so'rov bo'lmagan. Baza yangilanganda yoki Gemini ishlaganda "
+    "so'rovlar shu yerda ko'rinadi."
+)
+CALLS_PICK_FILTER: Final = "Ro'yxatni ko'rish uchun filtrni tanlang 👇"
+BTN_CALLS_FILTERS: Final[dict[str, str]] = {
+    "a": "Hammasi",
+    "f": "API-Football",
+    "g": "Gemini",
+    "e": "Faqat xatolar",
+}
+BTN_CALLS_STATS: Final = "📊 Statistika"
+BTN_CALLS_BACK: Final = "⬅️ Ro'yxatga"
+BTN_CALLS_FILE: Final = "📄 To'liq matnni fayl sifatida"
+CALLS_FILTER_MARK: Final = "● {label}"
+CALLS_LIST_TITLE: Final = "📡 <b>So'rovlar</b> · {filter} — {total} ta"
+CALLS_LINE: Final = (
+    "{n}. {provider} <b>{time}</b> · <code>{operation}</code> · {outcome} · {duration}"
+)
+CALLS_LINE_PREVIEW: Final = "   <code>{preview}</code>"
+CALLS_PREVIEW_CHARS: Final = 60
+CALLS_OUTCOMES: Final[dict[str, str]] = {
+    "ok": "✅",
+    "cached": "💾 kesh",
+    "error": "❌ xato",
+    "quota_blocked": "🚫 blok",
+}
+CALLS_OUTCOME_LONG: Final[dict[str, str]] = {
+    "ok": "✅ muvaffaqiyatli",
+    "cached": "💾 keshdan (provayderga so'rov ketmagan)",
+    "error": "❌ xato",
+    "quota_blocked": "🚫 kunlik limit tufayli rad etilgan",
+}
+CALLS_EMPTY: Final = (
+    "📡 Hali so'rov yozilmagan. Baza yangilanganda yoki Gemini ishlaganda shu yerda ko'rinadi."
+)
+CALLS_EMPTY_FILTER: Final = "📡 Bu filtr bo'yicha so'rov yo'q. Boshqa filtrni tanlang."
+CALLS_DETAIL_TITLE: Final = "📡 <b>So'rov #{id}</b>"
+CALLS_DETAIL_WHO: Final = "{provider} · <code>{operation}</code>"
+CALLS_DETAIL_TIME: Final = "🕒 {time} ({zone})"
+CALLS_DETAIL_STATE: Final = "Holat: {outcome}{http}"
+CALLS_DETAIL_HTTP: Final = " · HTTP {status}"
+CALLS_DETAIL_NUMBERS: Final = "⏱ {duration} · kvota: {quota}{size}"
+CALLS_DETAIL_SIZE: Final = " · 📦 {size}"
+CALLS_DETAIL_CLIPPED: Final = "✂️ Jurnalda matn qirqilgan (eng ko'pi {limit} belgi saqlanadi)."
+CALLS_DETAIL_REQUEST: Final = "📤 <b>So'rov:</b>"
+CALLS_DETAIL_RESPONSE: Final = "📥 <b>Javob:</b>"
+CALLS_DETAIL_NO_RESPONSE: Final = "📥 Javob yozilmagan (kesh yoki rad etilgan so'rov)."
+CALLS_DETAIL_ERROR: Final = "⚠️ <b>Xato:</b>"
+CALLS_DETAIL_CUT: Final = (
+    "… faqat boshi ko'rsatildi ({shown} / {total} belgi). To'liq matn: '📄 To'liq matnni fayl "
+    "sifatida'."
+)
+CALLS_INLINE_LIMIT: Final = 3500
+CALLS_INLINE_PREVIEW: Final = 1200
+CALLS_FILE_SENDING: Final = "📄 Fayl yuborilmoqda…"
+CALLS_FILE_CAPTION: Final = "📄 So'rov #{id}: to'liq so'rov va javob matni"
+CALLS_FILE_HEADER: Final = (
+    "So'rov #{id}\nProvayder: {provider}\nOperatsiya: {operation}\nVaqt: {time} ({zone})\n"
+    "Holat: {outcome}{http}\nDavomiyligi: {duration}\nKvota: {quota}"
+)
+CALLS_FILE_REQUEST: Final = "=== SO'ROV ==="
+CALLS_FILE_RESPONSE: Final = "=== JAVOB ==="
+CALLS_FILE_ERROR: Final = "=== XATO ==="
+CALLS_FILE_EMPTY: Final = "(yo'q)"

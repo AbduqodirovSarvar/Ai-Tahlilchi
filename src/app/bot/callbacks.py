@@ -230,6 +230,37 @@ class ExpressCb(CallbackData, prefix="ex"):
     index: int = 0
 
 
+class DbCb(CallbackData, prefix="db"):
+    """🗄 Baza buttons.
+
+    ``menu``/``leagues``/``teams``/``all``/``refresh``/``search`` need no token; the rest act on
+    the screen shown last and carry its ``token`` (``t``) and screen code (``s``): ``pick``
+    (``n`` = item index), ``page`` (``n`` = page), ``day`` (``n`` = date ordinal, 0 = every
+    day), ``cal`` (open the calendar), ``month`` (``n`` = year*100+month), ``back``, ``odds``
+    and ``opage`` (``n`` = page). The screen code makes a repeated tap harmless: a button that
+    no longer belongs to the screen on display only redraws it. Entity ids never travel in a
+    button: the screen keeps them in FSM data.
+    """
+
+    action: str
+    n: int = 0
+    t: int = 0
+    s: str = ""
+
+
+class CallsCb(CallbackData, prefix="cl"):
+    """📡 So'rovlar buttons: ``stats``, ``list`` (filter ``f``, page ``p``), ``item`` and ``file``.
+
+    ``f`` is ``a`` (all), ``f`` (API-Football), ``g`` (Gemini) or ``e`` (errors only); ``i`` is the
+    call id (an integer, so the buttons are stateless).
+    """
+
+    action: str
+    f: str = "a"
+    p: int = 0
+    i: int = 0
+
+
 class NoopCb(CallbackData, prefix="nx"):
     """Display-only button (day headers, page indicator)."""
 

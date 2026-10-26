@@ -45,6 +45,7 @@ def test_main_menu_matches_plan_layout() -> None:
         ["💾 Shablonlarim", "⚡ Bugungi signallar"],
         ["⭐ Sevimlilar", "🎟 Mening stavkalarim"],
         ["📈 Hisobot", "⚙️ Sozlamalar"],
+        ["🗄 Baza", "📡 So'rovlar"],
         ["ℹ️ Holat / Yordam"],
     ]
 

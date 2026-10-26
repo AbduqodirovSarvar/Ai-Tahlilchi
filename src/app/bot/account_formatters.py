@@ -52,7 +52,8 @@ def age_label(moment: datetime, now: datetime) -> str:
     return texts.STATUS_AGE_DAYS.format(days=hours // HOURS_PER_DAY)
 
 
-def _stamp(moment: datetime, zone: ZoneInfo) -> str:
+def stamp(moment: datetime, zone: ZoneInfo) -> str:
+    """``26.10 08:31`` in the user's zone (every stored instant is UTC)."""
     local = moment.astimezone(zone)
     return f"{short_date(local.date())} {clock(local.time())}"
 
@@ -77,7 +78,7 @@ def _quota_line(quota: ApiQuota) -> str:
 
 
 def _job_line(job: JobStatus, zone: ZoneInfo) -> str:
-    when = texts.STATUS_JOB_NEVER if job.last_run_at is None else _stamp(job.last_run_at, zone)
+    when = texts.STATUS_JOB_NEVER if job.last_run_at is None else stamp(job.last_run_at, zone)
     detail = f" ({escape(_cut(job.detail, MAX_DETAIL_CHARS))})" if job.detail else ""
     return texts.STATUS_JOB_LINE.format(
         mark="✅" if job.ok else "❌", name=escape(job.name), time=when, detail=detail
@@ -86,7 +87,7 @@ def _job_line(job: JobStatus, zone: ZoneInfo) -> str:
 
 def _error_line(entry: ErrorEntry, zone: ZoneInfo) -> str:
     return texts.STATUS_ERROR_LINE.format(
-        time=_stamp(entry.at, zone),
+        time=stamp(entry.at, zone),
         component=escape(entry.component),
         message=escape(_cut(entry.message, MAX_ERROR_CHARS)),
     )
@@ -117,7 +118,7 @@ def _refresh_block(status: SystemStatus, zone: ZoneInfo, now: datetime) -> list[
         return [texts.STATUS_REFRESH_NEVER]
     return [
         texts.STATUS_REFRESH.format(
-            time=_stamp(status.last_refresh_at, zone), age=age_label(status.last_refresh_at, now)
+            time=stamp(status.last_refresh_at, zone), age=age_label(status.last_refresh_at, now)
         )
     ]
 
@@ -143,7 +144,7 @@ def _learning_block(status: SystemStatus, zone: ZoneInfo) -> list[str]:
         when = (
             texts.STATUS_JOB_NEVER
             if job is None or job.last_run_at is None
-            else _stamp(job.last_run_at, zone)
+            else stamp(job.last_run_at, zone)
         )
         mark = "" if job is None else ("✅ " if job.ok else "❌ ")
         lines.append(texts.STATUS_LEARNING_JOB_LINE.format(mark=mark, name=label, time=when))
