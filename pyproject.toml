@@ -228,6 +228,7 @@ source_modules = [
 forbidden_modules = [
     "app.services.fake",
     "app.services._fake_browser",
+    "app.services._fake_calls",
     "app.services._fake_world",
     "app.services._fake_learning",
 ]

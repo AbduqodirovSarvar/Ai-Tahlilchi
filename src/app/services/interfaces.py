@@ -27,7 +27,16 @@ from enum import StrEnum
 from typing import Final, Protocol, Self, runtime_checkable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.domain import FixtureStatus, Market, MarketType, OddsKind, Selection, Sport
+from app.domain import (
+    CallOutcome,
+    FixtureStatus,
+    Market,
+    MarketType,
+    OddsKind,
+    Provider,
+    Selection,
+    Sport,
+)
 from app.services.errors import ValidationFailedError
 
 type SignalId = int
@@ -83,6 +92,8 @@ MIN_SEARCH_LENGTH: Final = 2
 MAX_SEARCH_RESULTS: Final = 20
 DEFAULT_PAGE_SIZE: Final = 8
 MAX_PAGE_SIZE: Final = 20
+MAX_CALL_STATS_DAYS: Final = 30
+"""Longest period of :meth:`CallLogService.call_stats` (the log keeps about this long)."""
 DEFAULT_TIMEZONE: Final = "Asia/Tashkent"
 _SATURDAY: Final = 5
 _SUNDAY: Final = 6
@@ -2574,6 +2585,119 @@ class DataBrowserService(Protocol):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CallLogEntry:
+    """One row of the provider call log (v1.12); the response text is only in the detail."""
+
+    call_id: int
+    at: datetime
+    provider: Provider
+    operation: str
+    outcome: CallOutcome
+    duration_ms: int
+    http_status: int | None
+    quota_cost: int
+    request_preview: str
+    """About the first 200 characters of the request."""
+
+    def __post_init__(self) -> None:
+        """UTC instant and non-negative counters."""
+        _check_utc(self.at, "at")
+        _check(self.duration_ms >= 0, "duration_ms", "must not be negative")
+        _check(self.quota_cost >= 0, "quota_cost", "must not be negative")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallLogRequest:
+    """A paged look at the call log, newest first, optionally for one provider or outcome."""
+
+    provider: Provider | None = None
+    outcome: CallOutcome | None = None
+    page: int = 0
+    page_size: int = DEFAULT_PAGE_SIZE
+
+    def __post_init__(self) -> None:
+        """Bounded pages."""
+        _check(self.page >= 0, "page", "must not be negative")
+        _check(1 <= self.page_size <= MAX_PAGE_SIZE, "page_size", f"must be 1..{MAX_PAGE_SIZE}")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallLogPage:
+    """A page of call log rows; ``page_count`` is 0 when nothing matched."""
+
+    items: tuple[CallLogEntry, ...]
+    page: int
+    page_count: int
+    total: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallLogDetail(CallLogEntry):
+    """One call with the whole (scrubbed, length-capped) request and response text."""
+
+    request: str
+    response: str | None
+    error: str | None
+    size_bytes: int | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallLogStat:
+    """Calls of one provider operation in a period (the admin's usage summary).
+
+    ``avg_duration_ms`` covers only calls that reached the provider (not cache hits or local
+    refusals); ``None`` when there were none.
+    """
+
+    provider: Provider
+    operation: str
+    calls: int
+    errors: int
+    cached: int
+    blocked: int
+    avg_duration_ms: int | None
+    quota_cost: int
+
+
+def check_call_stats_days(days: int) -> None:
+    """Reject a ``call_stats`` period outside 1..:data:`MAX_CALL_STATS_DAYS` (shared by impls)."""
+    _check(1 <= days <= MAX_CALL_STATS_DAYS, "days", f"must be 1..{MAX_CALL_STATS_DAYS}")
+
+
+class CallLogService(Protocol):
+    """The provider call log (v1.12): what was sent to API-Football and Gemini, for admins.
+
+    Every method is for administrators only (``NotAuthorizedError`` otherwise).
+    """
+
+    async def list_calls(self, user_id: int, request: CallLogRequest) -> CallLogPage:
+        """A page of calls, newest first. A page past the end is empty, not an error.
+
+        Raises:
+            NotAuthorizedError: the user is not an administrator.
+        """
+        ...
+
+    async def get_call(self, user_id: int, call_id: int) -> CallLogDetail:
+        """One call in full.
+
+        Raises:
+            NotAuthorizedError: the user is not an administrator.
+            NotFoundError: unknown or already pruned call.
+        """
+        ...
+
+    async def call_stats(self, user_id: int, *, days: int = 1) -> tuple[CallLogStat, ...]:
+        """Calls of the last ``days`` (1..:data:`MAX_CALL_STATS_DAYS`) per provider and operation.
+
+        Raises:
+            NotAuthorizedError: the user is not an administrator.
+            ValidationFailedError: ``days`` out of range.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Services:
     """Everything the bot needs, injected at startup (fake now, real services in F4)."""
 
@@ -2590,3 +2714,4 @@ class Services:
     express: ExpressService
     learning: LearningService
     browser: DataBrowserService
+    calls: CallLogService
