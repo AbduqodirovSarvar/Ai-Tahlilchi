@@ -57,10 +57,20 @@ class ScriptedBackend:
         self.usage = GeminiUsage(input_tokens=input_tokens, output_tokens=output_tokens)
 
     async def generate_json(
-        self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
+        self,
+        *,
+        system_instruction: str,
+        contents: str,
+        response_schema: type[BaseModel],
+        operation: str | None = None,
     ) -> GeminiResponse:
         self.requests.append(
-            {"system": system_instruction, "contents": contents, "schema": response_schema.__name__}
+            {
+                "system": system_instruction,
+                "contents": contents,
+                "schema": response_schema.__name__,
+                "operation": operation or "",
+            }
         )
         item = self.script.pop(0)
         if isinstance(item, BaseException):

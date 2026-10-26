@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from app.domain import Sport, normalize_name
 from app.logging import get_logger
 from app.services._fake_browser import FakeDataBrowserService
+from app.services._fake_calls import FakeCallLogService
 from app.services._fake_learning import FakeLearningService, FakeLearningState
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
@@ -1498,7 +1499,8 @@ def create_fake_services(
 ) -> Services:
     """All fake services over one shared in-memory state.
 
-    ``admin_ids`` limits who may refresh the database (``None`` = everyone).
+    ``admin_ids`` limits who may refresh the database and read the call log
+    (``None`` = everyone).
     """
     state = FakeState(clock)
     bets = FakeBetService(state)
@@ -1516,4 +1518,5 @@ def create_fake_services(
         express=FakeExpressService(state),
         learning=FakeLearningService(state.learning),
         browser=FakeDataBrowserService(state, admin_ids=admin_ids),
+        calls=FakeCallLogService(state, admin_ids=admin_ids),
     )

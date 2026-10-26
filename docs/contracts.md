@@ -455,9 +455,30 @@ Xatti-harakat o'zgarishi: `/eksport` CSV matn ustunlarida (liga, jamoalar, o'yin
 
 Kunlik qamrov: refresh mahalliy (`DISPLAY_TZ`) kunlarni oladi: `refresh_days_ahead` kunlik o'yinlar va `odds_days_ahead` kunlik narxlar, ularni qoplaydigan **barcha UTC kunlari** (Toshkent 01:00 o'yini oldingi UTC kuniga tushadi).
 
+**v1.12 qo'shimchalari (T7-C: provayder chaqiruvlari jurnali botga, faqat qo'shish; [ADR 0020](adr/0020-provider-call-log.md))**
+
+Hammasi **faqat admin** uchun: admin bo'lmaganga `NotAuthorizedError` (admin tekshiruvi `refresh_database` bilan bir xil: `admin_ids`, `None` = bot whitelist'i). Tekshiruv kirish tekshiruvidan oldin.
+
+| Nom | Turi | Ma'nosi |
+|---|---|---|
+| `CallLogService` (port) + `Services.calls` | port / majburiy maydon | `list_calls`, `get_call`, `call_stats` |
+| `list_calls(user_id, CallLogRequest) -> CallLogPage` | metod | Yangisi birinchi (`at`, tenglikda `id` kamayish). Filtr `provider`, `outcome` (VA). Oxiridan keyingi sahifa bo'sh (xato emas); `page_count` 0 = hech narsa topilmadi. Javob matni o'qilmaydi |
+| `get_call(user_id, call_id) -> CallLogDetail` | metod | To'liq `request`/`response`/`error`/`size_bytes`. Noma'lum yoki tozalab yuborilgan id: `NotFoundError("call", id)` |
+| `call_stats(user_id, *, days=1) -> tuple[CallLogStat, ...]` | metod | Oxirgi `days` (1..`MAX_CALL_STATS_DAYS` = 30, aks holda `ValidationFailedError`) uchun (provayder, operatsiya) bo'yicha, shu tartibda |
+| `CallLogEntry` | DTO | `call_id`, `at` (UTC), `provider` (`Provider`), `operation`, `outcome` (`CallOutcome`), `duration_ms`, `http_status`, `quota_cost`, `request_preview` (~200 belgi) |
+| `CallLogRequest` | DTO | `provider=None`, `outcome=None`, `page=0`, `page_size=DEFAULT_PAGE_SIZE` (1..`MAX_PAGE_SIZE`; xato: `ValidationFailedError`) |
+| `CallLogPage` | DTO | `items`, `page`, `page_count`, `total` |
+| `CallLogDetail(CallLogEntry)` | DTO | Entry maydonlari (jumladan `request_preview`) + `request`, `response` (keshdan/rad etilgan chaqiruvda `None`), `error`, `size_bytes` |
+| `CallLogStat` | DTO | `provider`, `operation`, `calls`, `errors`, `cached`, `blocked`, `avg_duration_ms` (`int`, faqat provayderga yetgan chaqiruvlar; yo'q bo'lsa `None`), `quota_cost` |
+| `MAX_CALL_STATS_DAYS`, `check_call_stats_days(days)` | konstanta / funksiya | 30; realizatsiyalar uchun umumiy tekshiruv |
+| `RealCallLogService` (`services/real/calls.py`), `FakeCallLogService` (`services/_fake_calls.py`) | amalga oshirish | Real `pipeline.data.list_calls/count_calls/get_call/call_stats` ustida. Fake: 14 qatorli namunaviy jurnal (`sample_call_records(now)`; API-Football ok/cached/quota_blocked/error, Gemini ok/error, 3 kunlik tarix); `create_fake_services(admin_ids=...)` jurnalga ham ta'sir qiladi |
+| `GeminiClient.generate_json(..., operation=None)`, `JsonGenerator` | parametr | Ixtiyoriy kalit so'zli argument: jurnal yozuvida `operation` (bo'lmasa javob sxemasi nomi). `LlmService` `"llm_review"` va `"post_mortem"` ni uzatadi (`llm.service.OPERATION_*`). Eski `JsonGenerator` fake lari `operation` ni qabul qilishi kerak (`**kwargs` yoki `operation: str | None = None`) |
+| `pipeline.data` | re-export | `list_calls`, `count_calls`, `get_call`, `call_stats`, `CallSummary`, `CallDetail`, `CallStat` |
+
 ## 5. Soxta servis — `src/app/services/fake.py`
 **Holat:** frozen v1 (orkestr tasdiqlagan, 2026-10-21), qo'shimchalar v1.1–v1.11 (fake va real servis shartnoma testlari bir xil) · **Versiya:** 1.11 · **Egasi:** pipeline-engineer
 
+- v1.12: `FakeCallLogService` (`_fake_calls.py`): namunaviy provayder jurnali; shartnoma testlari fake va real uchun bir xil (`tests/services/calls_contract.py`).
 - v1.11: `FakeDataBrowserService` (`_fake_browser.py`): sinov dunyosi "bazada saqlangandek" ko'rinadi (har kvotaga bitta ertalabki narx), 30 daqiqalik yangilash oralig'i va `admin_ids` real servisdagidek.
 - `create_fake_services(*, clock: Clock = system_clock, admin_ids: frozenset[int] | None = None) -> Services` — barcha protokollarning bitta umumiy xotira holati ustidagi soxta amalga oshirilishi (`FakeAnalysisService`, `FakeSignalService`, `FakeCatalogService`, `FakeSettingsService`, `FakeTemplateService`, `FakeWatchlistService`, `FakeBetService`, `FakeResultService`, `FakeReportService`, `FakeSystemStatusService`). `Clock = Callable[[], datetime]` (UTC).
 - Ma'lumot: hash asosida **deterministik** (tasodif yo'q): APL, La Liga, Seriya A, Bundesliga (futbol) va KHL (xokkey, `experimental=True`), soat bo'yicha "bugun" dan 7 kun oldin — 14 kun keyin, har kuni har ligada bitta o'yin; bozorlar 1X2, ikki natija, Total 2.5, BTTS, Fora −0.5 (xokkey: 1X2, Total 5.5). Tugagan o'yinlarning ~15% ida natija "API dan kelmagan" (`/natijalar` uchun).
@@ -560,3 +581,4 @@ LLM qadami **hech qachon istisno ko'tarmaydi** va pipeline'ni to'xtatmaydi: o'ch
 | 2026-10-23 | 6. Model API, 3. Baza sxemasi | v1.3 (T5 fix, faqat qo'shimcha): takroriy tekshiruvga qarshi himoya (99.5% oraliq, BH FDR, ketma-ket ikki run), `LEARNING_MODE` (`shadow` standart), Alembic `0009` (`learning_changes.applied`, `segment_stats.flagged`), `review_segments`, `confirmed`, `rollback_change`/`RollbackResult`, `load_overlay` ([ADR 0013 qo'shimchasi](adr/0013-learning-loop-math.md)) | quant-modeler | orkestr ko'rib chiqadi |
 | 2026-10-26 | 3. Baza sxemasi | v1.11 (T7-A, faqat qo'shimcha): Alembic `0010` (`provider_calls`), repo `record_call`/`list_calls`/`count_calls`/`get_call`/`purge_calls_older_than`/`call_stats`, `SqlCallRecorder`, klientlarga ixtiyoriy `recorder`, `CALL_LOG_RETENTION_DAYS` ([ADR 0020](adr/0020-provider-call-log.md)) | data-engineer | orkestr ko'rib chiqadi |
 | 2026-10-26 | 3. Baza (repo), 4. Servis shartnomasi, 5. Soxta servis | v1.11 (T7-B, faqat qo'shish): tahlil faqat bazadan (qaror #25): `DataStaleError`, `NotAuthorizedError`, `CostEstimate.data_stale/last_refresh_at`, `DataBrowserService` + `Services.browser` (baza ko'rish va adminning "Bazani yangilash" i), `db.repo.browse`, `pipeline.freshness`, `refresh_manual`, kunlik refresh mahalliy kunni to'liq qamraydi, `REFRESH_AT`/`MANUAL_REFRESH_MIN_MINUTES`, `max_quote_age` 30 soat ([ADR 0021](adr/0021-db-only-analysis.md)) | pipeline-engineer | orkestr ko'rib chiqadi |
+| 2026-10-26 | 4. Servis shartnomasi, 5. Soxta servis, 7. LLM API | v1.12 (T7-C, faqat qo'shish): `CallLogService` + `Services.calls` (majburiy maydon), `CallLogEntry/Request/Page/Detail/Stat`, `MAX_CALL_STATS_DAYS`; `generate_json(..., operation=None)`, `LlmService` vazifa nomlarini uzatadi ([ADR 0020](adr/0020-provider-call-log.md)) | pipeline-engineer | orkestr ko'rib chiqadi |

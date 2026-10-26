@@ -80,10 +80,15 @@ class ScriptedGemini:
         self.hook: Callable[[str], None] | None = None  # a chaos test's kill switch
 
     async def generate_json(
-        self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
+        self,
+        *,
+        system_instruction: str,
+        contents: str,
+        response_schema: type[BaseModel],
+        operation: str | None = None,
     ) -> GeminiResponse:
         """Answer from the candidate ids found in the prompt (the pipeline builds them)."""
-        del system_instruction, response_schema
+        del system_instruction, response_schema, operation
         if self.hook is not None:
             self.hook("gemini")
         self.requests += 1

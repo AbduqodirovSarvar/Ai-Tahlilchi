@@ -5,10 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from app.db.repo import record_call
+from app.services._fake_calls import sample_call_records
 from app.services.interfaces import Services
 from tests.pipeline.harness import Env, open_env
 from tests.pipeline.world import World
 from tests.services.browser_contract import BrowserContract
+from tests.services.calls_contract import CallLogContract
 from tests.services.contract_suite import (
     AnalysisContract,
     BetContract,
@@ -118,3 +121,12 @@ class TestExpress(ExpressContract):
 
 class TestBrowser(BrowserContract):
     pass
+
+
+class TestCallLog(CallLogContract):
+    @pytest.fixture(autouse=True)
+    async def logged_calls(self, env: Env) -> None:
+        """The real log holds the same sample set the fake lays out itself."""
+        async with env.sessions.begin() as session:
+            for record in sample_call_records(env.clock.now):
+                await record_call(session, record)
