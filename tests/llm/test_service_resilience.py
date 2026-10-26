@@ -214,9 +214,14 @@ class FuzzBackend:
         self.behaviours = behaviours
 
     async def generate_json(
-        self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
+        self,
+        *,
+        system_instruction: str,
+        contents: str,
+        response_schema: type[BaseModel],
+        operation: str | None = None,
     ) -> GeminiResponse:
-        del system_instruction, contents, response_schema
+        del system_instruction, contents, response_schema, operation
         item = self.behaviours.pop(0) if self.behaviours else RuntimeError("exhausted")
         if isinstance(item, Exception):
             raise item

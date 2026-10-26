@@ -19,6 +19,7 @@ from app.services.real.account import (
 )
 from app.services.real.analysis import RealAnalysisService
 from app.services.real.browser import RealDataBrowserService
+from app.services.real.calls import RealCallLogService
 from app.services.real.core import Core
 from app.services.real.learning import RealLearningService
 from app.services.real.notifier import LogOnlyNotifier, NotifierDelivery
@@ -66,5 +67,6 @@ def create_real_services(
         express=RealExpressService(core),
         learning=RealLearningService(core),
         browser=RealDataBrowserService(core),
+        calls=RealCallLogService(core),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

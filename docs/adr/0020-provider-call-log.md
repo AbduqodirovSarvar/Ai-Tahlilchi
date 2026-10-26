@@ -33,5 +33,5 @@ Asos: bepul tarif 100 so'rov/kun; Gemini bepul tarifda kuniga taxminan 20–50 c
 ## Oqibatlar
 - Plyus: admin har bir so'rovni ko'radi; kvota sarfi `call_stats` bilan tushuntiriladi; xatolar kontekst bilan saqlanadi.
 - Minus: baza ~100 MB gacha o'sadi; har provayder chaqiruvi bitta qo'shimcha qisqa yozuv tranzaksiyasi (~ms) qo'shadi.
-- Cheklovlar: yozuv yo'qolishi mumkin (qulf, to'liq disk); Gemini `operation` — sxema nomi, vazifa nomi emas (LLM xizmati vazifa nomini bersa, `generate_json` ga ixtiyoriy argument qo'shiladi); bir vaqtda bir xil so'rovni kutgan chaqiruvchilar (single-flight) bitta yozuv oladi (bitta haqiqiy so'rov); `ApiClient` yozuvlarda doimo `Provider.API_FOOTBALL` deb belgilanadi (hozircha yagona HTTP provayder).
+- Cheklovlar: yozuv yo'qolishi mumkin (qulf, to'liq disk); Gemini `operation` — T7-C dan boshlab vazifa nomi (`llm_review`, `post_mortem`; `generate_json(..., operation=)`), berilmasa sxema nomi; bir vaqtda bir xil so'rovni kutgan chaqiruvchilar (single-flight) bitta yozuv oladi (bitta haqiqiy so'rov); `ApiClient` yozuvlarda doimo `Provider.API_FOOTBALL` deb belgilanadi (hozircha yagona HTTP provayder).
 - Kelajak: ikkinchi HTTP provayder qo'shilsa, `ProviderConfig` ga `Provider` maydoni qo'shiladi.
