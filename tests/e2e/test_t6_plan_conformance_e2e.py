@@ -5,6 +5,7 @@ Telegram notifier) is used where the claim depends on data; they complement the 
 suites by running the same claims over the production pipeline.
 """
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from aiogram.methods import EditMessageText, SendMessage
 
 from app.bot import texts
 from app.bot.formatters import format_signal_card
+from app.pipeline.refresh import refresh
 from app.scheduler import JOB_REFRESH
 from app.services.interfaces import (
     AnalysisQuery,
@@ -62,8 +64,17 @@ async def test_6_2_the_future_is_limited_to_the_horizon(week: Week) -> None:
     assert len(week.provider.calls) == before  # nothing was fetched for a refused request
 
 
+async def refresh_a_week_ahead(week: Week) -> None:
+    """Analyses read the database: a refresh reaching a week ahead is what puts far matches in."""
+    wide = replace(
+        week.ctx, config=replace(week.ctx.config, refresh_days_ahead=7, odds_days_ahead=7)
+    )
+    await refresh(wide, force=True)
+
+
 async def test_6_2_matches_more_than_three_days_away_are_marked_preliminary(week: Week) -> None:
     await week.settings(USER, **PERMISSIVE)
+    await refresh_a_week_ahead(week)
     result = await week.services.analysis.analyze(
         USER,
         AnalysisQuery(
@@ -150,6 +161,7 @@ async def test_6_13_a_users_note_reaches_the_next_language_model_prompt(week: We
     # a later review that involves the same teams sees the note as context
     at(week, 22, 3, 0)
     week.provider.exhausted = False
+    await refresh_a_week_ahead(week)  # the next morning's refresh fills the database
     result = await week.services.analysis.analyze(
         USER,
         AnalysisQuery(

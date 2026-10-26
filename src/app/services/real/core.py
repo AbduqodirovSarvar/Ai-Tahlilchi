@@ -46,6 +46,9 @@ class Core:
 
     ctx: PipelineContext
     busy: set[int] = field(default_factory=set)
+    admin_ids: frozenset[int] | None = None
+    """Who may refresh the database; ``None`` = everyone who reached the service (the bot's
+    whitelist is the administrator list)."""
 
     @property
     def engine(self) -> AnalysisEngine:
@@ -59,6 +62,10 @@ class Core:
     def local_today(self, zone: ZoneInfo) -> date:
         """Today's date in ``zone`` according to the injected clock."""
         return self.now().astimezone(zone).date()
+
+    def is_admin(self, user_id: int) -> bool:
+        """True when ``user_id`` may run administrator actions."""
+        return self.admin_ids is None or user_id in self.admin_ids
 
     async def ensure_user(self, user_id: int) -> None:
         """Create the user row on first contact (signals and bets reference it)."""

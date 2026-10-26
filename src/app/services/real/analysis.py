@@ -1,9 +1,11 @@
 """Real :class:`~app.services.interfaces.AnalysisService` on top of the pipeline.
 
 The service owns the rules that belong to a *user action*: the window rules (horizon, retro
-look-back), one running analysis per user, the manual-reserve budget, the 10-minute recalc
-cooldown per fixture and ownership. The calculation itself is the pipeline's single analysis
-path (:class:`~app.pipeline.analyze.AnalysisEngine`).
+look-back), one running analysis per user, the 10-minute recalc cooldown per fixture and
+ownership. Nothing here calls the data provider (decision #25): analyses and manual
+recalculations read the database, and a database that was not refreshed lately is reported as
+:class:`~app.services.errors.DataStaleError`. The calculation itself is the pipeline's single
+analysis path (:class:`~app.pipeline.analyze.AnalysisEngine`).
 """
 
 import json
@@ -17,7 +19,7 @@ from app.pipeline import data
 from app.pipeline.data import QueryScope, SignalVersionReason, SortOrder
 from app.pipeline.data import SignalSource as StoredSource
 from app.pipeline.detail import VenueStats, build_fixture_card
-from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
+from app.pipeline.freshness import StaleDataError
 from app.pipeline.ledger import STAMP_DAY, LedgerKey
 from app.pipeline.limits import load_loss_status
 from app.pipeline.profile import UserProfile
@@ -25,9 +27,9 @@ from app.pipeline.provider import MANUAL
 from app.pipeline.recalc import RecalcOptions, RecalcResult, RecalcVerdict, recalc_signals
 from app.pipeline.types import AnalysisOutcome, AnalysisRequest
 from app.services.errors import (
-    BudgetExceededError,
     BusyError,
     CooldownActiveError,
+    DataStaleError,
     NotFoundError,
     ServiceUnavailableError,
     ValidationFailedError,
@@ -108,13 +110,12 @@ def window_of(core: Core, dates: DateSpec, profile: UserProfile) -> DateWindow:
 
 
 def build_request(
-    core: Core, profile: UserProfile, query: AnalysisQuery, window: DateWindow
+    profile: UserProfile, query: AnalysisQuery, window: DateWindow
 ) -> AnalysisRequest:
     """The pipeline request for ``query`` under the user's settings."""
     s = profile.settings
     start, end = window.utc_bounds(profile.zone)
     ids = parse_ids(query.scope_ids, "scope_ids")
-    retro = window.is_retro(core.local_today(profile.zone))
     return AnalysisRequest(
         user_id=profile.user_id,
         start=start,
@@ -142,7 +143,6 @@ def build_request(
         unit=profile.unit,
         prematch_minutes=s.prematch_minutes,
         purpose=MANUAL,
-        fetch=not retro,
     )
 
 
@@ -157,13 +157,15 @@ class RealAnalysisService:
         """See :meth:`AnalysisService.estimate_cost`."""
         profile = await self._core.profile(user_id)
         window = window_of(self._core, query.dates, profile)
-        request = build_request(self._core, profile, query, window)
+        request = build_request(profile, query, window)
         plan = await self._core.engine.plan(request)
         return CostEstimate(
             window=window,
             fixtures_found=plan.fixtures_found,
             api_requests=plan.api_requests,
             budget_remaining=plan.budget_remaining,
+            data_stale=plan.data_stale,
+            last_refresh_at=plan.last_refresh_at,
         )
 
     async def analyze(
@@ -184,7 +186,7 @@ class RealAnalysisService:
         core = self._core
         profile = await core.profile(user_id)
         window = window_of(core, query.dates, profile)
-        request = build_request(core, profile, query, window)
+        request = build_request(profile, query, window)
         await core.ensure_user(user_id)
 
         async def sink(stage: str, done: int, total: int) -> None:
@@ -192,10 +194,8 @@ class RealAnalysisService:
 
         try:
             outcome = await core.engine.run(request, progress=sink)
-        except BudgetExhaustedError as error:
-            raise BudgetExceededError(error.needed, error.available) from error
-        except ProviderUnavailableError as error:
-            raise ServiceUnavailableError(error.provider, error.detail) from error
+        except StaleDataError as error:
+            raise DataStaleError(error.last_refresh_at) from error
         query_id = await self._remember(user_id, outcome)
         retro = window.is_retro(core.local_today(profile.zone))
         # A look-back recommends nothing, so the responsible-gaming banner has no meaning there.
@@ -419,6 +419,7 @@ def _numbers(record: data.SignalRecord) -> SignalNumbers:
 
 
 def _manual_options() -> RecalcOptions:
+    """A user's recalculation re-prices from the database only (decision #25)."""
     return RecalcOptions(
-        reason=SignalVersionReason.RECALC, purpose=MANUAL, odds_kind=OddsKind.RECALC
+        reason=SignalVersionReason.RECALC, purpose=MANUAL, odds_kind=OddsKind.RECALC, fetch=False
     )

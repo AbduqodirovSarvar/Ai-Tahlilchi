@@ -17,7 +17,6 @@ from app.pipeline.prematch import run_due_recalcs
 from app.pipeline.profile import default_request, load_profile
 from app.pipeline.refresh import refresh
 from app.pipeline.settle import run_settlement
-from app.services.errors import BudgetExceededError, ServiceUnavailableError
 from app.services.interfaces import (
     AnalysisQuery,
     DateSpec,
@@ -101,38 +100,39 @@ async def test_refresh_fetches_results_of_finished_matches(provider_env: Env) ->
 
 
 # ------------------------------------------------------------------------------ analysis
-async def test_estimate_then_manual_analysis_spends_then_is_cached(provider_env: Env) -> None:
+async def test_analysis_after_the_refresh_never_calls_the_provider(provider_env: Env) -> None:
     services = provider_env.system.services
     query = AnalysisQuery(dates=DateSpec.next_days(2), **PERMISSIVE)
-    estimate = await services.analysis.estimate_cost(USER, query)
-    assert estimate.api_requests > 0
-    assert estimate.within_budget
+    await refresh(provider_env.ctx)
+    calls = list(scripted(provider_env).calls)
 
+    estimate = await services.analysis.estimate_cost(USER, query)
     result = await services.analysis.analyze(USER, query)
 
+    assert estimate.api_requests == 0
     assert result.signals
-    purposes = {purpose for _, purpose in scripted(provider_env).calls}
-    assert purposes == {"manual"}
-    assert (await services.analysis.estimate_cost(USER, query)).api_requests == 0
+    assert result.api_requests_used == 0
+    assert scripted(provider_env).calls == calls
 
 
-async def test_manual_analysis_with_a_spent_reserve_is_refused(provider_env: Env) -> None:
+async def test_a_spent_api_budget_does_not_stop_an_analysis_of_stored_data(
+    provider_env: Env,
+) -> None:
     services = provider_env.system.services
-    scripted(provider_env).exhausted = True
     query = AnalysisQuery(dates=DateSpec.next_days(2), **PERMISSIVE)
+    await refresh(provider_env.ctx)
+    scripted(provider_env).exhausted = True
 
-    estimate = await services.analysis.estimate_cost(USER, query)
-    assert not estimate.within_budget
-    with pytest.raises(BudgetExceededError):
-        await services.analysis.analyze(USER, query)
+    assert (await services.analysis.analyze(USER, query)).signals
 
 
-async def test_a_provider_outage_is_reported_to_the_bot(provider_env: Env) -> None:
+async def test_a_provider_outage_does_not_touch_an_analysis(provider_env: Env) -> None:
+    services = provider_env.system.services
+    query = AnalysisQuery(dates=DateSpec.next_days(2), **PERMISSIVE)
+    await refresh(provider_env.ctx)
     scripted(provider_env).fail_with = ProviderUnavailableError("api-football", "down")
-    with pytest.raises(ServiceUnavailableError):
-        await provider_env.system.services.analysis.analyze(
-            USER, AnalysisQuery(dates=DateSpec.next_days(2), **PERMISSIVE)
-        )
+
+    assert (await services.analysis.analyze(USER, query)).signals
 
 
 async def test_automatic_analysis_lets_a_failed_fetch_pass(provider_env: Env) -> None:

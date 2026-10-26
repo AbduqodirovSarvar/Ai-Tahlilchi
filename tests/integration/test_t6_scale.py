@@ -29,6 +29,7 @@ from app.domain import (
     Sport,
 )
 from app.pipeline.context import PipelineContext
+from app.pipeline.freshness import mark_fresh
 from app.pipeline.ledger import Ledger
 from app.services.interfaces import (
     AnalysisQuery,
@@ -115,6 +116,7 @@ async def big(big_template: tuple[Path, Scale], tmp_path: Path) -> AsyncIterator
     slow = Slow()
     slow.attach(engine)
     ctx = PipelineContext(sessions=sessions, ledger=Ledger(sessions), clock=clock)
+    await mark_fresh(ctx)  # analyses read the database only and refuse a stale one
     system = create_real_services(ctx)
     try:
         yield Big(ctx, system, slow, clock, engine)

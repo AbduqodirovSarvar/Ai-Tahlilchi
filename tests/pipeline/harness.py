@@ -17,6 +17,7 @@ from app.domain import Sport
 from app.pipeline.config import PipelineConfig
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import NullDelivery
+from app.pipeline.freshness import mark_fresh
 from app.pipeline.ledger import Ledger
 from app.pipeline.provider import SportProvider
 from app.pipeline.review import CandidateReviewer, NoReview
@@ -88,8 +89,13 @@ async def open_env(  # noqa: PLR0913 - one switch per thing a test may vary
     config: PipelineConfig | None = None,
     reveal_results: bool = True,
     reviewer: CandidateReviewer | None = None,
+    fresh: bool = True,
 ) -> AsyncIterator[Env]:
-    """A fresh copy of the seeded database wired into the real services."""
+    """A fresh copy of the seeded database wired into the real services.
+
+    ``fresh``: the database counts as refreshed at the start (analyses read the database only
+    and refuse a stale one); pass ``False`` to test the stale case.
+    """
     shutil.copy(template, target)
     engine = create_engine(target)
     sessions = create_session_factory(engine)
@@ -103,6 +109,8 @@ async def open_env(  # noqa: PLR0913 - one switch per thing a test may vary
         config=config or PipelineConfig(),
         reviewer=reviewer or NoReview(),
     )
+    if fresh:
+        await mark_fresh(ctx)
     notifier = FakeNotifier()
     system = create_real_services(ctx, notifier)
     feed = ResultFeed(ctx, world, NullDelivery())

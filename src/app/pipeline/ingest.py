@@ -5,14 +5,12 @@ No database session is open while a provider request is in flight, and each writ
 committed transaction, so a crash or a quota error between steps loses nothing that was
 already fetched. Writes are idempotent upserts.
 
-Data coverage (which days of fixtures and odds were fetched, and when) is remembered in the
-ledger, so neither a restart nor a second user's request repeats a fetch and cost estimates
-know what is already cached.
+Only the daily refresh, the administrator's manual refresh and the settle/pre-match jobs call
+these functions: an analysis never does (ADR 0021).
 """
 
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
-from typing import Final
 
 from app.db.repo import league_teams, upsert_live
 from app.domain import ExternalRef, FixtureResult, OddsKind, Sport
@@ -25,9 +23,6 @@ from app.sports.base import FixtureQuery
 
 logger = get_logger(__name__)
 
-FIXTURES_COVERAGE: Final = "cover.fixtures"
-ODDS_COVERAGE: Final = "cover.odds"
-
 
 def provider_of(ctx: PipelineContext, sport: Sport) -> SportProvider:
     """The provider of ``sport``.
@@ -39,23 +34,6 @@ def provider_of(ctx: PipelineContext, sport: Sport) -> SportProvider:
     if provider is None:
         raise ProviderUnavailableError(str(sport), "no data provider is configured")
     return provider
-
-
-async def is_covered(
-    ctx: PipelineContext, job: str, day: date, *, ttl: timedelta, sport: Sport = Sport.FOOTBALL
-) -> bool:
-    """True when ``day`` was fetched for ``job`` less than ``ttl`` ago."""
-    stamped = await ctx.ledger.stamped_at(job, f"{sport.value}:{day.isoformat()}")
-    return stamped is not None and ctx.clock() - stamped < ttl
-
-
-async def mark_covered(
-    ctx: PipelineContext, job: str, days: Sequence[date], *, sport: Sport = Sport.FOOTBALL
-) -> None:
-    """Remember that ``days`` were fetched for ``job`` just now."""
-    now = ctx.clock()
-    for day in days:
-        await ctx.ledger.stamp(job, f"{sport.value}:{day.isoformat()}", now=now)
 
 
 def days_between(start: date, end: date) -> list[date]:
@@ -91,31 +69,24 @@ async def ingest_fixtures(
             )
     async with ctx.sessions.begin() as session:
         await upsert_live(session, fixtures=fixtures)
-    await mark_covered(ctx, FIXTURES_COVERAGE, days_between(date_from, date_to), sport=sport)
     return len(fixtures)
 
 
-async def ingest_odds(  # noqa: PLR0913 - one fetch described by its parts
+async def ingest_odds(
     ctx: PipelineContext,
     sport: Sport,
     fixtures: Sequence[ExternalRef],
     *,
     kind: OddsKind,
     purpose: Purpose,
-    days: Sequence[date] = (),
 ) -> int:
-    """Fetch current prices of ``fixtures`` as ``kind`` and store them; returns rows written.
-
-    ``days`` are the UTC days to record as covered afterwards.
-    """
+    """Fetch current prices of ``fixtures`` as ``kind`` and store them; returns rows written."""
     if not fixtures:
         return 0
     adapter = provider_of(ctx, sport).adapter(purpose)
     snapshots = await adapter.fetch_odds(list(fixtures), kind=kind)
     async with ctx.sessions.begin() as session:
         await upsert_live(session, odds=snapshots)
-    if days:
-        await mark_covered(ctx, ODDS_COVERAGE, days, sport=sport)
     return len(snapshots)
 
 

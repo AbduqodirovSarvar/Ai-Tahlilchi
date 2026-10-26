@@ -191,9 +191,13 @@ async def test_api_quota_exhausted_gives_clear_notices_and_nothing_crashes(week:
     methods = await client.press_data(recalc_data, recalc_id)
     body = "\n".join(m.text for m in methods if isinstance(m, SendMessage | EditMessageText))
     assert "holatiga" in body  # the numbers of 11:00, said plainly
+    calls = len(w.provider.calls)
     sent = await client.send("/tahlil 7kun 50% ev3% 10ta")
     shown_text = "\n".join(m.text for m in sent if isinstance(m, SendMessage))
-    assert "API limitidan oshadi" in shown_text
+    # the analysis reads the database: a spent API quota neither blocks it nor is touched by it
+    assert "API limitidan oshadi" not in shown_text
+    assert "So'rov" in shown_text
+    assert len(w.provider.calls) == calls
     at(w, 22, 3, 30)
     await jobs(w).run(JOB_REFRESH)  # reported, never raised
     status = await client.send("/holat")

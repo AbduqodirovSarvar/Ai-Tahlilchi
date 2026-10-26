@@ -8,6 +8,7 @@ import pytest
 from app.services.interfaces import Services
 from tests.pipeline.harness import Env, open_env
 from tests.pipeline.world import World
+from tests.services.browser_contract import BrowserContract
 from tests.services.contract_suite import (
     AnalysisContract,
     BetContract,
@@ -112,4 +113,8 @@ class TestExportBets(ExportBetsContract):
 
 
 class TestExpress(ExpressContract):
+    pass
+
+
+class TestBrowser(BrowserContract):
     pass

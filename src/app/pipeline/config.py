@@ -1,10 +1,11 @@
 """Tunable numbers of the pipeline (nothing here is read from the environment)."""
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Final
+from zoneinfo import ZoneInfo
 
 from app.domain import BOOKMAKER_1XBET, BOOKMAKER_PINNACLE
 from app.errors import ConfigurationError
@@ -14,6 +15,11 @@ from app.pipeline.review import DEFAULT_REVIEW_TIMEOUT, DEFAULT_REVIEW_TOTAL_TIM
 
 HISTORY_DAYS: Final = 1100
 """Model fit window (the backtest's choice, ADR 0005)."""
+DEFAULT_DISPLAY_ZONE: Final = ZoneInfo("Asia/Tashkent")
+DEFAULT_REFRESH_AT: Final = time(8, 30)
+DEFAULT_MANUAL_REFRESH_MIN_INTERVAL: Final = timedelta(minutes=30)
+DEFAULT_MAX_QUOTE_AGE: Final = timedelta(hours=30)
+"""One daily refresh plus slack: analysis reads the database only (ADR 0021)."""
 
 
 class StakingMode(StrEnum):
@@ -45,16 +51,22 @@ class PipelineConfig:
     min_team_matches: int = MIN_TEAM_MATCHES
     staking: StakingMode = StakingMode.FLAT
     flat_unit: Decimal = Decimal(1)
+    display_zone: ZoneInfo = DEFAULT_DISPLAY_ZONE
+    """The zone whose calendar days the refresh covers (a local day spans two UTC days)."""
+    refresh_at: time = DEFAULT_REFRESH_AT
+    """Local (``display_zone``) wall-clock time of the daily refresh job."""
+    manual_refresh_min_interval: timedelta = DEFAULT_MANUAL_REFRESH_MIN_INTERVAL
+    """Shortest gap between two administrator-triggered refreshes (protects the daily quota)."""
     refresh_days_ahead: int = 3
-    """Days of fixtures the daily refresh loads (today included)."""
+    """Local days of fixtures the daily refresh loads (today included)."""
     odds_days_ahead: int = 2
-    """Days of odds the daily refresh loads (today included)."""
+    """Local days of odds the daily refresh loads (today included)."""
     xg_per_refresh: int = 10
     """Most newly finished fixtures per refresh for which expected goals are fetched."""
-    fixtures_ttl: timedelta = timedelta(hours=12)
-    odds_ttl: timedelta = timedelta(hours=3)
-    max_quote_age: timedelta = timedelta(hours=6)
-    """Oldest bookmaker quote a decision may use (twice ``odds_ttl``); older = no decision."""
+    max_quote_age: timedelta = DEFAULT_MAX_QUOTE_AGE
+    """Oldest bookmaker quote a decision may use; older = no decision.
+
+    Also the age at which the database counts as not updated (``DataStaleError``)."""
     max_quote_skew: timedelta = timedelta(hours=3)
     """Largest gap between the bet quote and the anchor quote it is compared with."""
     match_duration: timedelta = timedelta(hours=2)
@@ -87,6 +99,9 @@ class PipelineConfig:
             raise ConfigurationError(msg)
         if self.postmortems_per_run < 1 or self.postmortem_lookback <= timedelta(0):
             msg = "postmortems_per_run must be at least 1 and postmortem_lookback positive"
+            raise ConfigurationError(msg)
+        if self.manual_refresh_min_interval < timedelta(0):
+            msg = "manual_refresh_min_interval must not be negative"
             raise ConfigurationError(msg)
         if self.refresh_days_ahead < 1 or self.odds_days_ahead < 1:
             msg = "refresh_days_ahead and odds_days_ahead must be at least 1"

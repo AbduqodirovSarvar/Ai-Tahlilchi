@@ -172,6 +172,7 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
             PipelineJobs(runtime.ctx, system.delivery, heartbeat=Heartbeat.from_settings(settings)),
             db_path=settings.jobs_db_path,
             timezone=settings.display_timezone,
+            refresh_at=settings.refresh_at,
         )
         dispatcher = build_dispatcher(
             admin_ids,

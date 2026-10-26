@@ -118,6 +118,7 @@
 - [ ] Butun kod bazasi sharhi (code-reviewer)
 - [x] TLS ishonch sozlamasi (infra-engineer, 2026-10-23): `TLS_USE_SYSTEM_TRUST_STORE` / `TLS_CA_BUNDLE`, `src/app/tls.py`, aiogram/httpx/Gemini ulanishi, `docker-compose.proxy.yml` ishga tushirishda ham CA ni ulaydi ([ADR 0017](adr/0017-tls-trust-configuration.md))
 - [x] T6 fix-b: infratuzilma sharh topilmalari (infra-engineer, 2026-10-23, [ADR 0018](adr/0018-t6-ops-hardening.md)): `HEALTHCHECKS_URL` `SecretStr` va HTTP klient loglari WARNING; ping tanasi faqat qisqa kod; backup/verify vaqtinchalik fayllari baza yonida, `pre-restore/` da 5 nusxa; rejalashtiruvchi alohida `jobs.db`, bot ulangandan keyin start, ichki qorovul (kod 3); `APP_VERSION`/`GIT_SHA` va `app.ops.version`; `HANDICAP_CONVENTION` aniq berilmasa `real` ishga tushmaydi; deploy: yashil CI sharti, `IMAGE_REFERENCE` tekshiruvi, majburiy `SSH_KNOWN_HOSTS`; CI tezkor/sekin testlarga bo'lindi; Dependabot va haftalik `pip-audit`; `pandas`/`scikit-learn`/`ODDS_API_KEY` olib tashlandi (image 938 -> 768 MB); `clean_worktrees.sh`
+- [x] T7-B: tahlil faqat bazadan (pipeline-engineer, 2026-10-26, [ADR 0021](adr/0021-db-only-analysis.md), qaror #25): `DataStaleError`, kunlik refresh mahalliy kunni qamraydi (`REFRESH_AT`), adminning "Bazani yangilash" i (`refresh_manual`, `MANUAL_REFRESH_MIN_MINUTES`), `DataBrowserService` (shartnoma v1.11, fake + real). Bot qismi (`/baza`, tugma) hali yozilmagan
 - [ ] Production deploy va zaxiradan tiklash sinovi (foydalanuvchi: server va kalitlar kerak)
 
 ## F10 — Paper trading

@@ -3,7 +3,8 @@
 Jobs
 ----
 - ``settle``: 08:00 every day (display time zone), results -> outcomes, profit, CLV;
-- ``refresh``: 08:30 every day, fixtures/results/odds into the local cache;
+- ``refresh``: 08:30 every day (``REFRESH_AT``), fixtures/results/odds into the database, the data
+  every analysis reads (ADR 0021);
 - ``learning``: 09:00 every Monday, segment review and calibration (F8.5, F8.6);
 - ``feedback``: 08:45 every day, after the results are in: post-mortems of the new losses and the
   lessons built from them (F8.3, F8.4); ``lessons``: 09:30 every Monday, the lesson maintenance
@@ -56,6 +57,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.logging import get_logger
 from app.ops.heartbeat import Heartbeat, PingKind
 from app.pipeline.alerts import alert_throttled
+from app.pipeline.config import DEFAULT_REFRESH_AT
 from app.pipeline.context import PipelineContext
 from app.pipeline.daily import run_due_digests
 from app.pipeline.delivery import Delivery
@@ -80,7 +82,6 @@ FEEDBACK_AT: Final = time(8, 45)
 LESSONS_AT: Final = time(9, 30)
 RETENTION_AT: Final = time(4, 0)
 RETENTION_WEEKDAY: Final = "sun"
-REFRESH_AT: Final = time(8, 30)
 DAILY_GRACE_SECONDS: Final = 6 * 3600
 TICK_GRACE_SECONDS: Final = 60
 TICK_SECONDS: Final = 60
@@ -313,13 +314,18 @@ class PipelineScheduler:
         db_path: Path,
         timezone: ZoneInfo,
         stop_timeout: float = STOP_TIMEOUT_SECONDS,
+        refresh_at: time = DEFAULT_REFRESH_AT,
     ) -> None:
-        """Persist the schedule in the SQLite file ``db_path``; cron jobs use ``timezone``."""
+        """Persist the schedule in the SQLite file ``db_path``; cron jobs use ``timezone``.
+
+        ``refresh_at`` is the local time of the daily database refresh (``REFRESH_AT``).
+        """
         self._started_at: float | None = None
         install(jobs)
         self._tracker = _tracker
         self._stop_timeout = stop_timeout
         self._timezone = timezone
+        self._refresh_at = refresh_at
         self._scheduler = AsyncIOScheduler(
             jobstores={"default": SQLAlchemyJobStore(url=f"sqlite:///{db_path.as_posix()}")},
             timezone=timezone,
@@ -372,7 +378,9 @@ class PipelineScheduler:
             (
                 JOB_REFRESH,
                 CronTrigger(
-                    hour=REFRESH_AT.hour, minute=REFRESH_AT.minute, timezone=self._timezone
+                    hour=self._refresh_at.hour,
+                    minute=self._refresh_at.minute,
+                    timezone=self._timezone,
                 ),
                 DAILY_GRACE_SECONDS,
             ),

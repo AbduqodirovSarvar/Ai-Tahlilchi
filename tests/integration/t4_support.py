@@ -43,6 +43,7 @@ from app.domain import (
 )
 from app.pipeline.config import PipelineConfig
 from app.pipeline.context import PipelineContext
+from app.pipeline.freshness import mark_fresh
 from app.pipeline.ledger import Ledger
 from app.pipeline.provider import SportProvider
 from app.pipeline.review import CandidateReviewer, NoReview
@@ -86,8 +87,13 @@ async def open_bare(  # noqa: PLR0913 - one switch per thing a test may vary
     reviewer: CandidateReviewer | None = None,
     notifier: FakeNotifier | None = None,
     now: datetime = START,
+    fresh: bool = True,
 ) -> AsyncIterator[Bare]:
-    """A fresh database with ``batch`` stored, wired into the real services."""
+    """A fresh database with ``batch`` stored, wired into the real services.
+
+    ``fresh``: count the data as refreshed at ``now`` (analyses read the database only and
+    refuse a stale one, ADR 0021).
+    """
     engine = create_engine(path)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -105,6 +111,8 @@ async def open_bare(  # noqa: PLR0913 - one switch per thing a test may vary
         config=config or PipelineConfig(),
         reviewer=reviewer or NoReview(),
     )
+    if fresh:
+        await mark_fresh(ctx)
     notifier = notifier or FakeNotifier()
     system = create_real_services(ctx, notifier)
     try:

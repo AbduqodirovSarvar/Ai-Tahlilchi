@@ -5,7 +5,7 @@ data the message needs (which field was wrong, how long to wait, how many reques
 missing) instead of a pre-formatted sentence.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.errors import AppError
 
@@ -80,3 +80,27 @@ class BusyError(ServiceError):
         """Remember whose analysis is running, for the log."""
         super().__init__(f"an analysis for user {user_id} is already running")
         self.user_id = user_id
+
+
+class DataStaleError(ServiceError):
+    """The database was not refreshed recently enough to analyse upcoming matches (v1.11).
+
+    Analysis reads only the database (decision #25). The bot tells the user when the last
+    update was (``None`` = never) and that an administrator can press "Bazani yangilash".
+    """
+
+    def __init__(self, last_refresh_at: datetime | None) -> None:
+        """``last_refresh_at`` is a UTC instant; ``None`` = the database was never refreshed."""
+        when = "never" if last_refresh_at is None else last_refresh_at.isoformat()
+        super().__init__(f"database not refreshed (last refresh: {when})")
+        self.last_refresh_at = last_refresh_at
+
+
+class NotAuthorizedError(ServiceError):
+    """The user may not do this (v1.11): refreshing the database is for administrators."""
+
+    def __init__(self, user_id: int, action: str) -> None:
+        """Remember who tried what, for the log."""
+        super().__init__(f"user {user_id} may not {action}")
+        self.user_id = user_id
+        self.action = action

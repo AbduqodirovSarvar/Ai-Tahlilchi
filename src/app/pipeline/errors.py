@@ -6,6 +6,8 @@ failure :class:`ProviderUnavailableError`. The real services map them to the con
 ``BudgetExceededError`` / ``ServiceUnavailableError``.
 """
 
+from datetime import timedelta
+
 from app.errors import AppError
 
 
@@ -31,6 +33,15 @@ class ProviderUnavailableError(PipelineError):
         super().__init__(f"{provider} unavailable: {detail}")
         self.provider = provider
         self.detail = detail
+
+
+class RefreshTooSoonError(PipelineError):
+    """An administrator asked for a database refresh again before the minimum gap passed."""
+
+    def __init__(self, retry_after: timedelta) -> None:
+        """``retry_after`` is the remaining wait (always positive)."""
+        super().__init__(f"database refreshed recently, retry after {retry_after}")
+        self.retry_after = retry_after
 
 
 class DeliveryNotConfirmedError(PipelineError):
