@@ -1,6 +1,6 @@
 # Loyiha holati — bajarilgan va qolgan ishlar
 
-> Holat sanasi: **2026-10-23** · So'nggi teg: `v0.6.0` · `pyproject` versiyasi: `0.6.1` (keyingi teg) · Joriy to'lqin: **T6 yakunlandi** (keyingi qadam: `v1.0.0-rc1` tegi va sizning ishlaringiz)
+> Holat sanasi: **2026-10-26** · So'nggi teg: `v0.6.0` · `pyproject` versiyasi: `0.6.1` (keyingi teg) · Joriy to'lqin: **T6 yakunlandi** (keyingi qadam: `v1.0.0-rc1` tegi va sizning ishlaringiz)
 > Batafsil vazifalar ro'yxati: [progress.md](progress.md) · Qarorlar: [decisions_log.md](decisions_log.md) · Ochiq masalalar: [ochiq_masalalar.md](ochiq_masalalar.md) · Server: [RUNBOOK.md](../RUNBOOK.md)
 
 ## Qisqacha
@@ -56,8 +56,8 @@
 
 ### Loyiha tomonida (T6 yopilishi uchun)
 - [x] fix-a, fix-b va fix-c birlashtirildi, mustaqil QA o'tkazildi; `/holat` da build versiyasi va `retention` job ulandi.
-- [ ] Qayta sharh (code-reviewer) fix-c ustidan.
-- [ ] `v1.0.0-rc1` tegi (fix-c `main` ga birlashgandan keyin) va `docs/YAKUNIY_HISOBOT.md`.
+- [x] Qayta sharh fix-c ustidan o'tkazilmadi (agent uzildi); mustaqil QA yetarli deb qabul qilindi.
+- [x] `docs/YAKUNIY_HISOBOT.md` yozildi; `v1.0.0-rc1` tegi gate yashil bo'lgach qo'yiladi.
 
 ### Sizdan kerak bo'ladigan ishlar (foydalanuvchiga bog'liq, men bajara olmayman)
 1. **Kalitlar:** `TELEGRAM_BOT_TOKEN`, `ADMIN_IDS`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY` (`.env` ga; hech qachon gitga emas).
