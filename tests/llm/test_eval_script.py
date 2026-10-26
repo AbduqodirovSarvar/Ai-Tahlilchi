@@ -38,6 +38,7 @@ class RecordedClient:
         system_instruction: str,  # noqa: ARG002
         contents: str,
         response_schema: type[BaseModel],  # noqa: ARG002
+        operation: str | None = None,  # noqa: ARG002
     ) -> GeminiResponse:
         block = contents.split("<<<DATA>>>")[1].split("<<<END_DATA>>>", maxsplit=1)[0]
         first_id = json.loads(block)["candidates"][0]["id"]

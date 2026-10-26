@@ -42,6 +42,7 @@ async def test_valid_answer_maps_to_review() -> None:
     assert review.model == "gemini-fake"
     assert (review.input_tokens, review.output_tokens) == (100, 50)
     assert backend.requests[0]["schema"] == "ReviewResponse"
+    assert backend.requests[0]["operation"] == "llm_review"
 
 
 async def test_no_candidates_means_no_call() -> None:
@@ -306,6 +307,7 @@ async def test_postmortem_valid() -> None:
     assert result.reason == "Palmer o'ynamasligi ma'lum edi. Bu e'tiborga olinmagan."
     assert result.prompt_version == "postmortem.v2"
     assert backend.requests[0]["schema"] == "PostmortemOutput"
+    assert backend.requests[0]["operation"] == "post_mortem"
 
 
 @pytest.mark.parametrize(

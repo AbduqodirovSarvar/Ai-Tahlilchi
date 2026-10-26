@@ -16,7 +16,8 @@ The wrapper owns everything transport-related so callers see one method,
 
 With a :class:`~app.domain.CallRecorder` each ``generate_json`` call (not each retry) is also
 reported with the full prompt and the answer, for the administrator's call log; reporting is
-best effort and never changes the result. The operation is the name of the answer schema.
+best effort and never changes the result. The operation is the caller's task name, else the
+answer schema name.
 """
 
 import asyncio
@@ -112,9 +113,17 @@ class JsonGenerator(Protocol):
         ...
 
     async def generate_json(
-        self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
+        self,
+        *,
+        system_instruction: str,
+        contents: str,
+        response_schema: type[BaseModel],
+        operation: str | None = None,
     ) -> GeminiResponse:
-        """Return the model's JSON answer constrained to ``response_schema``."""
+        """Return the model's JSON answer constrained to ``response_schema``.
+
+        ``operation`` names the task in the provider call log (default: the schema's name).
+        """
         ...
 
 
@@ -181,16 +190,23 @@ class GeminiClient:
         return self._model
 
     async def generate_json(
-        self, *, system_instruction: str, contents: str, response_schema: type[BaseModel]
+        self,
+        *,
+        system_instruction: str,
+        contents: str,
+        response_schema: type[BaseModel],
+        operation: str | None = None,
     ) -> GeminiResponse:
         """Ask for a JSON answer matching ``response_schema``; retry transient failures.
+
+        ``operation`` is the task name written to the call log (default: the schema's name).
 
         Raises:
             GeminiError: non-transient API error, retries exhausted, or an empty answer.
         """
         at = datetime.now(UTC)
         started = monotonic()
-        operation = response_schema.__name__
+        operation = operation or response_schema.__name__
         request = f"[system]\n{system_instruction}\n\n[user]\n{contents}"
         try:
             result = await self._generate(system_instruction, contents, response_schema)

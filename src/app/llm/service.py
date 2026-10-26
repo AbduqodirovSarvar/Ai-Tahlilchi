@@ -62,6 +62,10 @@ MAX_NOTE_CHARS: Final = 400
 EXPECTED_OUTPUT_TOKENS_PER_CANDIDATE: Final = 120
 EXPECTED_OUTPUT_TOKENS_POSTMORTEM: Final = 150
 
+# Task names the provider call log shows for each request (instead of the schema class name).
+OPERATION_REVIEW: Final = "llm_review"
+OPERATION_POSTMORTEM: Final = "post_mortem"
+
 REASON_DISABLED: Final = "llm_disabled"
 REASON_BUDGET: Final = "budget_exhausted"
 REASON_UNAVAILABLE: Final = "llm_unavailable"
@@ -130,7 +134,10 @@ class LlmService:
         try:
             built = build_postmortem_prompt(case)
             outcome = await self._ask(
-                built, PostmortemOutput, expected_output=EXPECTED_OUTPUT_TOKENS_POSTMORTEM
+                built,
+                PostmortemOutput,
+                expected_output=EXPECTED_OUTPUT_TOKENS_POSTMORTEM,
+                operation=OPERATION_POSTMORTEM,
             )
         except Exception:
             logger.warning("llm_postmortem_unexpected_error", exc_info=True)
@@ -156,6 +163,7 @@ class LlmService:
             built,
             ReviewResponse,
             expected_output=EXPECTED_OUTPUT_TOKENS_PER_CANDIDATE * len(built.included_ids),
+            operation=OPERATION_REVIEW,
         )
         if outcome.parsed is None:
             return _all_fallback(candidates, outcome.reason or REASON_INVALID, version, outcome)
@@ -169,7 +177,7 @@ class LlmService:
         return reviews
 
     async def _ask[T: BaseModel](
-        self, built: BuiltPrompt, schema: type[T], *, expected_output: int
+        self, built: BuiltPrompt, schema: type[T], *, expected_output: int, operation: str
     ) -> _Outcome[T]:
         """Call the backend, validating the answer; ask once more if it is invalid."""
         if self._backend is None:
@@ -183,7 +191,7 @@ class LlmService:
             if reservation is None:
                 reason = REASON_BUDGET
                 break
-            attempt = await self._attempt(self._backend, built, schema, reservation)
+            attempt = await self._attempt(self._backend, built, schema, reservation, operation)
             input_total += attempt.input_tokens
             output_total += attempt.output_tokens
             reason = attempt.reason or ""
@@ -192,13 +200,21 @@ class LlmService:
         return _Outcome(None, reason, model, input_total, output_total)
 
     async def _attempt[T: BaseModel](
-        self, backend: JsonGenerator, built: BuiltPrompt, schema: type[T], reservation: Reservation
+        self,
+        backend: JsonGenerator,
+        built: BuiltPrompt,
+        schema: type[T],
+        reservation: Reservation,
+        operation: str,
     ) -> _Outcome[T]:
         """One request. ``reason`` is ``invalid_output`` (worth retrying) or unavailable."""
         started = monotonic()
         try:
             response = await backend.generate_json(
-                system_instruction=built.system, contents=built.user, response_schema=schema
+                system_instruction=built.system,
+                contents=built.user,
+                response_schema=schema,
+                operation=operation,
             )
         except GeminiError as exc:
             usage = exc.usage
