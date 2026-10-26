@@ -5,6 +5,14 @@ be added to, never changed or removed, without the orchestrator's approval.
 """
 
 from app.domain.batch import HistoryBatch
+from app.domain.call_log import (
+    MAX_LOGGED_TEXT,
+    CallOutcome,
+    CallRecord,
+    CallRecorder,
+    Provider,
+    clip_text,
+)
 from app.domain.entities import (
     MAX_SEASON,
     MIN_SEASON,
@@ -47,10 +55,14 @@ __all__ = [
     "BOOKMAKER_PINNACLE",
     "LINE_MARKETS",
     "LINE_STEP",
+    "MAX_LOGGED_TEXT",
     "MAX_SEASON",
     "MIN_DECIMAL_ODDS_EXCLUSIVE",
     "MIN_SEASON",
     "SELECTIONS_BY_MARKET",
+    "CallOutcome",
+    "CallRecord",
+    "CallRecorder",
     "DomainValidationError",
     "ExternalRef",
     "Fixture",
@@ -62,10 +74,12 @@ __all__ = [
     "MarketType",
     "OddsKind",
     "OddsSnapshot",
+    "Provider",
     "ResultStatus",
     "Selection",
     "Sport",
     "Team",
+    "clip_text",
     "normalize_line",
     "normalize_name",
 ]
