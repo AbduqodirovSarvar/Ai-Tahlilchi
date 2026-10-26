@@ -131,14 +131,16 @@ async def poll(
     bot = await connect_bot(token)
     install_flood_control(bot)
     logger.info("bot_starting", app_env=settings.app_env, admin_count=len(admin_ids))
+    build = get_version(settings).label
+
+    async def greet_admins() -> None:
+        # Registered last: runs after the notifier is bound and the scheduler has started, so
+        # the greeting means the bot is ready, not merely connected.
+        await announce_startup(bot, admin_ids, build=build, backend=settings.app_services)
+
+    dispatcher.startup.register(greet_admins)
     try:
         await recover_running_analyses(bot, dispatcher.storage)
-        await announce_startup(
-            bot,
-            admin_ids,
-            build=get_version(settings).label,
-            backend=settings.app_services,
-        )
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
         await dispatcher.storage.close()

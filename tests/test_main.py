@@ -271,3 +271,29 @@ def test_main_registers_the_secrets_for_scrubbing(
     assert "gem-secret-value-12345" not in text
     assert "very-secret-uuid" not in text
     start_polling.assert_awaited_once()
+
+
+async def test_admins_are_greeted_in_the_startup_phase_after_earlier_hooks(
+    monkeypatch: pytest.MonkeyPatch, _no_startup_greeting: AsyncMock, get_me: AsyncMock
+) -> None:
+    order: list[str] = []
+    _no_startup_greeting.side_effect = lambda *_, **__: order.append("greeting")
+    dispatcher = Dispatcher()
+
+    async def earlier_hook() -> None:
+        order.append("scheduler")
+
+    dispatcher.startup.register(earlier_hook)
+
+    async def run_startup(bot: Bot, **_: object) -> None:
+        await dispatcher.emit_startup(bot=bot)
+
+    monkeypatch.setattr(Dispatcher, "start_polling", AsyncMock(side_effect=run_startup))
+    monkeypatch.setattr(
+        Bot, "get_me", AsyncMock(return_value=User(id=42, is_bot=True, first_name="B"))
+    )
+    monkeypatch.setattr("aiogram.client.session.aiohttp.AiohttpSession.close", AsyncMock())
+
+    await main_module.poll(dispatcher, TOKEN, frozenset({1}), settings())
+
+    assert order == ["scheduler", "greeting"]
