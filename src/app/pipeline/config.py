@@ -74,6 +74,8 @@ class PipelineConfig:
     """Seconds all the review batches of one analysis may take together."""
     history_sources: tuple[str, ...] = ("api-football", "football-data")
     """Which stored copy of the same match the model fit prefers."""
+    call_log_retention: timedelta = timedelta(days=30)
+    """How long the log of provider calls is kept (``CALL_LOG_RETENTION_DAYS``)."""
 
     def __post_init__(self) -> None:
         """Reject values that would make a job meaningless."""
@@ -88,4 +90,7 @@ class PipelineConfig:
             raise ConfigurationError(msg)
         if self.refresh_days_ahead < 1 or self.odds_days_ahead < 1:
             msg = "refresh_days_ahead and odds_days_ahead must be at least 1"
+            raise ConfigurationError(msg)
+        if self.call_log_retention <= timedelta(0):
+            msg = "call_log_retention must be positive"
             raise ConfigurationError(msg)

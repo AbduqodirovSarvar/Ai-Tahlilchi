@@ -54,7 +54,15 @@ from app.db.enums import (
     WatchKind,
 )
 from app.db.types import Money, UTCDateTime, enum_column
-from app.domain import FixtureStatus, MarketType, OddsKind, Selection, Sport
+from app.domain import (
+    CallOutcome,
+    FixtureStatus,
+    MarketType,
+    OddsKind,
+    Provider,
+    Selection,
+    Sport,
+)
 
 NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -620,3 +628,28 @@ class ApiUsageRow(Base):
     requests_used: Mapped[int] = mapped_column(default=0)
     reserved_manual: Mapped[int] = mapped_column(default=0)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class ProviderCallRow(Base):
+    """One call to an outside provider (API-Football, Gemini) with its request and response.
+
+    Written by :class:`~app.db.call_log.SqlCallRecorder`, read by the admin's call log and
+    pruned by the retention job. ``response`` is the heavy column; list queries must not load it.
+    """
+
+    __tablename__ = "provider_calls"
+    # `at` alone serves "newest first" (a backward scan), `(provider, at)` the per-provider view.
+    __table_args__ = (Index(None, "at"), Index(None, "provider", "at"))
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime]
+    provider: Mapped[Provider] = mapped_column(enum_column(Provider))
+    operation: Mapped[str] = mapped_column(String(NAME_LENGTH))
+    outcome: Mapped[CallOutcome] = mapped_column(enum_column(CallOutcome))
+    duration_ms: Mapped[int]
+    request: Mapped[str] = mapped_column(Text)
+    response: Mapped[str | None] = mapped_column(Text)
+    http_status: Mapped[int | None]
+    quota_cost: Mapped[int] = mapped_column(default=0, server_default="0")
+    size_bytes: Mapped[int | None]
+    error: Mapped[str | None] = mapped_column(Text)

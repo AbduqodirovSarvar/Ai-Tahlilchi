@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     learning_mode: LearningModeName = "shadow"
     # Days the loop leaves a segment or the calibration alone after a person rolled a change back.
     learning_manual_hold_days: int = Field(default=30, ge=0, le=365)
+    # Days the log of calls to API-Football and Gemini (requests and answers) is kept.
+    call_log_retention_days: int = Field(default=30, ge=1, le=365)
     # The ping URL's path is the credential of the check, so it is a secret (never logged).
     healthchecks_url: SecretStr | None = None
     # Baked into the image by the build (`--build-arg APP_VERSION=... GIT_SHA=...`); shown in the

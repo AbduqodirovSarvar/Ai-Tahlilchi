@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.clients.gemini import GeminiError, GeminiUsage, JsonGenerator, create_gemini_client
 from app.config import Settings
+from app.domain import CallRecorder
 from app.errors import ConfigurationError, DataError
 from app.llm.budget import CallOutcome, JournalEntry, LlmBudget, Reservation
 from app.llm.builder import (
@@ -263,10 +264,15 @@ def _effective_usage(built: BuiltPrompt, answer: str, usage: GeminiUsage) -> tup
     )
 
 
-def create_llm_service(settings: Settings, budget: LlmBudget | None = None) -> LlmService:
-    """Production wiring; without ``GEMINI_API_KEY`` the service runs switched off."""
+def create_llm_service(
+    settings: Settings, budget: LlmBudget | None = None, recorder: CallRecorder | None = None
+) -> LlmService:
+    """Production wiring; without ``GEMINI_API_KEY`` the service runs switched off.
+
+    ``recorder`` receives every call to the model (the administrator's call log).
+    """
     try:
-        backend = create_gemini_client(settings)
+        backend = create_gemini_client(settings, recorder)
     except ConfigurationError:
         logger.info("llm_disabled_no_api_key")
         return LlmService(None, budget=budget)
