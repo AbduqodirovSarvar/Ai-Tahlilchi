@@ -26,6 +26,14 @@ TOKEN = "42:TEST-TOKEN-VALUE"
 
 
 @pytest.fixture(autouse=True)
+def _no_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The start-up greeting to the admins must not reach the network."""
+    mock = AsyncMock()
+    monkeypatch.setattr(Bot, "send_message", mock)
+    return mock
+
+
+@pytest.fixture(autouse=True)
 def _forget_registered_secrets() -> Iterator[None]:
     """``main()`` registers process-wide secrets; do not leak them into other tests."""
     yield

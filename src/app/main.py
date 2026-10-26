@@ -22,6 +22,7 @@ from app.bot.dispatcher import build_dispatcher
 from app.bot.messaging import install_flood_control
 from app.bot.notifier import TelegramNotifier
 from app.bot.recovery import recover_running_analyses
+from app.bot.startup_notice import announce_startup
 from app.bot.storage import SqliteStorage, fsm_db_path
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
@@ -132,6 +133,12 @@ async def poll(
     logger.info("bot_starting", app_env=settings.app_env, admin_count=len(admin_ids))
     try:
         await recover_running_analyses(bot, dispatcher.storage)
+        await announce_startup(
+            bot,
+            admin_ids,
+            build=get_version(settings).label,
+            backend=settings.app_services,
+        )
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
         await dispatcher.storage.close()

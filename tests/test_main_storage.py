@@ -12,6 +12,14 @@ from app.bot.storage import FSM_DB_NAME, SqliteStorage
 from app.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def _no_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The start-up greeting to the admins must not reach the network."""
+    mock = AsyncMock()
+    monkeypatch.setattr(Bot, "send_message", mock)
+    return mock
+
+
 async def test_polling_uses_sqlite_storage_and_closes_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

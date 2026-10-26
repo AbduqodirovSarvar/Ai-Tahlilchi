@@ -3,6 +3,7 @@
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import Bot, Dispatcher
@@ -26,6 +27,14 @@ def real_settings(tmp_path: Path, **overrides: object) -> Settings:
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[call-arg, arg-type]
+
+
+@pytest.fixture(autouse=True)
+def _no_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The start-up greeting to the admins must not reach the network."""
+    mock = AsyncMock()
+    monkeypatch.setattr(Bot, "send_message", mock)
+    return mock
 
 
 async def test_real_services_refuse_to_start_without_an_explicit_handicap_convention(

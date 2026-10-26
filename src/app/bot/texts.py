@@ -401,6 +401,11 @@ TEMPLATE_NAME_PROMPT: Final = (
     "💾 Shablon nomini yozing (1–{max_name} belgi), masalan: <code>Dam olish · APL · 60%+</code>"
 )
 TEMPLATE_SAVED: Final = "💾 Shablon saqlandi: <b>{name}</b>"
+STARTUP_NOTICE: Final = (
+    "✅ Bot ishga tushdi.\n"
+    "Versiya: <code>{build}</code> · rejim: <code>{backend}</code>\n"
+    "Menyu: /start"
+)
 WIZARD_STARTED: Final = "▶️ Tahlil boshlandi."
 SCOPE_ALL_LABEL: Final = "hamma o'yinlar"
 COUNT_ALL_LABEL: Final = "hammasi"
