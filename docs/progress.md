@@ -132,3 +132,6 @@
 - [ ] F11.2 Bank va zarar limitlari
 - [ ] F11.3 Birinchi oy minimal stavkalar
 - [ ] F11.4 Oylik ko'rib chiqish
+
+## T7 — Provayder chaqiruvlari jurnali
+- [x] T7-A Ma'lumotlar qatlami: Alembic `0010` `provider_calls`, repo (`record_call`, `list_calls`, `count_calls`, `get_call`, `purge_calls_older_than`, `call_stats`), `SqlCallRecorder`, API-Football va Gemini klient hooklari, `CALL_LOG_RETENTION_DAYS` ([ADR 0020](adr/0020-provider-call-log.md)). Servis va bot qatlami (ko'rsatish) ochiq.
