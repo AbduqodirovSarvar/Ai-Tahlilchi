@@ -291,3 +291,45 @@
 | 23.7 | Zarari bir sentdan kam | "0" (hech qachon "-0") |
 | 23.8 | 4096 belgidan uzun ro'yxat (tugmadan tahrir) | Birinchi qism tahrir, qolgani yangi xabar(lar)da, tugmalar oxirgisida; hech narsa kesilmaydi |
 | 23.9 | Ekspress: −10% EV oyoq + 0% EV oyoq | Ekspress EV −10% (0% emas); bir o'yindan ikki tanlov hamon rad etiladi |
+
+## 24. 🗄 Baza (`/baza`) va 🔄 Bazani yangilash (T7-D)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 24.1 | `/baza` yoki menyudagi "🗄 Baza" | Oxirgi yangilanish (mahalliy vaqt + "N soat oldin"), hajm (MB), o'yinlar oralig'i, jadvallar bo'yicha qatorlar, "Vaqtlar Asia/Tashkent bo'yicha"; signallar qatorida "(faqat sizniki)" |
+| 24.2 | Baza eskirgan (`data_stale`) | Overview'da "⚠️ Baza eskirgan…" ogohlantirishi |
+| 24.3 | Baza bo'sh | "Baza bo'sh. Admin '🔄 Bazani yangilash' ni bosing"; faqat yangilash tugmasi |
+| 24.4 | 🏆 Ligalar | Raqamlangan ro'yxat: nomi, davlat, o'yinlar soni, kelgusi, eng erta—eng kech sana; 10 tadan sahifa; raqam tugmasi ligani ochadi |
+| 24.5 | Liga → o'yinlar | Kun sarlavhalari, "HH:MM Uy — Mehmon", liga, holat/hisob (✅ tugagan 2:1, ⏳, 🔴), 💱 narxi bor belgisi; ◀️ n/m ▶️ |
+| 24.6 | Kun filtri: Bugun / Ertaga / Hammasi | Faqat shu mahalliy kun o'yinlari; faol tugmada ●; bo'sh kun — "Bu filtr bo'yicha o'yin yo'q…" |
+| 24.7 | 🗓 Sana | Kalendar faqat bazadagi o'yinlar oralig'ida; kun tanlansa ro'yxat shu kunga; ⬅️ Orqaga ro'yxatga |
+| 24.8 | UTC 20:00 da boshlanadigan o'yin (Toshkent) | Ro'yxatda ertasi kun sarlavhasi ostida 01:00; kartada "01:00 (Asia/Tashkent) · UTC 20:00" |
+| 24.9 | O'yin raqami | Karta: liga, mahalliy+UTC vaqt, holat, hisob/xG, har bukmeker bozorining oxirgi koeffitsienti va olingan vaqti, "Mening signallarim"; juda ko'p narx bo'lsa "…yana N ta" |
+| 24.10 | 💱 Narxlar tarixi | Yangisi birinchi, 15 tadan sahifa; ⬅️ kartaga qaytadi |
+| 24.11 | 👥 Jamoalar, raqam | Jamoa o'yinlari ro'yxati; ⬅️ Jamoalarga |
+| 24.12 | 🔎 Qidirish → matn | 1 harf: "kamida 2 ta harf"; 65+ belgi: "oshmasin"; topilmasa "… topilmadi. Boshqa nom yozing"; `/bekor` rejimdan chiqaradi |
+| 24.13 | ⚽ Hamma o'yinlar | Barcha ligalar, kun bo'yicha, filtr va sahifalash ishlaydi |
+| 24.14 | Yangi `/baza` ochib, eski xabardagi tugmani bosish; bot qayta ishga tushgandan keyin tugma | Alert "Bu ekran eskirgan… /baza"; jim yiqilmaydi |
+| 24.15 | Sahifa/kun tugmasini ikki marta tez bosish | Natija bir xil, xato yo'q |
+| 24.16 | 🔄 Bazani yangilash (admin) | Darhol "⏳ Baza yangilanmoqda…", so'ng o'sha xabar: o'yin/natija/narx soni, API so'rovlari, soniya; o'tkazib yuborilgan qadamlar ko'rsatiladi |
+| 24.17 | Yangilash ketayotganda yana bosish | Alert "Yangilash allaqachon ketmoqda" |
+| 24.18 | 30 daqiqa ichida qayta; limit yetmaydi; manba ishlamaydi; admin emas | Mos matnlar: "yana N daqiqadan keyin", "kerak ≈N, qoldi M. Hech narsa yuborilmadi", "manba ishlamayapti", "faqat administrator uchun" |
+
+## 25. 📡 So'rovlar (`/sorovlar`) — admin (T7-D)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 25.1 | `/sorovlar` yoki "📡 So'rovlar" | So'nggi 24 soat: provayder bo'yicha so'rov, xato, keshdan, bloklangan, kvota; operatsiyalar bo'yicha qatorlar; filtr tugmalari. Admin bo'lmasa "faqat administrator uchun" |
+| 25.2 | Filtr: Hammasi / API-Football / Gemini / Faqat xatolar | "12.10 12:41 · fixtures · ✅ · 230 ms" (mahalliy vaqt); 💾 kesh, ❌ xato (HTTP kodi), 🚫 blok belgilari; so'rov boshi (qirqilgan, escape) |
+| 25.3 | Raqam tugmasi | Batafsil: vaqt (sekund bilan), operatsiya, holat, davomiylik, kvota, hajm, so'rov va javob `<pre>` bloklarida; xato matni |
+| 25.4 | Matn 3500 belgidan uzun | Ekranda faqat boshi + "To'liq matn: fayl"; [📄 To'liq matnni fayl sifatida] `.txt` yuboradi (to'liq so'rov+javob+xato) |
+| 25.5 | Jurnalda qirqilgan matn | "✂️ Jurnalda matn qirqilgan" belgisi |
+| 25.6 | Hamma xabar | ≤ 4096 belgi; HTML buzilmaydi (`<`, `&` escape) |
+| 25.7 | Bo'sh jurnal / bo'sh filtr | "Hali so'rov yozilmagan…" / "Bu filtr bo'yicha so'rov yo'q" |
+| 25.8 | O'chirilgan (30 kundan eski) so'rov tugmasi | "Topilmadi" xabari |
+
+## 26. Eskirgan baza tahlil oqimlarida (T7-D)
+| # | Qadam | Kutilgan natija |
+|---|---|---|
+| 26.1 | ▶️ Boshlash, `/qayta`, 🔄 karta tugmasi, 🔍 Maxsus tahlil, shablon, ⚡ bugungi — baza eski/yo'q | "Baza yangilanmagan (oxirgi: 20.10 20:00 — mahalliy vaqt)…"; hech narsa hisoblanmaydi; izoh ostida [🔄 Bazani yangilash]; tasdiq ekrani qaytariladi |
+| 26.2 | Tasdiq ekrani, baza eski | Ogohlantirish + [🔄 Bazani yangilash]; ▶️ Boshlash yashirin; ✏️ ishlaydi |
+| 26.3 | Baza hali hech yangilanmagan | "Baza hali yangilanmagan…" |
+| 26.4 | Izohdagi [🔄 Bazani yangilash] | Alohida "⏳" xabar, so'ng natija; asl ekran tugmalari saqlanadi |
