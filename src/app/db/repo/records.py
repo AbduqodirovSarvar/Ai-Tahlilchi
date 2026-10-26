@@ -24,7 +24,7 @@ from app.db.enums import (
     SortOrder,
     WatchKind,
 )
-from app.domain import Fixture, FixtureResult, Market, Selection, Sport
+from app.domain import CallOutcome, Fixture, FixtureResult, Market, Provider, Selection, Sport
 
 MIN_WEEKDAY: Final = 1
 MAX_WEEKDAY: Final = 7
@@ -291,3 +291,60 @@ class SignalNoteRecord:
     signal_id: int
     text: str
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallSummary:
+    """One logged provider call without its response (cheap to list).
+
+    ``request_preview`` is only the first ``REQUEST_PREVIEW_CHARS`` characters of the request
+    (see :mod:`app.db.repo.calls`); :class:`CallDetail` has the whole text.
+    """
+
+    id: int
+    at: datetime
+    provider: Provider
+    operation: str
+    outcome: CallOutcome
+    duration_ms: int
+    http_status: int | None
+    quota_cost: int
+    size_bytes: int | None
+    error: str | None
+    request_preview: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallDetail:
+    """One logged provider call with the full request and response text."""
+
+    id: int
+    at: datetime
+    provider: Provider
+    operation: str
+    outcome: CallOutcome
+    duration_ms: int
+    http_status: int | None
+    quota_cost: int
+    size_bytes: int | None
+    error: str | None
+    request: str
+    response: str | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CallStat:
+    """Calls of one provider operation since a moment (the admin's usage summary).
+
+    ``avg_duration_ms`` covers only calls that reached the provider (ok or error), so cache
+    hits do not drag the average to zero; ``None`` when there were none.
+    """
+
+    provider: Provider
+    operation: str
+    calls: int
+    errors: int
+    cached: int
+    blocked: int
+    avg_duration_ms: float | None
+    quota_cost: int

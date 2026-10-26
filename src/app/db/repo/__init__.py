@@ -6,6 +6,15 @@ counter updates. They return domain objects or frozen DTOs from
 :mod:`app.db.repo.records`, never ORM rows. See ``docs/contracts.md`` §3.
 """
 
+from app.db.repo.calls import (
+    REQUEST_PREVIEW_CHARS,
+    call_stats,
+    count_calls,
+    get_call,
+    list_calls,
+    purge_calls_older_than,
+    record_call,
+)
 from app.db.repo.catalog import (
     get_league,
     get_team,
@@ -62,6 +71,9 @@ from app.db.repo.operations import (
     signal_has_bets,
 )
 from app.db.repo.records import (
+    CallDetail,
+    CallStat,
+    CallSummary,
     FixtureRecord,
     Page,
     RecalcTask,
@@ -111,7 +123,11 @@ from app.db.repo.users import (
 __all__ = [
     "DEFAULT_CLAIM_LEASE",
     "DEFAULT_KIND_PRIORITY",
+    "REQUEST_PREVIEW_CHARS",
     "CalibrationRecord",
+    "CallDetail",
+    "CallStat",
+    "CallSummary",
     "FixtureRecord",
     "LearningChange",
     "LearningSignal",
@@ -137,9 +153,11 @@ __all__ = [
     "add_watch",
     "bets_for_signal",
     "bets_placed_between",
+    "call_stats",
     "cancel_recalcs",
     "claim_due_recalcs",
     "complete_recalc",
+    "count_calls",
     "create_bet",
     "delete_saved_query",
     "enqueue_recalc",
@@ -147,6 +165,7 @@ __all__ = [
     "finished_fixtures",
     "get_bet",
     "get_bet_by_token",
+    "get_call",
     "get_fixture_by_id",
     "get_fixtures",
     "get_league",
@@ -163,6 +182,7 @@ __all__ = [
     "league_teams",
     "list_bets",
     "list_calibration_versions",
+    "list_calls",
     "list_fixtures",
     "list_leagues",
     "list_learning_changes",
@@ -174,6 +194,8 @@ __all__ = [
     "mark_change_rolled_back",
     "odds_history",
     "open_bets_of_settled_signals",
+    "purge_calls_older_than",
+    "record_call",
     "release_recalc",
     "remove_watch",
     "report_signals",
