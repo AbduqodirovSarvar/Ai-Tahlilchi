@@ -17,6 +17,7 @@ from app.clients.cache import TtlCache
 from app.clients.http import ApiClient, ProviderConfig
 from app.clients.quota import InMemoryUsageStore, QuotaGuard, QuotaPolicy
 from app.clients.rate_limit import TokenBucket
+from app.domain import CallRecorder
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "api_football"
 BASE_URL = API_FOOTBALL_CONFIG.base_url
@@ -85,6 +86,7 @@ def build_harness(
     *,
     daily_limit: int = 100,
     config: ProviderConfig | None = None,
+    recorder: CallRecorder | None = None,
 ) -> Harness:
     sleep = RecordingSleep(fake_time)
     store = InMemoryUsageStore()
@@ -108,6 +110,7 @@ def build_harness(
         sleep=sleep,
         jitter=lambda: 0.0,
         clock=fake_time.utc,
+        recorder=recorder,
     )
     return Harness(fake_time, sleep, store, quota, cache, api, ApiFootballClient(api))
 

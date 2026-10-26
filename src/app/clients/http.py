@@ -15,6 +15,11 @@ Every provider request goes through :meth:`ApiClient.get_json`, which in order:
    request and is charged); a ``Retry-After`` beyond the cap fails fast instead;
 7. reconciles the quota with the provider's remaining-requests headers when present.
 
+When a :class:`~app.domain.CallRecorder` is given, every step above that ends a call reports
+it: a cache answer (``cached``, no cost), a refusal by the quota (``quota_blocked``), each HTTP
+attempt (``ok`` or ``error``, one request charged). Reporting is best effort by contract, so it
+never changes what the caller gets.
+
 Authentication is a header set once on the ``httpx.AsyncClient`` (see
 :func:`create_http_client`); URLs and parameters, which are logged, never contain the key.
 """
@@ -22,6 +27,7 @@ Authentication is a header set once on the ``httpx.AsyncClient`` (see
 import asyncio
 import json
 import random
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -35,8 +41,9 @@ from pydantic import JsonValue
 from tenacity import AsyncRetrying, RetryCallState, retry_if_exception_type, stop_after_attempt
 
 from app.clients.cache import QueryParams, TtlCache, cache_key
-from app.clients.quota import QuotaGuard, RequestPurpose, UsageKey
+from app.clients.quota import QuotaExceededError, QuotaGuard, RequestPurpose, UsageKey
 from app.clients.rate_limit import Sleep, TokenBucket
+from app.domain import CallOutcome, CallRecord, CallRecorder, Provider
 from app.errors import ExternalServiceError
 from app.logging import get_logger
 from app.tls import get_ssl_context
@@ -44,6 +51,9 @@ from app.tls import get_ssl_context
 logger = get_logger(__name__)
 
 DEDUPE_TTL_SECONDS: Final = 10 * 60.0
+_MS_PER_SECOND: Final = 1000
+LOGGED_PROVIDER: Final = Provider.API_FOOTBALL
+"""The only provider this client talks to; the name its calls are logged under."""
 
 type UtcClock = Callable[[], datetime]
 type BodyRetryCheck = Callable[[JsonValue], str | None]
@@ -182,6 +192,7 @@ class ApiClient:
         sleep: Sleep = asyncio.sleep,
         jitter: Callable[[], float] = random.random,  # noqa: S311 - backoff jitter, not crypto
         clock: UtcClock = _utc_now,
+        recorder: CallRecorder | None = None,
     ) -> None:
         """Wire the client; ``sleep``/``jitter`` are injectable so tests never wait."""
         self._config = config
@@ -194,6 +205,7 @@ class ApiClient:
         self._sleep = sleep
         self._jitter = jitter
         self._clock = clock
+        self._recorder = recorder
         self._inflight: dict[str, asyncio.Future[JsonResponse]] = {}
 
     @property
@@ -244,6 +256,7 @@ class ApiClient:
             cached = self._cache.get(key)
             if cached is not None:
                 logger.debug("provider_cache_hit", provider=self._config.name, request=key)
+                await self._report(path, params, CallOutcome.CACHED, status=HTTPStatus.OK)
                 return JsonResponse(
                     HTTPStatus.OK, cached.payload, from_cache=True, fetched_at=cached.fetched_at
                 )
@@ -318,13 +331,21 @@ class ApiClient:
     ) -> JsonResponse:
         await self._limiter.acquire(urgent=purpose is RequestPurpose.MANUAL)
         # The charge's key is the quota day this request belongs to, whenever it is answered.
-        usage_key = (await self._quota.charge(purpose)).key
+        try:
+            usage_key = (await self._quota.charge(purpose)).key
+        except QuotaExceededError as exc:
+            await self._report(path, params, CallOutcome.QUOTA_BLOCKED, error=str(exc))
+            raise
+        started = time.perf_counter()
         try:
             response = await self._http.get(path, params=dict(params))
         except httpx.TimeoutException as exc:
+            await self._report_failure(path, params, started, f"timeout: {type(exc).__name__}")
             raise _RetryableError(f"timeout: {type(exc).__name__}") from exc
         except httpx.TransportError as exc:
-            raise _RetryableError(f"transport error: {type(exc).__name__}") from exc
+            reason = f"transport error: {type(exc).__name__}"
+            await self._report_failure(path, params, started, reason)
+            raise _RetryableError(reason) from exc
         logger.info(
             "provider_request",
             provider=self._config.name,
@@ -334,7 +355,71 @@ class ApiClient:
             purpose=purpose.value,
         )
         await self._reconcile_quota(usage_key, response.headers)
-        return self._decode(response)
+        try:
+            decoded = self._decode(response)
+        except (_RetryableError, ProviderHttpError, ProviderUnavailableError) as exc:
+            reason = exc.reason if isinstance(exc, _RetryableError) else str(exc)
+            await self._report_failure(path, params, started, reason, response)
+            raise
+        await self._report(
+            path,
+            params,
+            CallOutcome.OK,
+            status=response.status_code,
+            duration_ms=_elapsed_ms(started),
+            body=response,
+        )
+        return decoded
+
+    async def _report_failure(
+        self,
+        path: str,
+        params: QueryParams,
+        started: float,
+        reason: str,
+        response: httpx.Response | None = None,
+    ) -> None:
+        """Report one charged attempt that failed (``response`` is ``None`` before an answer)."""
+        await self._report(
+            path,
+            params,
+            CallOutcome.ERROR,
+            status=None if response is None else response.status_code,
+            duration_ms=_elapsed_ms(started),
+            body=response,
+            error=reason,
+        )
+
+    async def _report(  # noqa: PLR0913 - one value per logged facet
+        self,
+        path: str,
+        params: QueryParams,
+        outcome: CallOutcome,
+        *,
+        status: int | None = None,
+        duration_ms: int = 0,
+        body: httpx.Response | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Hand one call to the recorder (a no-op without one). Cost: 1 per sent request."""
+        if self._recorder is None:
+            return
+        sent = outcome in (CallOutcome.OK, CallOutcome.ERROR)
+        await self._recorder.record(
+            CallRecord(
+                at=self._clock(),
+                provider=LOGGED_PROVIDER,
+                operation=path,
+                outcome=outcome,
+                duration_ms=duration_ms,
+                request=json.dumps(dict(params), sort_keys=True, ensure_ascii=False),
+                response=None if body is None else body.text,
+                http_status=status,
+                quota_cost=1 if sent else 0,
+                size_bytes=None if body is None else len(body.content),
+                error=error,
+            )
+        )
 
     def _decode(self, response: httpx.Response) -> JsonResponse:
         status = response.status_code
@@ -387,6 +472,10 @@ class ApiClient:
         if isinstance(error, _RetryableError) and error.retry_after is not None:
             delay = max(delay, min(error.retry_after, config.max_retry_after_seconds))
         return delay
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((time.perf_counter() - started) * _MS_PER_SECOND)
 
 
 def _int_header(headers: Mapping[str, str], name: str | None) -> int | None:

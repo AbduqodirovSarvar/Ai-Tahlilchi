@@ -13,11 +13,16 @@ The wrapper owns everything transport-related so callers see one method,
   tokens that were spent);
 * token usage of every successful call is returned and logged as metrics. The API key and
   the prompt text are never logged (only sizes).
+
+With a :class:`~app.domain.CallRecorder` each ``generate_json`` call (not each retry) is also
+reported with the full prompt and the answer, for the administrator's call log; reporting is
+best effort and never changes the result. The operation is the name of the answer schema.
 """
 
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from http import HTTPStatus
 from time import monotonic
 from typing import Final, Protocol
@@ -34,6 +39,7 @@ from tenacity import (
 )
 
 from app.config import Settings
+from app.domain import CallOutcome, CallRecord, CallRecorder, Provider
 from app.errors import ExternalServiceError
 from app.logging import get_logger
 from app.tls import get_ssl_context
@@ -160,12 +166,14 @@ class GeminiClient:
         config: GeminiConfig = GeminiConfig(),  # noqa: B008 - frozen, shared default is safe
         *,
         sleep: Sleep = asyncio.sleep,
+        recorder: CallRecorder | None = None,
     ) -> None:
         """Wrap an already configured SDK client (the key lives only inside it)."""
         self._sdk = sdk_client
         self._model = model
         self._config = config
         self._sleep = sleep
+        self._recorder = recorder
 
     @property
     def model(self) -> str:
@@ -180,6 +188,50 @@ class GeminiClient:
         Raises:
             GeminiError: non-transient API error, retries exhausted, or an empty answer.
         """
+        at = datetime.now(UTC)
+        started = monotonic()
+        operation = response_schema.__name__
+        request = f"[system]\n{system_instruction}\n\n[user]\n{contents}"
+        try:
+            result = await self._generate(system_instruction, contents, response_schema)
+        except GeminiError as exc:
+            await self._report(
+                CallRecord(
+                    at=at,
+                    provider=Provider.GEMINI,
+                    operation=operation,
+                    outcome=CallOutcome.ERROR,
+                    duration_ms=_elapsed_ms(started),
+                    request=request,
+                    quota_cost=exc.attempts,
+                    error=str(exc),
+                )
+            )
+            raise
+        await self._report(
+            CallRecord(
+                at=at,
+                provider=Provider.GEMINI,
+                operation=operation,
+                outcome=CallOutcome.OK,
+                duration_ms=_elapsed_ms(started),
+                request=request,
+                response=result.text,
+                quota_cost=result.attempts,
+                size_bytes=len(result.text.encode()),
+            )
+        )
+        return result
+
+    async def _report(self, call: CallRecord) -> None:
+        """Hand ``call`` to the recorder, when there is one."""
+        if self._recorder is not None:
+            await self._recorder.record(call)
+
+    async def _generate(
+        self, system_instruction: str, contents: str, response_schema: type[BaseModel]
+    ) -> GeminiResponse:
+        """The request with its retries (see :meth:`generate_json`)."""
         cfg = self._config
         request_config = genai_types.GenerateContentConfig(
             system_instruction=system_instruction,
@@ -259,15 +311,21 @@ class GeminiClient:
         return GeminiResponse(text=text, model=self._model, usage=usage, attempts=attempts)
 
 
-def create_gemini_client(settings: Settings) -> GeminiClient:
-    """Build the production client from settings.
+def _elapsed_ms(started: float) -> int:
+    return round((monotonic() - started) * _MS_PER_SECOND)
+
+
+def create_gemini_client(settings: Settings, recorder: CallRecorder | None = None) -> GeminiClient:
+    """Build the production client from settings; ``recorder`` logs each call when given.
 
     Raises:
         ConfigurationError: ``GEMINI_API_KEY`` is not set.
     """
     api_key = settings.require_secret("gemini_api_key")
     return GeminiClient(
-        genai.Client(api_key=api_key, http_options=_http_options()), settings.gemini_model
+        genai.Client(api_key=api_key, http_options=_http_options()),
+        settings.gemini_model,
+        recorder=recorder,
     )
 
 

@@ -36,6 +36,7 @@ from app.clients.quota import (
     UsageStore,
     shared_guard,
 )
+from app.domain import CallRecorder
 from app.errors import ExternalServiceError
 from app.logging import get_logger
 
@@ -383,18 +384,20 @@ def _date_range(date_from: date | None, date_to: date | None) -> dict[str, str]:
     return params
 
 
-def create_api_football_client(
+def create_api_football_client(  # noqa: PLR0913 - one value per wiring facet
     api_key: str,
     store: UsageStore,
     *,
     daily_limit: int = FREE_PLAN_DAILY_LIMIT,
     manual_reserve_share: float = DEFAULT_MANUAL_RESERVE_SHARE,
     config: ProviderConfig = API_FOOTBALL_CONFIG,
+    recorder: CallRecorder | None = None,
 ) -> tuple[ApiFootballClient, httpx.AsyncClient]:
     """Production wiring: the endpoint client and the HTTP client the caller must close.
 
     Clients over the same ``store`` share one quota guard, so several clients (bot actions,
-    scheduler, probe) can never overspend the daily limit between them.
+    scheduler, probe) can never overspend the daily limit between them. ``recorder`` logs every
+    request, cache answer and quota refusal for the administrator.
     """
     http = create_http_client(config, api_key)
     quota = shared_guard(
@@ -403,5 +406,5 @@ def create_api_football_client(
         provider=PROVIDER,
         sport=QUOTA_SPORT,
     )
-    api = ApiClient(config, http=http, quota=quota, cache=TtlCache())
+    api = ApiClient(config, http=http, quota=quota, cache=TtlCache(), recorder=recorder)
     return ApiFootballClient(api), http
