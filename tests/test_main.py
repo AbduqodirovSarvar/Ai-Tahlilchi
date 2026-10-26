@@ -273,8 +273,9 @@ def test_main_registers_the_secrets_for_scrubbing(
     start_polling.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("get_me")
 async def test_admins_are_greeted_in_the_startup_phase_after_earlier_hooks(
-    monkeypatch: pytest.MonkeyPatch, _no_startup_greeting: AsyncMock, get_me: AsyncMock
+    monkeypatch: pytest.MonkeyPatch, _no_startup_greeting: AsyncMock
 ) -> None:
     order: list[str] = []
     _no_startup_greeting.side_effect = lambda *_, **__: order.append("greeting")
