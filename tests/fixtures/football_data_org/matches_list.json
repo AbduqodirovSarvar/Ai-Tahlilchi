@@ -1,0 +1,16 @@
+{
+  "resultSet": {"count": 3},
+  "matches": [
+    {
+      "id": 1, "utcDate": "2024-10-26T14:00:00Z", "status": "TIMED",
+      "competition": {"id": 2021, "name": "Premier League", "code": "PL"},
+      "homeTeam": {"id": 61, "name": "Chelsea FC"}, "awayTeam": {"id": 64, "name": "Liverpool FC"},
+      "score": {"fullTime": {"home": null, "away": null}}
+    },
+    {
+      "id": 2, "utcDate": "2024-10-27T14:00:00Z", "status": "SOMETHING_NEW",
+      "homeTeam": {"id": null, "name": null}, "awayTeam": {"id": 65, "name": "Manchester City FC"}
+    },
+    {"id": 3, "status": "SCHEDULED", "homeTeam": {}, "awayTeam": {}}
+  ]
+}

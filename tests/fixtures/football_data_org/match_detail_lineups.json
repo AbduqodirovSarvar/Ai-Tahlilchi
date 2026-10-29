@@ -1,0 +1,29 @@
+{
+  "id": 497410,
+  "utcDate": "2024-10-26T11:30:00Z",
+  "status": "FINISHED",
+  "matchday": 9,
+  "stage": "REGULAR_SEASON",
+  "competition": {"id": 2021, "name": "Premier League", "code": "PL"},
+  "homeTeam": {
+    "id": 61, "name": "Chelsea FC", "shortName": "Chelsea", "tla": "CHE",
+    "coach": {"id": 1, "name": "Enzo Maresca", "nationality": "Italy"},
+    "formation": "4-2-3-1",
+    "lineup": [
+      {"id": 10, "name": "Robert Sanchez", "position": "Goalkeeper", "shirtNumber": 1},
+      {"id": 11, "name": "Cole Palmer", "position": "Attacking Midfield", "shirtNumber": 20}
+    ],
+    "bench": [{"id": 12, "name": "Filip Jorgensen", "position": "Goalkeeper", "shirtNumber": 12}]
+  },
+  "awayTeam": {
+    "id": 64, "name": "Liverpool FC", "shortName": "Liverpool", "tla": "LIV",
+    "coach": {"id": 2, "name": "Arne Slot", "nationality": "Netherlands"},
+    "formation": "4-3-3",
+    "lineup": [{"id": 20, "name": "Alisson", "position": "Goalkeeper", "shirtNumber": 1}],
+    "bench": []
+  },
+  "score": {
+    "winner": "AWAY_TEAM", "duration": "REGULAR",
+    "fullTime": {"home": 1, "away": 2}, "halfTime": {"home": 0, "away": 1}
+  }
+}

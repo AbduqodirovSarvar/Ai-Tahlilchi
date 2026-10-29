@@ -25,7 +25,9 @@ type HandicapConventionName = Literal["home_line", "own_line"]
 type StakingModeName = Literal["flat", "kelly"]
 type LearningModeName = Literal["off", "shadow", "apply"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-type SecretName = Literal["telegram_bot_token", "api_football_key", "gemini_api_key"]
+type SecretName = Literal[
+    "telegram_bot_token", "api_football_key", "football_data_org_key", "gemini_api_key"
+]
 
 _HTTP_URL: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
 
@@ -49,6 +51,7 @@ class Settings(BaseSettings):
     admin_ids: Annotated[frozenset[int], NoDecode] = frozenset()
 
     api_football_key: SecretStr | None = None
+    football_data_org_key: SecretStr | None = None
     gemini_api_key: SecretStr | None = None
     gemini_model: str = Field(default="gemini-flash-latest", min_length=1)
 

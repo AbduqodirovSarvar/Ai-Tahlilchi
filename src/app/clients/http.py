@@ -9,6 +9,7 @@ Every provider request goes through :meth:`ApiClient.get_json`, which in order:
 3. waits for a token of the per-provider :class:`~app.clients.rate_limit.TokenBucket`
    (manual requests go before queued automatic ones);
 4. charges the daily :class:`~app.clients.quota.QuotaGuard` (refuses *before* sending);
+   a provider without a daily limit is built without one and skips this step;
 5. sends the request with a per-request timeout;
 6. retries 429, 5xx, timeouts, transport errors and provider-flagged rate-limit bodies with
    jittered exponential backoff that honours ``Retry-After`` (every attempt is a real
@@ -44,7 +45,7 @@ from app.clients.cache import QueryParams, TtlCache, cache_key
 from app.clients.quota import QuotaExceededError, QuotaGuard, RequestPurpose, UsageKey
 from app.clients.rate_limit import Sleep, TokenBucket
 from app.domain import CallOutcome, CallRecord, CallRecorder, Provider
-from app.errors import ExternalServiceError
+from app.errors import ConfigurationError, ExternalServiceError
 from app.logging import get_logger
 from app.tls import get_ssl_context
 
@@ -186,7 +187,7 @@ class ApiClient:
         config: ProviderConfig,
         *,
         http: httpx.AsyncClient,
-        quota: QuotaGuard,
+        quota: QuotaGuard | None,
         limiter: TokenBucket | None = None,
         cache: TtlCache[_CachedBody] | None = None,
         sleep: Sleep = asyncio.sleep,
@@ -215,7 +216,14 @@ class ApiClient:
 
     @property
     def quota(self) -> QuotaGuard:
-        """The daily quota guard (status for cost estimates and ``/holat``)."""
+        """The daily quota guard (status for cost estimates and ``/holat``).
+
+        Raises:
+            ConfigurationError: the client was built without a quota (no daily limit).
+        """
+        if self._quota is None:
+            msg = f"{self._config.name} has no daily quota"
+            raise ConfigurationError(msg)
         return self._quota
 
     def cached(self, path: str, params: QueryParams, shape: PayloadShape | None = None) -> bool:
@@ -330,12 +338,7 @@ class ApiClient:
         self, path: str, params: QueryParams, purpose: RequestPurpose
     ) -> JsonResponse:
         await self._limiter.acquire(urgent=purpose is RequestPurpose.MANUAL)
-        # The charge's key is the quota day this request belongs to, whenever it is answered.
-        try:
-            usage_key = (await self._quota.charge(purpose)).key
-        except QuotaExceededError as exc:
-            await self._report(path, params, CallOutcome.QUOTA_BLOCKED, error=str(exc))
-            raise
+        usage_key = await self._charge(path, params, purpose)
         started = time.perf_counter()
         try:
             response = await self._http.get(path, params=dict(params))
@@ -354,7 +357,8 @@ class ApiClient:
             status=response.status_code,
             purpose=purpose.value,
         )
-        await self._reconcile_quota(usage_key, response.headers)
+        if usage_key is not None:
+            await self._reconcile_quota(usage_key, response.headers)
         try:
             decoded = self._decode(response)
         except (_RetryableError, ProviderHttpError, ProviderUnavailableError) as exc:
@@ -370,6 +374,18 @@ class ApiClient:
             body=response,
         )
         return decoded
+
+    async def _charge(
+        self, path: str, params: QueryParams, purpose: RequestPurpose
+    ) -> UsageKey | None:
+        """Charge one request; the key is the quota day it belongs to (``None``: no quota)."""
+        if self._quota is None:
+            return None
+        try:
+            return (await self._quota.charge(purpose)).key
+        except QuotaExceededError as exc:
+            await self._report(path, params, CallOutcome.QUOTA_BLOCKED, error=str(exc))
+            raise
 
     async def _report_failure(
         self,
@@ -449,7 +465,7 @@ class ApiClient:
     async def _reconcile_quota(self, key: UsageKey, headers: httpx.Headers) -> None:
         limit = _int_header(headers, self._config.limit_header)
         remaining = _int_header(headers, self._config.remaining_header)
-        if limit is None or remaining is None:
+        if self._quota is None or limit is None or remaining is None:
             return
         status = await self._quota.reconcile(
             key, provider_limit=limit, provider_remaining=remaining
