@@ -50,13 +50,13 @@ def test_summary_without_skips_has_no_price_notes() -> None:
 def test_summary_reports_fixtures_without_a_bookmaker_price() -> None:
     text = format_results_summary(make_result(skipped_no_price=3))
 
-    assert "3 ta o'yin: 1xBet narxi yo'q" in text
+    assert "3 ta o'yin: koeffitsient yo'q" in text
 
 
 def test_summary_reports_stale_prices_and_stale_data() -> None:
     text = format_results_summary(make_result(skipped_stale_price=2, data_stale=True))
 
-    assert "2 ta o'yin: 1xBet narxi eskirgan" in text
+    assert "2 ta o'yin: koeffitsient eskirgan" in text
     assert "Ma'lumot yangilanmadi — eski ma'lumot" in text
     assert telegram_html_problems(text) == []
 
@@ -65,7 +65,7 @@ def test_empty_result_still_explains_the_skipped_fixtures() -> None:
     text = format_results_summary(make_result(signals=(), matched=0, skipped_no_price=4))
 
     assert "Value topilmadi" in text
-    assert "4 ta o'yin: 1xBet narxi yo'q" in text
+    assert "4 ta o'yin: koeffitsient yo'q" in text
 
 
 def test_digest_header_carries_the_price_notes() -> None:
@@ -74,7 +74,7 @@ def test_digest_header_carries_the_price_notes() -> None:
 
     text = format_results_summary(result)
 
-    assert "1xBet narxi yo'q" in text
+    assert "koeffitsient yo'q" in text
     assert "eski ma'lumot" in text
 
 

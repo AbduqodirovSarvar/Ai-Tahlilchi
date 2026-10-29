@@ -282,11 +282,11 @@ RESULTS_SHORTFALL: Final = (
 )
 RESULTS_FAILED: Final = "⚠️ {count} ta o'yinni tahlil qilib bo'lmadi, ular o'tkazib yuborildi."
 RESULTS_NO_PRICE: Final = (
-    "💱 {count} ta o'yin: 1xBet narxi yo'q, shuning uchun baholanmadi "
-    "(bukmeker koeffitsient chiqarmagan bo'lishi mumkin)."
+    "💱 {count} ta o'yin: koeffitsient yo'q, shuning uchun baholanmadi "
+    "(Football-Data.org koeffitsientni faqat pullik Odds paketi bilan beradi)."
 )
 RESULTS_STALE_PRICE: Final = (
-    "⏱ {count} ta o'yin: 1xBet narxi eskirgan, shuning uchun baholanmadi. "
+    "⏱ {count} ta o'yin: koeffitsient eskirgan, shuning uchun baholanmadi. "
     "🔄 Qayta hisoblash bilan yangilab ko'ring."
 )
 RESULTS_DATA_STALE: Final = (
