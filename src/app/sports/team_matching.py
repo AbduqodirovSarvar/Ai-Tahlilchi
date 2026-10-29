@@ -1,12 +1,15 @@
-"""Matching API-Football teams to football-data.co.uk teams (same club, two sources).
+"""Matching provider teams to football-data.co.uk teams (same club, two sources).
 
 History (football-data, team id = its spelling such as ``Man United``) and live data
-(API-Football, numeric ids, ``Manchester United``) must refer to the same club for the
-model to use history when pricing a live fixture. Matching order:
+(Football-Data.org, numeric ids, ``Manchester United FC``; formerly API-Football) must refer to
+the same club for the model to use history when pricing a live fixture. Matching order:
 
-1. curated alias table (:data:`TEAM_ALIASES`, API-Football name → football-data name);
+1. curated alias table (:data:`TEAM_ALIASES`, provider name → football-data name);
 2. exact match of :func:`~app.domain.normalize_name` keys;
-3. fuzzy match (``rapidfuzz`` WRatio) above ``threshold`` with a clear ``margin`` over the
+3. the same two on the *club keys* (:func:`club_key`): legal-form tokens such as ``FC``,
+   ``AFC``, ``CF``, ``SSC``, ``VfB`` or ``Calcio`` removed on both sides, so ``Arsenal FC`` is
+   ``Arsenal`` and ``AFC Bournemouth`` is ``Bournemouth`` without an alias each;
+4. fuzzy match (``rapidfuzz`` WRatio) above ``threshold`` with a clear ``margin`` over the
    runner-up. WRatio scores a name that is a prefix of another at exactly 90, so the
    threshold sits above that (``Inter`` is not ``Internacional``). Names that differ in a
    squad marker (``B``, ``II``, ``U23``, ``Youth``, ``Women``...) are never candidates for
@@ -45,6 +48,36 @@ _SQUAD_MARKERS: Final = frozenset(
     {"b", "c", "ii", "iii", "jong", "youth", "reserves", "reserve", "women", "ladies", "w"}
 )
 _AGE_GROUP: Final = re.compile(r"u\d{2}")
+# Legal-form and "football club" words that name the same club with or without them.
+_CLUB_FORM_TOKENS: Final = frozenset(
+    {
+        "1",
+        "ac",
+        "acf",
+        "afc",
+        "as",
+        "bc",
+        "ca",
+        "calcio",
+        "cd",
+        "cf",
+        "cfc",
+        "club",
+        "fc",
+        "fsv",
+        "rc",
+        "rcd",
+        "sc",
+        "ss",
+        "ssc",
+        "sv",
+        "tsg",
+        "ud",
+        "us",
+        "vfb",
+        "vfl",
+    }
+)
 
 # API-Football spelling → football-data.co.uk spelling, only where they differ beyond
 # accents/punctuation. Built from knowledge of both sources for the ten default leagues;
@@ -131,6 +164,37 @@ _ALIASES: Final[Mapping[str, str]] = {
     "Hertha Berlin": "Hertha",
     "Hannover 96": "Hannover",
     "Karlsruher SC": "Karlsruhe",
+    # Football-Data.org spellings (club keys already drop FC/AFC/CF/...; these differ more).
+    "Bayer 04 Leverkusen": "Leverkusen",
+    "Mainz 05": "Mainz",
+    "1. FC Heidenheim 1846": "Heidenheim",
+    "FC St. Pauli 1910": "St Pauli",
+    "VfL Bochum 1848": "Bochum",
+    "Club Atlético de Madrid": "Ath Madrid",
+    "Real Betis Balompié": "Betis",
+    "RC Celta de Vigo": "Celta",
+    "RCD Espanyol de Barcelona": "Espanol",
+    "Real Sociedad de Fútbol": "Sociedad",
+    "Rayo Vallecano de Madrid": "Vallecano",
+    "FC Internazionale Milano": "Inter",
+    "Bologna FC 1909": "Bologna",
+    "Parma Calcio 1913": "Parma",
+    "Como 1907": "Como",
+    "Olympique de Marseille": "Marseille",
+    "LOSC Lille": "Lille",
+    "Stade Rennais FC 1901": "Rennes",
+    "RC Strasbourg Alsace": "Strasbourg",
+    "Montpellier HSC": "Montpellier",
+    "AJ Auxerre": "Auxerre",
+    "Angers SCO": "Angers",
+    "Feyenoord Rotterdam": "Feyenoord",
+    "AZ": "AZ Alkmaar",
+    "FC Twente '65": "Twente",
+    "NEC": "Nijmegen",
+    "Willem II Tilburg": "Willem II",
+    "Sporting Clube de Portugal": "Sp Lisbon",
+    "Sporting Clube de Braga": "Sp Braga",
+    "Vitória SC": "Guimaraes",
     # Italy
     "AC Milan": "Milan",
     "AS Roma": "Roma",
@@ -200,6 +264,15 @@ TEAM_ALIASES: Final[Mapping[str, str]] = {
 }
 
 
+def club_key(normalized_name: str) -> str:
+    """``normalized_name`` without legal-form tokens (``arsenal fc`` -> ``arsenal``).
+
+    A name made only of such tokens keeps them (an empty key would match anything).
+    """
+    tokens = [token for token in normalized_name.split() if token not in _CLUB_FORM_TOKENS]
+    return " ".join(tokens) if tokens else normalized_name
+
+
 class MatchMethod(StrEnum):
     """How a pair was matched."""
 
@@ -250,14 +323,16 @@ def match_teams(
 ) -> TeamMatchReport:
     """Pair each provider team with at most one history team (see module docstring)."""
     by_key: dict[str, list[Team]] = {}
+    by_club: dict[str, list[Team]] = {}
     for team in history_teams:
         by_key.setdefault(team.normalized_name, []).append(team)
+        by_club.setdefault(club_key(team.normalized_name), []).append(team)
     choices = list(by_key)
     candidates: list[TeamMatch] = []
     ambiguous: list[AmbiguousMatch] = []
     unmatched: list[Team] = []
     for provider in dict.fromkeys(provider_teams):
-        outcome = _match_one(provider, by_key, choices, aliases, (threshold, margin))
+        outcome = _match_one(provider, (by_key, by_club), choices, aliases, (threshold, margin))
         if isinstance(outcome, TeamMatch):
             candidates.append(outcome)
         elif isinstance(outcome, AmbiguousMatch):
@@ -284,16 +359,26 @@ def match_teams(
 
 def _match_one(
     provider: Team,
-    by_key: Mapping[str, list[Team]],
+    indexes: tuple[Mapping[str, list[Team]], Mapping[str, list[Team]]],
     choices: list[str],
     aliases: Mapping[str, str],
     limits: tuple[float, float],
 ) -> TeamMatch | AmbiguousMatch | None:
+    by_key, by_club = indexes
     key = provider.normalized_name
-    for method, candidate_key in ((MatchMethod.ALIAS, aliases.get(key)), (MatchMethod.EXACT, key)):
-        if candidate_key is None or candidate_key not in by_key:
+    club = club_key(key)
+    alias, club_alias = aliases.get(key), aliases.get(club)
+    attempts = (
+        (MatchMethod.ALIAS, by_key, alias),
+        (MatchMethod.EXACT, by_key, key),
+        (MatchMethod.ALIAS, by_club, None if club_alias is None else club_key(club_alias)),
+        (MatchMethod.ALIAS, by_club, None if alias is None else club_key(alias)),
+        (MatchMethod.EXACT, by_club, club),
+    )
+    for method, index, candidate_key in attempts:
+        if candidate_key is None or candidate_key not in index:
             continue
-        teams = by_key[candidate_key]
+        teams = index[candidate_key]
         if len(teams) > 1:
             return AmbiguousMatch(provider, tuple(teams))
         return TeamMatch(provider, teams[0], method, 100.0)

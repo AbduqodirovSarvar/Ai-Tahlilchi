@@ -5,13 +5,29 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.domain import Market, Selection
+from app.models import ConfidenceLevel as ModelConfidence
 from app.pipeline.errors import MatchNotFoundError, ProviderUnavailableError
+from app.pipeline.forecast import Chance, Forecast, ForecastSkip, LikelyScore
 from app.pipeline.matches import Match
 from app.services._fake_matches import FakeMatchesService
 from app.services.errors import NotFoundError, ServiceUnavailableError, ValidationFailedError
 from app.services.fake import create_fake_services
-from app.services.interfaces import MAX_MATCH_DAYS, MatchState, check_match_days
-from app.services.real.matches import RealMatchesService, match_item, match_sheet
+from app.services.interfaces import (
+    MAX_MATCH_DAYS,
+    ConfidenceLevel,
+    ForecastStatus,
+    MatchForecast,
+    MatchState,
+    OutcomeChance,
+    check_match_days,
+)
+from app.services.real.matches import (
+    RealMatchesService,
+    match_forecast,
+    match_item,
+    match_sheet,
+)
 
 USER = 1
 DAY = date(2026, 10, 30)
@@ -59,9 +75,32 @@ class StubFeed:
         return self.matches[0]
 
 
-def real(feed: StubFeed | None) -> RealMatchesService:
+class StubForecaster:
+    def __init__(self) -> None:
+        self.asked: list[list[int]] = []
+
+    async def forecast(self, matches: list[Match]) -> dict[int, Forecast]:
+        self.asked.append([m.id for m in matches])
+        result = Market.match_result()
+        return {
+            m.id: Forecast(
+                match_id=m.id,
+                chances=(
+                    Chance(result, Selection.HOME, 0.5),
+                    Chance(result, Selection.DRAW, 0.3),
+                    Chance(result, Selection.AWAY, 1.0000000001),  # float overshoot
+                ),
+                scores=(LikelyScore(1, 0, 0.11),),
+                team_matches=25,
+                confidence=ModelConfidence.MEDIUM,
+            )
+            for m in matches
+        }
+
+
+def real(feed: StubFeed | None, forecaster: StubForecaster | None = None) -> RealMatchesService:
     settings = create_fake_services().settings
-    return RealMatchesService(feed, settings)  # type: ignore[arg-type]  # structural stub
+    return RealMatchesService(feed, settings, forecaster)  # type: ignore[arg-type]  # stubs
 
 
 @pytest.mark.parametrize(
@@ -158,3 +197,77 @@ async def test_fake_samples_are_stable_and_openable() -> None:
     assert sheet.match == items[0]
     with pytest.raises(NotFoundError):
         await service.get_match(USER, 3)
+
+
+async def test_forecasts_of_a_day_and_of_one_match() -> None:
+    forecaster = StubForecaster()
+    service = real(StubFeed([provider_match("TIMED")]), forecaster)
+    [line] = await service.forecast_day(USER, DAY)
+    assert line.match.match_id == 497410
+    forecast = line.forecast
+    assert forecast.status is ForecastStatus.READY
+    assert forecast.confidence is ConfidenceLevel.MEDIUM
+    assert forecast.chance(Market.match_result(), Selection.AWAY).probability == 1.0  # type: ignore[union-attr]
+    assert forecast.scores[0].home_goals == 1
+    single = await service.forecast_match(USER, 497410)
+    assert single.forecast.team_matches == 25
+    assert forecaster.asked == [[497410], [497410]]
+
+
+async def test_without_a_forecaster_every_forecast_is_unavailable() -> None:
+    [line] = await real(StubFeed([provider_match("TIMED")])).forecast_day(USER, DAY)
+    assert line.forecast.status is ForecastStatus.UNAVAILABLE
+    assert not line.forecast.chances
+
+
+async def test_forecast_errors_follow_the_match_errors() -> None:
+    down = real(
+        StubFeed([], error=ProviderUnavailableError("football-data-org", "503")), StubForecaster()
+    )
+    with pytest.raises(ServiceUnavailableError):
+        await down.forecast_day(USER, DAY)
+    missing = real(StubFeed([], error=MatchNotFoundError(5)), StubForecaster())
+    with pytest.raises(NotFoundError):
+        await missing.forecast_match(USER, 5)
+    with pytest.raises(ServiceUnavailableError):
+        await real(None, StubForecaster()).forecast_day(USER, DAY)
+
+
+@pytest.mark.parametrize("skip", list(ForecastSkip))
+def test_every_skip_reason_has_a_contract_status(skip: ForecastSkip) -> None:
+    mapped = match_forecast(Forecast(match_id=1, skip=skip, team_matches=3))
+    assert mapped.status.value == skip.value
+    assert mapped.team_matches == 3
+    assert not mapped.chances
+
+
+def test_forecast_dto_helpers() -> None:
+    result = Market.match_result()
+    forecast = MatchForecast(
+        match_id=1,
+        status=ForecastStatus.READY,
+        chances=(
+            OutcomeChance(market=result, selection=Selection.HOME, probability=0.25),
+            OutcomeChance(market=result, selection=Selection.DRAW, probability=0.0),
+            OutcomeChance(market=result, selection=Selection.AWAY, probability=0.75),
+        ),
+    )
+    assert forecast.favourite is not None
+    assert forecast.favourite.selection is Selection.AWAY
+    home = forecast.chance(result, Selection.HOME)
+    assert home is not None
+    assert home.fair_odds == pytest.approx(4.0)
+    assert forecast.chance(result, Selection.DRAW).fair_odds is None  # type: ignore[union-attr]
+    assert forecast.chance(Market.btts(), Selection.YES) is None
+    assert MatchForecast(match_id=2, status=ForecastStatus.NO_MODEL).favourite is None
+    with pytest.raises(ValidationFailedError):
+        OutcomeChance(market=result, selection=Selection.HOME, probability=1.5)
+
+
+async def test_fake_forecasts() -> None:
+    service = create_fake_services().matches
+    lines = await service.forecast_day(USER, DAY)
+    assert len(lines) == 2
+    assert all(line.forecast.status is ForecastStatus.READY for line in lines)
+    single = await service.forecast_match(USER, lines[0].match.match_id)
+    assert single.forecast.favourite is not None

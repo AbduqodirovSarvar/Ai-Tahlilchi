@@ -13,7 +13,7 @@ from typing import Final
 
 from app.domain import ExternalRef, Fixture, Team
 from app.logging import get_logger
-from app.sports.football_leagues import LeagueCatalog
+from app.sports.football_leagues import LeagueCatalog, TrackedLeague
 from app.sports.team_matching import IdentityMap, match_teams
 
 logger = get_logger(__name__)
@@ -51,6 +51,10 @@ class LeagueDirectory:
         """The history reference of the competition (``ref`` itself when untracked)."""
         tracked = self._catalog.resolve(ref)
         return ref if tracked is None else tracked.football_data_ref
+
+    def by_provider_code(self, code: str | None) -> TrackedLeague | None:
+        """The tracked league of a Football-Data.org competition code, if tracked."""
+        return self._catalog.by_provider_code(code)
 
     def tracked(self, ref: ExternalRef) -> bool:
         """True when ``ref`` is one of the tracked competitions."""

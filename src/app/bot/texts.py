@@ -1519,3 +1519,56 @@ MATCH_NO_NUMBER: Final = "—"
 MATCH_LINEUPS_MISSING: Final = (
     "ℹ️ Tarkiblar hali e'lon qilinmagan (odatda o'yindan ~1 soat oldin) yoki tarifda yo'q."
 )
+
+# --------------------------------------------------------------------------- model forecasts
+BTN_FORECAST_DAY: Final = "📊 Kun prognozi"
+BTN_FORECAST_MATCH: Final = "📊 Prognoz"
+BTN_FORECAST_BACK: Final = "⬅️ O'yinlarga"
+BTN_FORECAST_TO_SHEET: Final = "⬅️ O'yin kartasi"
+FORECAST_DAY_TITLE: Final = "📊 <b>Prognoz · {day}, {weekday}</b> — {total} ta o'yin"
+FORECAST_NOTE: Final = (
+    "<i>Faqat model bashorati (koeffitsientsiz), tarixiy natijalardan. Adolatli koeffitsient = "
+    "1 / ehtimollik: bukmeker undan yuqori bersa — value.</i>"
+)
+FORECAST_DAY_LINE: Final = "{n}. <b>{kickoff}</b> · {home} — {away}"
+FORECAST_DAY_RESULT: Final = "   1 {home} · X {draw} · 2 {away} → <b>{favourite}</b>{confidence}"
+FORECAST_DAY_EXTRA: Final = "   Total 2.5+: {over} · Ikkala jamoa gol uradi: {btts}"
+FORECAST_DAY_CONFIDENCE: Final = " · 🛡 {level}"
+FORECAST_SKIPPED: Final = "   ℹ️ Prognoz yo'q: {reason}"
+FORECAST_MATCH_TITLE: Final = "📊 <b>Prognoz: {home} — {away}</b>"
+FORECAST_MATCH_META: Final = "🕒 <b>{kickoff}</b> · {competition}"
+FORECAST_SECTION_RESULT: Final = "<b>Kim yutadi</b>"
+FORECAST_RESULT_LINE: Final = "• {label}: <b>{probability}</b> · adolatli koeff. {fair}"
+FORECAST_SECTION_DOUBLE: Final = (
+    "<b>Ikki natijadan biri</b>: 1X {home_draw} · X2 {draw_away} · 12 {home_away}"
+)
+FORECAST_SECTION_GOALS: Final = "<b>Gollar soni</b>"
+FORECAST_GOALS_LINE: Final = (
+    "• Total {line}: ko'p {over} ({over_fair}) · kam {under} ({under_fair})"
+)
+FORECAST_SECTION_BTTS: Final = (
+    "<b>Ikkala jamoa gol uradi</b>: ha {yes} ({yes_fair}) · yo'q {no} ({no_fair})"
+)
+FORECAST_SECTION_SCORES: Final = "<b>Ehtimolli hisoblar</b>: {scores}"
+FORECAST_SCORE: Final = "{home}:{away} {probability}"
+FORECAST_CONFIDENCE: Final = (
+    "🛡 Ishonch: <b>{level}</b> (kamroq o'yinli jamoada {matches} ta o'yin tarixi)"
+)
+FORECAST_RESULT_LABELS: Final[dict[str, str]] = {
+    "home": "Uy g'alabasi (1)",
+    "draw": "Durang (X)",
+    "away": "Mehmon g'alabasi (2)",
+}
+FORECAST_FAVOURITES: Final[dict[str, str]] = {
+    "home": "uy g'alabasi",
+    "draw": "durang",
+    "away": "mehmon g'alabasi",
+}
+FORECAST_REASONS: Final[dict[str, str]] = {
+    "untracked_league": "bu liga kuzatilmaydi",
+    "teams_undecided": "jamoalar hali aniqlanmagan",
+    "no_model": "liga tarixi yetarli emas (model o'rganilmagan)",
+    "thin_history": "jamoalardan birining o'yinlari kam",
+    "unknown_team": "jamoa tarixda topilmadi (nomi moslanmagan)",
+    "unavailable": "namunaviy rejimda prognoz yo'q (APP_SERVICES=real kerak)",
+}

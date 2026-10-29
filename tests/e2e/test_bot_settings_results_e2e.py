@@ -175,7 +175,7 @@ def _stream(methods: list[TelegramMethod[Any]]) -> list[str]:
 
 def _signal_for(card: str, signals: list[SignalView], zone: ZoneInfo) -> SignalView:
     for signal in signals:
-        local = signal.kickoff.astimezone(zone).strftime("%H:%M")
+        local = signal.kickoff.astimezone(zone).strftime("%d.%m.%Y %H:%M")
         if signal.fixture_label in card and f"🕒 {local}" in card:
             return signal
     msg = f"no signal for card {card[:60]!r}"

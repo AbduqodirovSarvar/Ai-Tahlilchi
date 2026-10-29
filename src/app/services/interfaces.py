@@ -2772,6 +2772,76 @@ class MatchSheet:
         return bool(self.home.starters and self.away.starters)
 
 
+class ForecastStatus(StrEnum):
+    """Whether a match has a model forecast, and why not (v1.13)."""
+
+    READY = "ready"
+    UNTRACKED_LEAGUE = "untracked_league"
+    TEAMS_UNDECIDED = "teams_undecided"
+    NO_MODEL = "no_model"
+    THIN_HISTORY = "thin_history"
+    UNKNOWN_TEAM = "unknown_team"
+    UNAVAILABLE = "unavailable"
+    """Forecasts need the stored history: not offered by the sample (fake) backend."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OutcomeChance:
+    """The model probability of one selection and its fair (margin-free) odds."""
+
+    market: Market
+    selection: Selection
+    probability: float
+
+    def __post_init__(self) -> None:
+        """A probability is within [0, 1]."""
+        _check_range(self.probability, "probability", 0.0, 1.0)
+
+    @property
+    def fair_odds(self) -> float | None:
+        """``1 / probability``: a bookmaker price above it is value (``None`` at 0%)."""
+        return None if self.probability <= 0.0 else 1.0 / self.probability
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MatchForecast:
+    """The model's view of a match without any odds: probabilities, likely scores, trust.
+
+    There is no expected value and no stake: both need a bookmaker price.
+    """
+
+    match_id: int
+    status: ForecastStatus
+    chances: tuple[OutcomeChance, ...] = ()
+    scores: tuple[ScoreProbability, ...] = ()
+    team_matches: int = 0
+    confidence: ConfidenceLevel | None = None
+
+    def chance(self, market: Market, selection: Selection) -> OutcomeChance | None:
+        """The chance of one selection, if forecast."""
+        return next(
+            (c for c in self.chances if c.market == market and c.selection == selection), None
+        )
+
+    @property
+    def favourite(self) -> OutcomeChance | None:
+        """The most likely full-time result (1, X or 2), if forecast."""
+        result = Market.match_result()
+        return max(
+            (c for c in self.chances if c.market == result),
+            key=lambda c: c.probability,
+            default=None,
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ForecastLine:
+    """A match and its forecast."""
+
+    match: MatchItem
+    forecast: MatchForecast
+
+
 class MatchesService(Protocol):
     """Live match list and match sheets, always asked from the provider (v1.12)."""
 
@@ -2789,6 +2859,23 @@ class MatchesService(Protocol):
 
     async def get_match(self, user_id: int, match_id: int) -> MatchSheet:
         """One match with its line-ups.
+
+        Raises:
+            NotFoundError: the provider does not know ``match_id``.
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+    async def forecast_day(self, user_id: int, day: date) -> tuple[ForecastLine, ...]:
+        """Every match of the user's local ``day`` with its model forecast (v1.13).
+
+        Raises:
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+    async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:
+        """One match with its model forecast (v1.13).
 
         Raises:
             NotFoundError: the provider does not know ``match_id``.

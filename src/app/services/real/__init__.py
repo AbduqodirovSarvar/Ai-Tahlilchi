@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery
+from app.pipeline.forecast import Forecaster
 from app.pipeline.matches import MatchFeed
 from app.services.interfaces import Notifier, Services
 from app.services.real.account import (
@@ -73,6 +74,6 @@ def create_real_services(
         learning=RealLearningService(core),
         browser=RealDataBrowserService(core),
         calls=RealCallLogService(core),
-        matches=RealMatchesService(matches, settings),
+        matches=RealMatchesService(matches, settings, Forecaster(ctx)),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

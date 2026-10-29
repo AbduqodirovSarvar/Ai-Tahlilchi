@@ -1,4 +1,7 @@
-"""⚽ O'yinlar (``/oyinlar``): a day's matches and match sheets, live from Football-Data.org.
+"""⚽ O'yinlar (``/oyinlar``): a day's matches, match sheets and model forecasts.
+
+Matches and sheets come live from Football-Data.org; forecasts (📊) are the model's
+probabilities from the stored history, without any odds.
 
 Nothing here reads stored fixtures: every screen asks the service, which asks the provider.
 Buttons carry only the day (a date ordinal), the page and the match id, so they are stateless
@@ -16,6 +19,12 @@ from app.bot import texts
 from app.bot.callbacks import MatchCb
 from app.bot.draft import StaleDraftError
 from app.bot.flow import FlowContext, FlowContextMiddleware
+from app.bot.forecast_ui import (
+    day_forecast_keyboard,
+    format_day_forecast,
+    format_match_forecast,
+    match_forecast_keyboard,
+)
 from app.bot.handlers.filters import TYPED_INPUT
 from app.bot.matches_ui import (
     clamp_page,
@@ -95,7 +104,35 @@ async def on_item(callback: CallbackQuery, callback_data: MatchCb, flow: FlowCon
     await edit_html(
         _message_of(callback),
         format_match_sheet(sheet, await flow.zone()),
-        sheet_keyboard(callback_data.d, callback_data.p),
+        sheet_keyboard(callback_data.d, callback_data.p, callback_data.i),
+    )
+
+
+async def on_forecast_day(
+    callback: CallbackQuery, callback_data: MatchCb, flow: FlowContext
+) -> None:
+    """📊 Kun prognozi: the model's view of every match of the day (paged)."""
+    await answer_callback(callback)
+    day = await _day_of(callback_data.d, flow)
+    lines = await flow.services.matches.forecast_day(flow.user_id, day)
+    page = clamp_page(callback_data.p, len(lines))
+    await edit_html(
+        _message_of(callback),
+        format_day_forecast(day, lines, page, await flow.zone()),
+        day_forecast_keyboard(day, page, len(lines)),
+    )
+
+
+async def on_forecast_match(
+    callback: CallbackQuery, callback_data: MatchCb, flow: FlowContext
+) -> None:
+    """📊 Prognoz: every forecast market of one match with fair odds."""
+    await answer_callback(callback)
+    line = await flow.services.matches.forecast_match(flow.user_id, callback_data.i)
+    await edit_html(
+        _message_of(callback),
+        format_match_forecast(line, await flow.zone()),
+        match_forecast_keyboard(callback_data.d, callback_data.p, callback_data.i),
     )
 
 
@@ -107,6 +144,12 @@ def create_router() -> Router:
     router.message.register(open_matches, F.text == texts.MENU_MATCHES)
     router.message.register(open_matches, Command(COMMAND))
     router.message.register(on_date_text, TYPED_INPUT, StateFilter(MatchFlow.date_query))
-    for action, handler in (("day", on_day), ("ask", on_ask), ("item", on_item)):
+    for action, handler in (
+        ("day", on_day),
+        ("ask", on_ask),
+        ("item", on_item),
+        ("fday", on_forecast_day),
+        ("fmatch", on_forecast_match),
+    ):
         router.callback_query.register(handler, MatchCb.filter(F.action == action))
     return router

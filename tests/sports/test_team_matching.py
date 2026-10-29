@@ -17,6 +17,7 @@ from app.sports.team_matching import (
     TEAM_ALIASES,
     IdentityMap,
     MatchMethod,
+    club_key,
     match_leagues,
     match_teams,
     squad_markers,
@@ -264,3 +265,52 @@ def test_teams_are_only_matched_within_their_own_league() -> None:
         "Newcastle Utd": "Newcastle",
         "Betis": "Betis",
     }
+
+
+FOOTBALL_DATA_ORG_NAMES = {
+    "Arsenal FC": "Arsenal",
+    "Manchester City FC": "Man City",
+    "Tottenham Hotspur FC": "Tottenham",
+    "Wolverhampton Wanderers FC": "Wolves",
+    "Nottingham Forest FC": "Nott'm Forest",
+    "Brighton & Hove Albion FC": "Brighton",
+    "AFC Bournemouth": "Bournemouth",
+    "Sunderland AFC": "Sunderland",
+    "Real Madrid CF": "Real Madrid",
+    "Club Atlético de Madrid": "Ath Madrid",
+    "FC Bayern München": "Bayern Munich",
+    "Bayer 04 Leverkusen": "Leverkusen",
+    "1. FSV Mainz 05": "Mainz",
+    "TSG 1899 Hoffenheim": "Hoffenheim",
+    "1. FC Union Berlin": "Union Berlin",
+    "SSC Napoli": "Napoli",
+    "FC Internazionale Milano": "Inter",
+    "AC Milan": "Milan",
+    "Paris Saint-Germain FC": "Paris SG",
+    "Paris FC": "Paris FC",
+    "AFC Ajax": "Ajax",
+    "Sporting Clube de Portugal": "Sp Lisbon",
+}
+
+
+def test_football_data_org_spellings_match_confidently() -> None:
+    provider = [
+        Team(ref=ExternalRef("football-data-org", str(i)), sport=Sport.FOOTBALL, name=name)
+        for i, name in enumerate(FOOTBALL_DATA_ORG_NAMES)
+    ]
+    history = [
+        Team(ref=ExternalRef("football-data", name), sport=Sport.FOOTBALL, name=name)
+        for name in FOOTBALL_DATA_ORG_NAMES.values()
+    ]
+    report = match_teams(provider, history)
+    found = {m.provider.name: m.history.name for m in report.matched if m not in report.fuzzy}
+    assert found == FOOTBALL_DATA_ORG_NAMES
+    assert not report.ambiguous
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [("arsenal fc", "arsenal"), ("afc bournemouth", "bournemouth"), ("fc", "fc"), ("ac", "ac")],
+)
+def test_club_key_drops_legal_form_words_but_never_everything(name: str, key: str) -> None:
+    assert club_key(name) == key

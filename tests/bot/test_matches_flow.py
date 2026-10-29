@@ -8,6 +8,7 @@ import pytest
 from aiogram import Bot
 
 from app.bot import texts
+from app.bot.forecast_ui import format_day_forecast, format_match_forecast
 from app.bot.formatters import kickoff_stamp
 from app.bot.matches_ui import (
     MATCHES_PAGE_SIZE,
@@ -17,9 +18,20 @@ from app.bot.matches_ui import (
     ordered_for_display,
     page_count,
 )
+from app.domain import Market, Selection
+from app.services._fake_matches import sample_forecast
 from app.services.errors import NotFoundError, ServiceUnavailableError
 from app.services.fake import create_fake_services
-from app.services.interfaces import LineupPlayer, MatchItem, MatchSheet, MatchState, SideLineup
+from app.services.interfaces import (
+    ForecastLine,
+    ForecastStatus,
+    LineupPlayer,
+    MatchForecast,
+    MatchItem,
+    MatchSheet,
+    MatchState,
+    SideLineup,
+)
 from tests.bot.fakes import BotHarness, RecordingSession, fixed_clock
 from tests.e2e.bot_client import telegram_html_problems
 
@@ -140,6 +152,15 @@ class StubMatches:
             raise NotFoundError("match", match_id)
         return sheet()
 
+    async def forecast_day(self, user_id: int, day: date) -> tuple[ForecastLine, ...]:  # noqa: ARG002 - protocol signature
+        self.days.append((day, day))
+        return tuple(
+            ForecastLine(match=i, forecast=sample_forecast(i.match_id)) for i in self.items
+        )
+
+    async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:  # noqa: ARG002 - protocol signature
+        return ForecastLine(match=sheet().match, forecast=sample_forecast(match_id))
+
 
 @pytest.fixture
 def stub() -> StubMatches:
@@ -200,3 +221,64 @@ async def test_forged_day_falls_back_to_today(harness: BotHarness, stub: StubMat
     message_id, _ = harness.find_button(texts.BTN_MATCHES_TODAY)
     await harness.press_data("mt:day:0:0:0", message_id)
     assert stub.days[-1] == (TODAY, TODAY)
+
+
+# --------------------------------------------------------------------------- forecasts
+def test_day_forecast_shows_result_chances_favourite_and_skips() -> None:
+    lines = (
+        ForecastLine(match=item(1), forecast=sample_forecast(1)),
+        ForecastLine(
+            match=item(2, home=None),
+            forecast=MatchForecast(match_id=2, status=ForecastStatus.THIN_HISTORY),
+        ),
+    )
+    text = format_day_forecast(date(2026, 10, 30), lines, 0, TASHKENT)
+    assert telegram_html_problems(text) == []
+    assert "30.10.2026 21:00" in text
+    assert "1 52% · X 26% · 2 22% → <b>uy g'alabasi</b> · 🛡 O'rta" in text
+    assert "Total 2.5+: 55% · Ikkala jamoa gol uradi: 51%" in text
+    assert texts.FORECAST_REASONS["thin_history"] in text
+    assert "Chelsea &lt;FC&gt;" in text
+    assert texts.MATCHES_EMPTY in format_day_forecast(date(2026, 10, 30), (), 0, TASHKENT)
+
+
+def test_match_forecast_card_lists_fair_odds_and_scores() -> None:
+    text = format_match_forecast(ForecastLine(match=item(1), forecast=sample_forecast(1)), TASHKENT)
+    assert telegram_html_problems(text) == []
+    assert "Uy g'alabasi (1): <b>52%</b> · adolatli koeff. 1.92" in text
+    assert "Total 2.5: ko'p 55% (1.82) · kam 45% (2.22)" in text
+    assert "ha 51% (1.96)" in text
+    assert "1:1 12% · 1:0 10%" in text
+    assert "Ishonch: <b>O'rta</b>" in text
+    assert texts.FORECAST_NOTE in text
+    unavailable = MatchForecast(match_id=1, status=ForecastStatus.UNAVAILABLE)
+    bare = format_match_forecast(ForecastLine(match=item(1), forecast=unavailable), TASHKENT)
+    assert texts.FORECAST_REASONS["unavailable"] in bare
+    assert "Kim yutadi" not in bare
+
+
+def test_forecast_card_without_optional_markets() -> None:
+    result = Market.match_result()
+    only_result = MatchForecast(
+        match_id=1,
+        status=ForecastStatus.READY,
+        chances=tuple(c for c in sample_forecast(1).chances if c.market == result),
+    )
+    text = format_match_forecast(ForecastLine(match=item(1), forecast=only_result), TASHKENT)
+    assert "Kim yutadi" in text
+    assert "Gollar soni" not in text
+    assert "Ishonch" not in text
+    assert only_result.chance(result, Selection.HOME) is not None
+
+
+async def test_forecast_buttons_from_the_list_and_the_sheet(harness: BotHarness) -> None:
+    await harness.send(texts.MENU_MATCHES)
+    await harness.press(texts.BTN_FORECAST_DAY)
+    assert "📊 <b>Prognoz · 21.10.2026" in harness.last_text
+    await harness.press(texts.BTN_FORECAST_BACK)
+    assert "⚽ <b>O'yinlar" in harness.last_text
+    await harness.press("1")
+    await harness.press(texts.BTN_FORECAST_MATCH)
+    assert "📊 <b>Prognoz: Chelsea" in harness.last_text
+    await harness.press(texts.BTN_FORECAST_TO_SHEET)
+    assert "Murabbiy: Enzo Maresca" in harness.last_text

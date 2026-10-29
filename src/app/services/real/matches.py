@@ -1,21 +1,31 @@
 """Live matches for the bot: Football-Data.org through :class:`~app.pipeline.matches.MatchFeed`.
 
-Works with either backend: it needs only the feed and the user's time zone (from whichever
-:class:`~app.services.interfaces.SettingsService` the bot runs with), never the database.
+Works with either backend: the list and the sheets need only the feed and the user's time zone
+(from whichever :class:`~app.services.interfaces.SettingsService` the bot runs with). Forecasts
+also need the stored history, so they come from a :class:`~app.pipeline.forecast.Forecaster`
+over the real pipeline; without one (the sample backend) a forecast says it is unavailable.
 """
 
+from collections.abc import Awaitable
 from datetime import date
 from typing import Final
 
 from app.logging import get_logger
 from app.pipeline.errors import MatchNotFoundError, ProviderUnavailableError
+from app.pipeline.forecast import Forecast, Forecaster
 from app.pipeline.matches import Match, MatchFeed, MatchStatus, MatchTeam, Player
 from app.services.errors import NotFoundError, ServiceUnavailableError
 from app.services.interfaces import (
+    ConfidenceLevel,
+    ForecastLine,
+    ForecastStatus,
     LineupPlayer,
+    MatchForecast,
     MatchItem,
     MatchSheet,
     MatchState,
+    OutcomeChance,
+    ScoreProbability,
     SettingsService,
     SideLineup,
     check_match_days,
@@ -46,36 +56,62 @@ class RealMatchesService:
     provider is not configured instead of showing anything.
     """
 
-    def __init__(self, feed: MatchFeed | None, settings: SettingsService) -> None:
-        """Wire the feed and the source of the user's time zone."""
+    def __init__(
+        self,
+        feed: MatchFeed | None,
+        settings: SettingsService,
+        forecaster: Forecaster | None = None,
+    ) -> None:
+        """Wire the feed, the source of the user's time zone and the model forecasts."""
         self._feed = feed
         self._settings = settings
+        self._forecaster = forecaster
 
     async def list_matches(
         self, user_id: int, day_from: date, day_to: date
     ) -> tuple[MatchItem, ...]:
         """See :meth:`app.services.interfaces.MatchesService.list_matches`."""
         check_match_days(day_from, day_to)
-        feed = self._require_feed()
-        zone = (await self._settings.get_settings(user_id)).zone
-        try:
-            matches = await feed.matches_on(day_from, day_to, zone)
-        except ProviderUnavailableError as error:
-            logger.warning("matches_unavailable", user_id=user_id, detail=error.detail)
-            raise ServiceUnavailableError(COMPONENT, error.detail) from error
-        return tuple(match_item(match) for match in matches)
+        return tuple(match_item(match) for match in await self._day(user_id, day_from, day_to))
 
     async def get_match(self, user_id: int, match_id: int) -> MatchSheet:
         """See :meth:`app.services.interfaces.MatchesService.get_match`."""
+        return match_sheet(await self._match(user_id, match_id))
+
+    async def forecast_day(self, user_id: int, day: date) -> tuple[ForecastLine, ...]:
+        """See :meth:`app.services.interfaces.MatchesService.forecast_day`."""
+        matches = await self._day(user_id, day, day)
+        forecasts = await self._forecasts(matches)
+        return tuple(
+            ForecastLine(match=match_item(match), forecast=forecasts[match.id]) for match in matches
+        )
+
+    async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:
+        """See :meth:`app.services.interfaces.MatchesService.forecast_match`."""
+        match = await self._match(user_id, match_id)
+        forecasts = await self._forecasts([match])
+        return ForecastLine(match=match_item(match), forecast=forecasts[match.id])
+
+    async def _day(self, user_id: int, day_from: date, day_to: date) -> list[Match]:
+        feed = self._require_feed()
+        zone = (await self._settings.get_settings(user_id)).zone
+        return await _provider(feed.matches_on(day_from, day_to, zone), user_id=user_id)
+
+    async def _match(self, user_id: int, match_id: int) -> Match:
         feed = self._require_feed()
         try:
-            match = await feed.match(match_id)
+            return await _provider(feed.match(match_id), user_id=user_id)
         except MatchNotFoundError as error:
             raise NotFoundError("match", match_id) from error
-        except ProviderUnavailableError as error:
-            logger.warning("match_unavailable", user_id=user_id, match_id=match_id)
-            raise ServiceUnavailableError(COMPONENT, error.detail) from error
-        return match_sheet(match)
+
+    async def _forecasts(self, matches: list[Match]) -> dict[int, MatchForecast]:
+        if self._forecaster is None:
+            return {
+                m.id: MatchForecast(match_id=m.id, status=ForecastStatus.UNAVAILABLE)
+                for m in matches
+            }
+        forecasts = await self._forecaster.forecast(matches)
+        return {match_id: match_forecast(f) for match_id, f in forecasts.items()}
 
     def _require_feed(self) -> MatchFeed:
         if self._feed is None:
@@ -127,3 +163,45 @@ def _players(players: tuple[Player, ...]) -> tuple[LineupPlayer, ...]:
         for player in players
         if player.name
     )
+
+
+async def _provider[T](call: Awaitable[T], *, user_id: int) -> T:
+    """Await a feed call; a provider outage becomes the contract's "try again later"."""
+    try:
+        return await call
+    except ProviderUnavailableError as error:
+        logger.warning("matches_unavailable", user_id=user_id, detail=error.detail)
+        raise ServiceUnavailableError(COMPONENT, error.detail) from error
+
+
+def match_forecast(forecast: Forecast) -> MatchForecast:
+    """The contract view of a pipeline forecast."""
+    if forecast.skip is not None:
+        return MatchForecast(
+            match_id=forecast.match_id,
+            status=ForecastStatus(forecast.skip.value),
+            team_matches=forecast.team_matches,
+        )
+    return MatchForecast(
+        match_id=forecast.match_id,
+        status=ForecastStatus.READY,
+        chances=tuple(
+            OutcomeChance(market=c.market, selection=c.selection, probability=_unit(c.probability))
+            for c in forecast.chances
+        ),
+        scores=tuple(
+            ScoreProbability(
+                home_goals=s.home_goals, away_goals=s.away_goals, probability=_unit(s.probability)
+            )
+            for s in forecast.scores
+        ),
+        team_matches=forecast.team_matches,
+        confidence=None
+        if forecast.confidence is None
+        else ConfidenceLevel(forecast.confidence.value),
+    )
+
+
+def _unit(probability: float) -> float:
+    """``probability`` kept inside [0, 1] (float sums may overshoot by an ulp)."""
+    return min(max(probability, 0.0), 1.0)

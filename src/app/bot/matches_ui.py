@@ -109,18 +109,19 @@ def _number_rows(items: Sequence[MatchItem], day: date, page: int) -> list[Row]:
     return [buttons[i : i + _NUMBERS_PER_ROW] for i in range(0, len(buttons), _NUMBERS_PER_ROW)]
 
 
-def _page_row(day: date, page: int, total: int) -> Row:
+def page_row(day: date, page: int, total: int, *, action: str = "day") -> Row:
+    """Previous / page indicator / next for a paged list of ``day`` (``action`` = which list)."""
     pages = page_count(total)
     if pages == 1:
         return []
     ordinal = day.toordinal()
     row: Row = []
     if page > 0:
-        previous = MatchCb(action="day", d=ordinal, p=page - 1)
+        previous = MatchCb(action=action, d=ordinal, p=page - 1)
         row.append(single_button(texts.BTN_MATCHES_PREV_PAGE, previous))
     row.append(single_button(f"{page + 1}/{pages}", NoopCb()))
     if page < pages - 1:
-        following = MatchCb(action="day", d=ordinal, p=page + 1)
+        following = MatchCb(action=action, d=ordinal, p=page + 1)
         row.append(single_button(texts.BTN_MATCHES_NEXT_PAGE, following))
     return row
 
@@ -147,7 +148,17 @@ def matches_keyboard(
         single_button(texts.BTN_MATCHES_PREV_DAY, MatchCb(action="day", d=day.toordinal() - 1)),
         single_button(texts.BTN_MATCHES_NEXT_DAY, MatchCb(action="day", d=day.toordinal() + 1)),
     ]
-    rows = [*_number_rows(items, day, page), _page_row(day, page, len(items)), neighbours]
+    forecast = (
+        [single_button(texts.BTN_FORECAST_DAY, MatchCb(action="fday", d=day.toordinal()))]
+        if items
+        else []
+    )
+    rows = [
+        *_number_rows(items, day, page),
+        page_row(day, page, len(items)),
+        forecast,
+        neighbours,
+    ]
     return markup_of([row for row in [*rows, *day_choice_rows(today)] if row])
 
 
@@ -200,8 +211,12 @@ def format_match_sheet(sheet: MatchSheet, zone: ZoneInfo) -> str:
     return "\n".join(lines)
 
 
-def sheet_keyboard(day_ordinal: int, page: int) -> InlineKeyboardMarkup:
-    """Back to the list the match was opened from."""
+def sheet_keyboard(day_ordinal: int, page: int, match_id: int) -> InlineKeyboardMarkup:
+    """The match's forecast, and back to the list the match was opened from."""
+    forecast = MatchCb(action="fmatch", d=day_ordinal, p=page, i=match_id)
     return markup_of(
-        [[single_button(texts.BTN_MATCHES_BACK, MatchCb(action="day", d=day_ordinal, p=page))]]
+        [
+            [single_button(texts.BTN_FORECAST_MATCH, forecast)],
+            [single_button(texts.BTN_MATCHES_BACK, MatchCb(action="day", d=day_ordinal, p=page))],
+        ]
     )

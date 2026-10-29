@@ -313,8 +313,9 @@ class LearnCb(CallbackData, prefix="ln"):
 class MatchCb(CallbackData, prefix="mt"):
     """⚽ O'yinlar buttons; stateless, so they survive a restart.
 
-    ``day`` (day ordinal ``d``, page ``p``), ``ask`` (type a date) and ``item`` (match id ``i``;
-    ``d``/``p`` lead back to the list).
+    ``day`` (day ordinal ``d``, page ``p``), ``ask`` (type a date), ``item`` (match id ``i``;
+    ``d``/``p`` lead back to the list), ``fday`` (the day's forecasts, page ``p``) and ``fmatch``
+    (one match's forecast).
     """
 
     action: str
