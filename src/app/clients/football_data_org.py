@@ -89,6 +89,8 @@ FOOTBALL_DATA_ORG_CONFIG: Final = ProviderConfig(
     auth_header="X-Auth-Token",
     requests_per_minute=FREE_PLAN_REQUESTS_PER_MINUTE,
     log_provider=Provider.FOOTBALL_DATA,
+    # Match lists fold the bookings away by default; the card model needs them (ADR 0027).
+    extra_headers=(("X-Unfold-Bookings", "true"),),
 )
 
 

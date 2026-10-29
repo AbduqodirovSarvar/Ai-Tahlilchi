@@ -11,11 +11,15 @@ from datetime import date
 from typing import Final
 
 from app.logging import get_logger
+from app.pipeline.card_forecast import CardOutlook as PipelineCardOutlook
 from app.pipeline.errors import MatchNotFoundError, ProviderUnavailableError
 from app.pipeline.forecast import Forecast, Forecaster
 from app.pipeline.matches import Match, MatchFeed, MatchStatus, MatchTeam, Player
 from app.services.errors import NotFoundError, ServiceUnavailableError
 from app.services.interfaces import (
+    CardChance,
+    CardOutlook,
+    CardScope,
     ConfidenceLevel,
     ForecastLine,
     ForecastStatus,
@@ -28,7 +32,11 @@ from app.services.interfaces import (
     ScoreProbability,
     SettingsService,
     SideLineup,
+    TeamChance,
+    TeamPick,
+    TopPick,
     check_match_days,
+    rank_picks,
 )
 
 logger = get_logger(__name__)
@@ -80,7 +88,17 @@ class RealMatchesService:
 
     async def forecast_day(self, user_id: int, day: date) -> tuple[ForecastLine, ...]:
         """See :meth:`app.services.interfaces.MatchesService.forecast_day`."""
-        matches = await self._day(user_id, day, day)
+        return await self._lines(user_id, day, day)
+
+    async def top_picks(self, user_id: int, day_from: date, day_to: date) -> tuple[TopPick, ...]:
+        """See :meth:`app.services.interfaces.MatchesService.top_picks`."""
+        check_match_days(day_from, day_to)
+        settings = await self._settings.get_settings(user_id)
+        lines = await self._lines(user_id, day_from, day_to)
+        return rank_picks(lines, min_probability=settings.min_probability)
+
+    async def _lines(self, user_id: int, day_from: date, day_to: date) -> tuple[ForecastLine, ...]:
+        matches = await self._day(user_id, day_from, day_to)
         forecasts = await self._forecasts(matches)
         return tuple(
             ForecastLine(match=match_item(match), forecast=forecasts[match.id]) for match in matches
@@ -195,6 +213,11 @@ def match_forecast(forecast: Forecast) -> MatchForecast:
             )
             for s in forecast.scores
         ),
+        team_chances=tuple(
+            TeamChance(pick=TeamPick(c.pick.value), probability=_unit(c.probability))
+            for c in forecast.team_chances
+        ),
+        cards=_cards(forecast.cards),
         team_matches=forecast.team_matches,
         confidence=None
         if forecast.confidence is None
@@ -205,3 +228,25 @@ def match_forecast(forecast: Forecast) -> MatchForecast:
 def _unit(probability: float) -> float:
     """``probability`` kept inside [0, 1] (float sums may overshoot by an ulp)."""
     return min(max(probability, 0.0), 1.0)
+
+
+def _cards(outlook: PipelineCardOutlook | None) -> CardOutlook | None:
+    if outlook is None:
+        return None
+    return CardOutlook(
+        expected_home=outlook.expected_home,
+        expected_away=outlook.expected_away,
+        referee=outlook.referee,
+        referee_known=outlook.referee_known,
+        strictness=outlook.strictness,
+        team_matches=outlook.team_matches,
+        chances=tuple(
+            CardChance(
+                scope=CardScope(c.scope.value),
+                line=c.line,
+                over=c.over,
+                probability=_unit(c.probability),
+            )
+            for c in outlook.chances
+        ),
+    )

@@ -36,6 +36,7 @@ from app.bot.matches_ui import (
 )
 from app.bot.messaging import answer_callback, callback_message, edit_html, send_html
 from app.bot.parsing import parse_date
+from app.bot.picks_ui import format_top_picks, top_picks_keyboard
 from app.bot.states import MatchFlow
 
 COMMAND: Final = "oyinlar"
@@ -136,6 +137,25 @@ async def on_forecast_match(
     )
 
 
+async def on_picks(callback: CallbackQuery, callback_data: MatchCb, flow: FlowContext) -> None:
+    """🎯 Eng ehtimolli tanlovlar of the day: the most likely picks, without odds."""
+    await answer_callback(callback)
+    day = await _day_of(callback_data.d, flow)
+    picks = await flow.services.matches.top_picks(flow.user_id, day, day)
+    settings = await flow.settings()
+    await edit_html(
+        _message_of(callback),
+        format_top_picks(
+            picks,
+            day_from=day,
+            day_to=day,
+            min_probability=settings.min_probability,
+            zone=settings.zone,
+        ),
+        top_picks_keyboard(day),
+    )
+
+
 def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="matches")
@@ -150,6 +170,7 @@ def create_router() -> Router:
         ("item", on_item),
         ("fday", on_forecast_day),
         ("fmatch", on_forecast_match),
+        ("picks", on_picks),
     ):
         router.callback_query.register(handler, MatchCb.filter(F.action == action))
     return router

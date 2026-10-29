@@ -13,6 +13,9 @@ from zoneinfo import ZoneInfo
 from app.domain import Market, Selection
 from app.services.errors import NotFoundError
 from app.services.interfaces import (
+    CardChance,
+    CardOutlook,
+    CardScope,
     ConfidenceLevel,
     ForecastLine,
     ForecastStatus,
@@ -25,7 +28,11 @@ from app.services.interfaces import (
     ScoreProbability,
     SettingsService,
     SideLineup,
+    TeamChance,
+    TeamPick,
+    TopPick,
     check_match_days,
+    rank_picks,
 )
 
 _SAMPLE_TIMES: Final = (time(19, 0), time(21, 30))
@@ -95,6 +102,15 @@ class FakeMatchesService:
             ForecastLine(match=item, forecast=sample_forecast(item.match_id)) for item in items
         )
 
+    async def top_picks(self, user_id: int, day_from: date, day_to: date) -> tuple[TopPick, ...]:
+        """See :meth:`app.services.interfaces.MatchesService.top_picks`."""
+        items = await self.list_matches(user_id, day_from, day_to)
+        lines = [
+            ForecastLine(match=item, forecast=sample_forecast(item.match_id)) for item in items
+        ]
+        settings = await self._settings.get_settings(user_id)
+        return rank_picks(lines, min_probability=settings.min_probability)
+
     async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:
         """See :meth:`app.services.interfaces.MatchesService.forecast_match`."""
         sheet = await self.get_match(user_id, match_id)
@@ -122,4 +138,22 @@ def sample_forecast(match_id: int) -> MatchForecast:
         ),
         team_matches=_SAMPLE_TEAM_MATCHES,
         confidence=ConfidenceLevel.MEDIUM,
+        team_chances=(
+            TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.78),
+            TeamChance(pick=TeamPick.AWAY_TO_SCORE, probability=0.64),
+        ),
+        cards=CardOutlook(
+            expected_home=1.8,
+            expected_away=2.3,
+            referee="Sample Referee",
+            referee_known=True,
+            strictness=1.15,
+            team_matches=_SAMPLE_TEAM_MATCHES,
+            chances=(
+                CardChance(scope=CardScope.TOTAL, line=3.5, over=True, probability=0.58),
+                CardChance(scope=CardScope.TOTAL, line=3.5, over=False, probability=0.42),
+                CardChance(scope=CardScope.AWAY, line=1.5, over=True, probability=0.67),
+                CardChance(scope=CardScope.AWAY, line=1.5, over=False, probability=0.33),
+            ),
+        ),
     )

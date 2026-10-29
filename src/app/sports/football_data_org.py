@@ -65,6 +65,8 @@ SUPPORTED_MARKETS: Final = frozenset({MarketType.MATCH_RESULT})
 """The only market the provider prices (averaged 1X2, with its odds package)."""
 MAX_IDS_PER_REQUEST: Final = 20
 _FORBIDDEN: Final = 403
+# Booking card -> index in (yellows, reds).
+_CARD_INDEX: Final = {"YELLOW": 0, "YELLOW_RED": 1, "RED": 1}
 
 type UtcClock = Callable[[], datetime]
 
@@ -153,6 +155,7 @@ def map_result(match: Match) -> FixtureResult | None:
         return None
     half = match.score.half_time
     both_halves = half.home is not None and half.away is not None
+    cards = card_counts(match)
     return FixtureResult(
         fixture=ref(match.id),
         status=status,
@@ -160,7 +163,40 @@ def map_result(match: Match) -> FixtureResult | None:
         away_score=score.away,
         home_ht_score=half.home if both_halves else None,
         away_ht_score=half.away if both_halves else None,
+        home_yellow=None if cards is None else cards[0],
+        away_yellow=None if cards is None else cards[1],
+        home_red=None if cards is None else cards[2],
+        away_red=None if cards is None else cards[3],
+        referee=main_referee(match),
     )
+
+
+def card_counts(match: Match) -> tuple[int, int, int, int] | None:
+    """``(home yellow, away yellow, home red, away red)`` from the bookings, if listed.
+
+    An empty bookings list is "not published" (the plan or the folding hides them), never
+    "no cards": a card-free match is rare and guessing zero would bias the card model.
+    A second yellow (``YELLOW_RED``) counts as a red, like football-data.co.uk counts it; the
+    first yellow of that player is a booking of its own.
+    """
+    if not match.bookings:
+        return None
+    counts = {"home": [0, 0], "away": [0, 0]}
+    sides = {match.home_team.id: "home", match.away_team.id: "away"}
+    for booking in match.bookings:
+        side = sides.get(None if booking.team is None else booking.team.id)
+        if side is None or booking.card not in _CARD_INDEX:
+            continue
+        counts[side][_CARD_INDEX[booking.card]] += 1
+    return counts["home"][0], counts["away"][0], counts["home"][1], counts["away"][1]
+
+
+def main_referee(match: Match) -> str | None:
+    """The name of the match referee (not an assistant or VAR), if published."""
+    for official in match.referees:
+        if official.type in (None, "REFEREE") and official.name:
+            return official.name
+    return None
 
 
 def map_odds(match: Match, *, kind: OddsKind, taken_at: datetime) -> list[OddsSnapshot]:

@@ -8,8 +8,8 @@ from aiogram.methods import EditMessageText, SendMessage
 
 from app.bot import texts
 from app.bot.callbacks import CalendarCb, PickCb
-from app.services.errors import BudgetExceededError
-from app.services.interfaces import CostEstimate, DateWindow, SortKey
+from app.services.errors import BudgetExceededError, ServiceUnavailableError
+from app.services.interfaces import AnalysisResult, CostEstimate, DateWindow, SortKey
 from tests.bot.fakes import FIXED_NOW, BotHarness, answers, sent_texts
 
 TODAY = FIXED_NOW.date()
@@ -361,3 +361,51 @@ async def test_progress_message_is_edited(harness: BotHarness) -> None:
     edits = [m for m in methods if isinstance(m, EditMessageText) and m.message_id == progress_id]
     assert edits
     assert edits[-1].text.startswith("✅")
+
+
+async def test_no_price_analysis_is_followed_by_the_most_likely_picks(harness: BotHarness) -> None:
+    window = DateWindow(TODAY, TODAY)
+    no_price = AnalysisResult(
+        query_id="q1",
+        window=window,
+        signals=(),
+        fixtures_analyzed=4,
+        matched=0,
+        requested=5,
+        api_requests_used=0,
+        skipped_no_price=4,
+    )
+    harness.services.analysis.analyze = AsyncMock(return_value=no_price)  # type: ignore[method-assign]
+    await run_to_confirm(harness)
+
+    methods = await harness.press(texts.BTN_START)
+
+    shown = sent_texts(methods)
+    assert any(texts.RESULTS_NO_PRICE.format(count=4) in text for text in shown)
+    picks = [text for text in shown if text.startswith(texts.TOP_PICKS_AFTER_ANALYSIS)]
+    assert len(picks) == 1
+    assert "🎯 <b>Eng ehtimolli tanlovlar" in picks[0]
+
+
+async def test_failed_picks_after_analysis_only_say_so(harness: BotHarness) -> None:
+    no_price = AnalysisResult(
+        query_id="q2",
+        window=DateWindow(TODAY, TODAY),
+        signals=(),
+        fixtures_analyzed=1,
+        matched=0,
+        requested=5,
+        api_requests_used=0,
+        skipped_no_price=1,
+    )
+    harness.services.analysis.analyze = AsyncMock(return_value=no_price)  # type: ignore[method-assign]
+    harness.services.matches.top_picks = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ServiceUnavailableError("football-data", "HTTP 503")
+    )
+    await run_to_confirm(harness)
+
+    shown = sent_texts(await harness.press(texts.BTN_START))
+
+    assert any(
+        text.startswith("ℹ️ Koeffitsientsiz tanlovlarni hozir olib bo'lmadi") for text in shown
+    )

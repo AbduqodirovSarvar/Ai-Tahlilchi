@@ -152,14 +152,13 @@ Skriptlar image ichida (`/app/scripts`). Natijalar `/data` ga yoziladi (konteyne
 cd /opt/ai-tahlilchi
 RUN="bin/dc run --rm --no-deps --entrypoint python bot"
 
-bin/dc run --rm --no-deps --entrypoint cat bot /data/probe/api_probe_report.md
-
 # Tarixiy ma'lumot (football-data.co.uk) → baza, so'ng backtest:
 $RUN /app/scripts/import_history.py --cache-dir /data/history --db-path /data/history.db
 $RUN /app/scripts/backtest.py --db-path /data/history.db --out-dir /data/backtest --label server
 bin/dc run --rm --no-deps --entrypoint ls bot /data/backtest
 ```
 - Tarix **alohida** `history.db` ga yoziladi (jonli `app.db` ga emas). Jonli bazaga import kerak bo'lsa, `--db-path /data/app.db` ni botni to'xtatib ishlating.
+- **Sariq kartochka prognozi** (ADR 0027) uchun jonli bazada kartochkalar bo'lishi kerak: `0011` migratsiyasidan keyin tarixni jonli bazaga bir marta qayta import qiling (botni to'xtatib, `--db-path /data/app.db`). Upsert mavjud o'yinlarga kartochka va hakamni qo'shadi; qayta import xavfsiz (idempotent).
 - football-data.co.uk lokal (korporativ) mashinada filtr/proksi sabab ochilmasligi mumkin; server odatda to'g'ridan-to'g'ri ulanadi, shuning uchun haqiqiy ma'lumotli backtest shu yerda bajariladi. Internet bo'lmasa `--offline` kesh bilan.
 - Hisobotni olish: `bin/dc run --rm --no-deps -T --entrypoint cat bot /data/backtest/<fayl>.md > ~/hisobot.md`, so'ng `scp`.
 - **F3 darvozasi:** backtest natijasi (CLV/Brier/kalibratsiya) mezonlardan o'tmasa, real rejimga o'tmang ([docs/adr/0005-backtest-methodology.md](docs/adr/0005-backtest-methodology.md)).

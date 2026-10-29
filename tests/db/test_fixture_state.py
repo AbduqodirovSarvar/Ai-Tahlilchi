@@ -109,3 +109,25 @@ def test_any_update_sequence_leaves_a_readable_row(
     for status, result in steps:
         stored = merge_outcome(stored, status, result)
         assert readable(stored)
+
+
+def test_cards_and_referee_merge_like_xg() -> None:
+    first = merge_outcome(
+        None,
+        FixtureStatus.FINISHED,
+        finished(home_yellow=2, away_yellow=3, home_red=0, away_red=1, referee="M Oliver"),
+    )
+    assert (first.home_yellow, first.away_yellow, first.home_red, first.away_red) == (2, 3, 0, 1)
+    assert first.referee == "M Oliver"
+    # A later result without cards (another source) keeps them; one with cards replaces them.
+    kept = merge_outcome(first, FixtureStatus.FINISHED, finished())
+    assert (kept.home_yellow, kept.away_red, kept.referee) == (2, 1, "M Oliver")
+    replaced = merge_outcome(kept, FixtureStatus.FINISHED, finished(home_yellow=4))
+    assert (replaced.home_yellow, replaced.away_yellow) == (4, 3)
+    assert {"home_yellow", "away_yellow", "home_red", "away_red", "referee"} <= set(first.values())
+
+
+def test_a_postponed_result_clears_cards() -> None:
+    stored = merge_outcome(None, FixtureStatus.FINISHED, finished(home_yellow=2))
+    postponed = FixtureResult(fixture=REF, status=ResultStatus.POSTPONED)
+    assert merge_outcome(stored, FixtureStatus.POSTPONED, postponed).home_yellow is None

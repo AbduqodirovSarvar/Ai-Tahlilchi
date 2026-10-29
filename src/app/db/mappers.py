@@ -141,6 +141,11 @@ def result_from_row(row: FixtureRow) -> FixtureResult | None:
         away_ht_score=row.away_ht_score,
         home_xg=row.home_xg,
         away_xg=row.away_xg,
+        home_yellow=row.home_yellow,
+        away_yellow=row.away_yellow,
+        home_red=row.home_red,
+        away_red=row.away_red,
+        referee=row.referee,
     )
 
 

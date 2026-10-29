@@ -2803,6 +2803,85 @@ class OutcomeChance:
         return None if self.probability <= 0.0 else 1.0 / self.probability
 
 
+class TeamPick(StrEnum):
+    """Team-level forecast selections (v1.14)."""
+
+    HOME_TO_SCORE = "home_to_score"
+    AWAY_TO_SCORE = "away_to_score"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TeamChance:
+    """The model probability of a team-level selection and its fair odds (v1.14)."""
+
+    pick: TeamPick
+    probability: float
+
+    def __post_init__(self) -> None:
+        """A probability is within [0, 1]."""
+        _check_range(self.probability, "probability", 0.0, 1.0)
+
+    @property
+    def fair_odds(self) -> float | None:
+        """``1 / probability`` (``None`` at 0%)."""
+        return None if self.probability <= 0.0 else 1.0 / self.probability
+
+
+class CardScope(StrEnum):
+    """Whose yellow cards a card line counts (v1.15)."""
+
+    TOTAL = "total"
+    HOME = "home"
+    AWAY = "away"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CardChance:
+    """``P(yellow cards > line)`` when ``over``, else ``P(< line)`` (v1.15)."""
+
+    scope: CardScope
+    line: float
+    over: bool
+    probability: float
+
+    def __post_init__(self) -> None:
+        """A probability is within [0, 1]."""
+        _check_range(self.probability, "probability", 0.0, 1.0)
+
+    @property
+    def fair_odds(self) -> float | None:
+        """``1 / probability`` (``None`` at 0%)."""
+        return None if self.probability <= 0.0 else 1.0 / self.probability
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CardOutlook:
+    """Expected yellow cards of a match, who referees it and the card lines (v1.15).
+
+    ``strictness`` is the referee's card ratio to the league (1.0 = average or unknown).
+    """
+
+    expected_home: float
+    expected_away: float
+    referee: str | None = None
+    referee_known: bool = False
+    strictness: float = 1.0
+    team_matches: int = 0
+    chances: tuple[CardChance, ...] = ()
+
+    @property
+    def expected_total(self) -> float:
+        """Expected yellow cards of the match."""
+        return self.expected_home + self.expected_away
+
+    def chance(self, scope: CardScope, line: float, *, over: bool) -> CardChance | None:
+        """One card line, if forecast."""
+        return next(
+            (c for c in self.chances if c.scope is scope and c.line == line and c.over is over),
+            None,
+        )
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MatchForecast:
     """The model's view of a match without any odds: probabilities, likely scores, trust.
@@ -2816,6 +2895,12 @@ class MatchForecast:
     scores: tuple[ScoreProbability, ...] = ()
     team_matches: int = 0
     confidence: ConfidenceLevel | None = None
+    team_chances: tuple[TeamChance, ...] = ()
+    cards: CardOutlook | None = None
+
+    def team_chance(self, pick: TeamPick) -> TeamChance | None:
+        """The chance of one team-level selection, if forecast."""
+        return next((c for c in self.team_chances if c.pick is pick), None)
 
     def chance(self, market: Market, selection: Selection) -> OutcomeChance | None:
         """The chance of one selection, if forecast."""
@@ -2840,6 +2925,82 @@ class ForecastLine:
 
     match: MatchItem
     forecast: MatchForecast
+
+
+TOP_PICKS_LIMIT: Final = 15
+"""Most picks one :meth:`MatchesService.top_picks` answer lists."""
+PICKS_PER_MATCH: Final = 2
+"""Most picks taken from one match, so a single fixture cannot fill the list."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TopPick:
+    """One selection worth showing, ranked by how likely it is to win (no odds needed).
+
+    Exactly one of ``outcome`` (a market selection), ``team`` (a team-level one) and ``card``
+    (a yellow-card line, v1.15) is set.
+    """
+
+    match: MatchItem
+    outcome: OutcomeChance | None = None
+    team: TeamChance | None = None
+    confidence: ConfidenceLevel | None = None
+    card: CardChance | None = None
+
+    def __post_init__(self) -> None:
+        """One selection per pick."""
+        chosen = sum(item is not None for item in (self.outcome, self.team, self.card))
+        _check(chosen == 1, "outcome", "exactly one pick")
+
+    @property
+    def probability(self) -> float:
+        """The chance that the pick wins."""
+        chosen = self.outcome or self.team or self.card
+        return 0.0 if chosen is None else chosen.probability
+
+    @property
+    def fair_odds(self) -> float | None:
+        """``1 / probability`` of the chosen selection."""
+        chosen = self.outcome or self.team or self.card
+        return None if chosen is None else chosen.fair_odds
+
+
+def rank_picks(
+    lines: Sequence[ForecastLine], *, min_probability: float, limit: int = TOP_PICKS_LIMIT
+) -> tuple[TopPick, ...]:
+    """The most likely picks of ``lines``: one rule for every implementation (v1.14).
+
+    Only matches still to be played count; every selection of a ready forecast at or above
+    ``min_probability`` is a candidate; at most :data:`PICKS_PER_MATCH` per match (its most
+    likely ones); the best ``limit`` overall, most likely first (earlier kick-off on ties).
+    """
+    chosen: list[TopPick] = []
+    for line in lines:
+        forecast = line.forecast
+        if (
+            forecast.status is not ForecastStatus.READY
+            or line.match.state is not MatchState.SCHEDULED
+        ):
+            continue
+        cards = () if forecast.cards is None else forecast.cards.chances
+        candidates = [
+            *(
+                TopPick(match=line.match, outcome=c, confidence=forecast.confidence)
+                for c in forecast.chances
+            ),
+            *(
+                TopPick(match=line.match, team=c, confidence=forecast.confidence)
+                for c in forecast.team_chances
+            ),
+            *(TopPick(match=line.match, card=c, confidence=forecast.confidence) for c in cards),
+        ]
+        best = sorted(
+            (pick for pick in candidates if pick.probability >= min_probability),
+            key=lambda pick: -pick.probability,
+        )
+        chosen.extend(best[:PICKS_PER_MATCH])
+    chosen.sort(key=lambda pick: (-pick.probability, pick.match.kickoff, pick.match.match_id))
+    return tuple(chosen[:limit])
 
 
 class MatchesService(Protocol):
@@ -2879,6 +3040,17 @@ class MatchesService(Protocol):
 
         Raises:
             NotFoundError: the provider does not know ``match_id``.
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+    async def top_picks(self, user_id: int, day_from: date, day_to: date) -> tuple[TopPick, ...]:
+        """The most likely picks of the user's local days, without odds (v1.14).
+
+        Ranked by :func:`rank_picks` with the user's ``min_probability``.
+
+        Raises:
+            ValidationFailedError: the range breaks :func:`check_match_days`.
             ServiceUnavailableError: the provider is down or not configured.
         """
         ...

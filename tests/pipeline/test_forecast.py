@@ -5,7 +5,13 @@ from typing import Any
 import pytest
 
 from app.domain import Market, Selection
-from app.pipeline.forecast import FORECAST_MARKETS, Forecaster, ForecastSkip, chances_of
+from app.pipeline.forecast import (
+    FORECAST_MARKETS,
+    Forecaster,
+    ForecastSkip,
+    TeamPick,
+    chances_of,
+)
 from app.pipeline.matches import Match
 from tests.pipeline.harness import Env
 
@@ -73,3 +79,13 @@ async def test_every_match_that_cannot_be_forecast_says_why(seeded_env: Env) -> 
 
 async def test_no_matches_no_work(seeded_env: Env) -> None:
     assert await Forecaster(seeded_env.ctx).forecast([]) == {}
+
+
+async def test_team_scoring_chances_agree_with_btts(seeded_env: Env) -> None:
+    [forecast] = (
+        await Forecaster(seeded_env.ctx).forecast([match(8, "Arsenal", "Chelsea")])
+    ).values()
+    by_pick = {c.pick: c.probability for c in forecast.team_chances}
+    home, away = by_pick[TeamPick.HOME_TO_SCORE], by_pick[TeamPick.AWAY_TO_SCORE]
+    both = chances_of(forecast, Market.btts())[Selection.YES]
+    assert 0.0 < both <= min(home, away) <= max(home, away) < 1.0

@@ -7,20 +7,35 @@ import pytest
 
 from app.domain import Market, Selection
 from app.models import ConfidenceLevel as ModelConfidence
+from app.pipeline.card_forecast import CardChance as PipelineCardChance
+from app.pipeline.card_forecast import CardOutlook as PipelineCardOutlook
+from app.pipeline.card_forecast import CardScope as PipelineCardScope
 from app.pipeline.errors import MatchNotFoundError, ProviderUnavailableError
 from app.pipeline.forecast import Chance, Forecast, ForecastSkip, LikelyScore
+from app.pipeline.forecast import TeamChance as PipelineTeamChance
+from app.pipeline.forecast import TeamPick as PipelineTeamPick
 from app.pipeline.matches import Match
 from app.services._fake_matches import FakeMatchesService
 from app.services.errors import NotFoundError, ServiceUnavailableError, ValidationFailedError
 from app.services.fake import create_fake_services
 from app.services.interfaces import (
     MAX_MATCH_DAYS,
+    PICKS_PER_MATCH,
+    CardChance,
+    CardOutlook,
+    CardScope,
     ConfidenceLevel,
+    ForecastLine,
     ForecastStatus,
     MatchForecast,
+    MatchItem,
     MatchState,
     OutcomeChance,
+    TeamChance,
+    TeamPick,
+    TopPick,
     check_match_days,
+    rank_picks,
 )
 from app.services.real.matches import (
     RealMatchesService,
@@ -91,6 +106,7 @@ class StubForecaster:
                     Chance(result, Selection.AWAY, 1.0000000001),  # float overshoot
                 ),
                 scores=(LikelyScore(1, 0, 0.11),),
+                team_chances=(PipelineTeamChance(PipelineTeamPick.HOME_TO_SCORE, 0.8),),
                 team_matches=25,
                 confidence=ModelConfidence.MEDIUM,
             )
@@ -271,3 +287,135 @@ async def test_fake_forecasts() -> None:
     assert all(line.forecast.status is ForecastStatus.READY for line in lines)
     single = await service.forecast_match(USER, lines[0].match.match_id)
     assert single.forecast.favourite is not None
+
+
+def _item(match_id: int, *, state: MatchState = MatchState.SCHEDULED, hour: int = 16) -> MatchItem:
+    return MatchItem(
+        match_id=match_id,
+        kickoff=datetime(2026, 10, 30, hour, 0, tzinfo=UTC),
+        competition="Premier League",
+        competition_code="PL",
+        home="A",
+        away="B",
+        state=state,
+    )
+
+
+def _ready(match_id: int, *probabilities: float, team: float | None = None) -> MatchForecast:
+    result = Market.match_result()
+    selections = (Selection.HOME, Selection.DRAW, Selection.AWAY)
+    return MatchForecast(
+        match_id=match_id,
+        status=ForecastStatus.READY,
+        chances=tuple(
+            OutcomeChance(market=result, selection=sel, probability=p)
+            for sel, p in zip(selections, probabilities, strict=False)
+        ),
+        team_chances=()
+        if team is None
+        else (TeamChance(pick=TeamPick.AWAY_TO_SCORE, probability=team),),
+    )
+
+
+def test_rank_picks_threshold_cap_order_and_filters() -> None:
+    lines = [
+        ForecastLine(match=_item(1), forecast=_ready(1, 0.70, 0.20, 0.10, team=0.90)),
+        ForecastLine(match=_item(2, hour=12), forecast=_ready(2, 0.60, 0.30, 0.10, team=0.60)),
+        ForecastLine(match=_item(3, state=MatchState.LIVE), forecast=_ready(3, 0.99)),
+        ForecastLine(
+            match=_item(4), forecast=MatchForecast(match_id=4, status=ForecastStatus.NO_MODEL)
+        ),
+    ]
+    picks = rank_picks(lines, min_probability=0.55)
+    assert [(p.match.match_id, round(p.probability, 2)) for p in picks] == [
+        (1, 0.90),
+        (1, 0.70),
+        (2, 0.60),  # equal chances: the earlier kick-off first
+        (2, 0.60),
+    ]
+    assert sum(p.match.match_id == 1 for p in picks) <= PICKS_PER_MATCH
+    assert picks[0].team is not None
+    assert picks[1].outcome is not None
+    assert rank_picks(lines, min_probability=0.95) == ()
+    assert len(rank_picks(lines, min_probability=0.0, limit=3)) == 3
+
+
+def test_top_pick_needs_exactly_one_selection() -> None:
+    with pytest.raises(ValidationFailedError):
+        TopPick(match=_item(1))
+    chance = OutcomeChance(market=Market.btts(), selection=Selection.YES, probability=0.5)
+    team = TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.5)
+    with pytest.raises(ValidationFailedError):
+        TopPick(match=_item(1), outcome=chance, team=team)
+    assert team.fair_odds == pytest.approx(2.0)
+    assert TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.0).fair_odds is None
+
+
+async def test_real_top_picks_use_the_users_minimum_probability() -> None:
+    service = real(StubFeed([provider_match("TIMED")]), StubForecaster())
+    picks = await service.top_picks(USER, DAY, DAY)
+    assert picks  # the stub forecast has 100% / 80% / 50% / 30% chances
+    floor = (await create_fake_services().settings.get_settings(USER)).min_probability
+    assert all(p.probability >= floor for p in picks)
+    assert len(picks) <= PICKS_PER_MATCH
+    with pytest.raises(ValidationFailedError):
+        await service.top_picks(USER, DAY, DAY - timedelta(days=1))
+
+
+def test_team_chances_reach_the_contract() -> None:
+    mapped = match_forecast(
+        Forecast(
+            match_id=1,
+            team_chances=(PipelineTeamChance(PipelineTeamPick.AWAY_TO_SCORE, 1.0000001),),
+        )
+    )
+    away = mapped.team_chance(TeamPick.AWAY_TO_SCORE)
+    assert away is not None
+    assert away.probability == 1.0
+    assert mapped.team_chance(TeamPick.HOME_TO_SCORE) is None
+
+
+async def test_fake_top_picks() -> None:
+    picks = await create_fake_services().matches.top_picks(USER, DAY, DAY)
+    assert picks
+    assert picks == tuple(sorted(picks, key=lambda p: -p.probability))
+
+
+def test_card_outlook_reaches_the_contract_and_the_ranking() -> None:
+    pipeline = Forecast(
+        match_id=1,
+        cards=PipelineCardOutlook(
+            expected_home=2.0,
+            expected_away=2.5,
+            referee="M Oliver",
+            referee_known=True,
+            strictness=1.2,
+            team_matches=30,
+            chances=(PipelineCardChance(PipelineCardScope.TOTAL, 3.5, True, 0.9),),
+        ),
+    )
+    mapped = match_forecast(pipeline)
+    assert mapped.cards is not None
+    assert mapped.cards.expected_total == pytest.approx(4.5)
+    over = mapped.cards.chance(CardScope.TOTAL, 3.5, over=True)
+    assert over is not None
+    assert over.fair_odds == pytest.approx(1 / 0.9)
+    assert mapped.cards.chance(CardScope.TOTAL, 3.5, over=False) is None
+    picks = rank_picks([ForecastLine(match=_item(1), forecast=mapped)], min_probability=0.5)
+    assert [p.card for p in picks] == [over]
+    assert match_forecast(Forecast(match_id=2)).cards is None
+
+
+def test_card_pick_rules() -> None:
+    card = CardChance(scope=CardScope.HOME, line=1.5, over=False, probability=0.0)
+    assert card.fair_odds is None
+    team = TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.5)
+    with pytest.raises(ValidationFailedError):
+        TopPick(match=_item(1), team=team, card=card)
+    pick = TopPick(match=_item(1), card=card)
+    assert pick.probability == 0.0
+    assert pick.fair_odds is None
+    assert (
+        CardOutlook(expected_home=1.0, expected_away=1.0).chance(CardScope.TOTAL, 3.5, over=True)
+        is None
+    )

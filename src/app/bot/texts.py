@@ -1572,3 +1572,69 @@ FORECAST_REASONS: Final[dict[str, str]] = {
     "unknown_team": "jamoa tarixda topilmadi (nomi moslanmagan)",
     "unavailable": "namunaviy rejimda prognoz yo'q (APP_SERVICES=real kerak)",
 }
+
+# --------------------------------------------------------------------------- top picks (no odds)
+BTN_TOP_PICKS: Final = "🎯 Eng ehtimolli tanlovlar"
+TOP_PICKS_TITLE: Final = "🎯 <b>Eng ehtimolli tanlovlar · {window}</b> — {count} ta"
+TOP_PICKS_NOTE: Final = (
+    "<i>Koeffitsientsiz, faqat model (tarixiy natijalardan); ehtimollik {min_probability} dan "
+    "yuqorilari, bir o'yindan ko'pi bilan 2 ta. Adolatli koeff. dan yuqori narx — value.</i>"
+)
+TOP_PICKS_EMPTY: Final = (
+    "Minimal ehtimollik ({min_probability}) dan yuqori tanlov topilmadi. ⚙️ Sozlamalarda "
+    "minimal ehtimollikni pasaytirib ko'ring yoki boshqa kunni tanlang."
+)
+TOP_PICK_LINE: Final = "{n}. <b>{probability}</b> · {label} · adolatli koeff. {fair}{confidence}"
+TOP_PICK_MATCH: Final = "   {kickoff} · {home} — {away} · {competition}"
+TOP_PICKS_AFTER_ANALYSIS: Final = (
+    "💡 Koeffitsient bo'lmagani uchun signal chiqmadi. Quyida o'sha kunlar uchun model "
+    "bashorati: o'tish ehtimoli eng yuqori tanlovlar."
+)
+TOP_PICKS_UNAVAILABLE: Final = "ℹ️ Koeffitsientsiz tanlovlarni hozir olib bo'lmadi: {reason}"
+PICK_RESULT_LABELS: Final[dict[str, str]] = {
+    "home": "1 — {home} yutadi",
+    "draw": "X — durang",
+    "away": "2 — {away} yutadi",
+}
+PICK_DOUBLE_LABELS: Final[dict[str, str]] = {
+    "home_draw": "1X — {home} yutqazmaydi",
+    "draw_away": "X2 — {away} yutqazmaydi",
+    "home_away": "12 — durang bo'lmaydi",
+}
+PICK_TOTALS_LABELS: Final[dict[str, str]] = {
+    "over": "Total {line} dan ko'p",
+    "under": "Total {line} dan kam",
+}
+PICK_BTTS_LABELS: Final[dict[str, str]] = {
+    "yes": "Ikkala jamoa gol uradi",
+    "no": "Ikkala jamoadan kamida biri gol urmaydi",
+}
+PICK_TEAM_LABELS: Final[dict[str, str]] = {
+    "home_to_score": "{home} gol uradi",
+    "away_to_score": "{away} gol uradi",
+}
+FORECAST_SECTION_TEAMS: Final = "<b>Gol uradi</b>: {home} {home_chance} · {away} {away_chance}"
+
+# --------------------------------------------------------------------------- yellow cards
+CARDS_SECTION: Final = "🟨 <b>Sariq kartochkalar</b>: kutilgan ~{total} (uy {home} · mehmon {away})"
+CARDS_REFEREE: Final = "👨‍⚖️ Hakam: {referee} — {strictness}"
+CARDS_REFEREE_UNKNOWN: Final = "👨‍⚖️ Hakam: {referee} (tarixda yo'q, liga o'rtachasi olindi)"
+CARDS_REFEREE_MISSING: Final = "👨‍⚖️ Hakam hali e'lon qilinmagan (liga o'rtachasi olindi)"
+CARDS_STRICTNESS: Final[dict[str, str]] = {
+    "strict": "qattiq (kartochkani ko'p ko'rsatadi, x{ratio})",
+    "average": "o'rtacha (x{ratio})",
+    "lenient": "yumshoq (kartochkani kam ko'rsatadi, x{ratio})",
+}
+CARDS_TOTAL_LINE: Final = "• Jami {line}: ko'p {over} ({over_fair}) · kam {under} ({under_fair})"
+CARDS_TEAM_LINE: Final = "• {team} {line}: ko'p {over} · kam {under}"
+CARDS_DAY_EXTRA: Final = "   🟨 ~{total} sariq kartochka{referee}"
+CARDS_DAY_REFEREE: Final = " · hakam {referee}"
+CARDS_NONE: Final = "🟨 Kartochka prognozi yo'q: bu liga tarixida kartochka ma'lumoti yetarli emas."
+PICK_CARD_TOTAL: Final[dict[bool, str]] = {
+    True: "Sariq kartochkalar jami {line} dan ko'p",
+    False: "Sariq kartochkalar jami {line} dan kam",
+}
+PICK_CARD_TEAM: Final[dict[bool, str]] = {
+    True: "{team} {line} dan ko'p sariq kartochka oladi",
+    False: "{team} {line} dan kam sariq kartochka oladi",
+}

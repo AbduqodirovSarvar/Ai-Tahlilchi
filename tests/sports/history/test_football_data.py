@@ -306,3 +306,20 @@ def test_parser_never_crashes_on_arbitrary_bytes(content: bytes) -> None:
     except DataError:
         return
     assert len(parsed.batch.fixtures) + len(parsed.skipped) <= parsed.rows
+
+
+CARDS_CSV = (
+    "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,HTHG,HTAG,Referee,HY,AY,HR,AR\n"
+    "E0,16/08/2024,20:00,Man United,Fulham,1,0,0,0,R Jones,2,3,0,1\n"
+    "E0,17/08/2024,12:30,Ipswich,Liverpool,0,2,0,0,,x,1,,\n"
+)
+
+
+def test_cards_and_referee_are_imported_and_a_bad_card_cell_keeps_the_result() -> None:
+    parsed = parse_season_csv(CARDS_CSV.encode(), league=league_for("E0"), season=2024)
+    first, second = parsed.batch.results
+    assert (first.home_yellow, first.away_yellow, first.home_red, first.away_red) == (2, 3, 0, 1)
+    assert first.referee == "R Jones"
+    assert (second.home_score, second.away_score) == (0, 2)  # still imported
+    assert (second.home_yellow, second.away_yellow, second.home_red) == (None, 1, None)
+    assert second.referee is None

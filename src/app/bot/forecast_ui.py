@@ -18,9 +18,21 @@ from app.bot.formatters import kickoff_stamp, odds, percent, weekday_name
 from app.bot.keyboards import markup_of, single_button
 from app.bot.matches_ui import MATCHES_PAGE_SIZE, page_count, page_row
 from app.domain import Market, Selection
-from app.services.interfaces import ForecastLine, ForecastStatus, MatchForecast
+from app.services.interfaces import (
+    CardOutlook,
+    CardScope,
+    ForecastLine,
+    ForecastStatus,
+    MatchForecast,
+    MatchItem,
+    TeamPick,
+)
 
 GOAL_LINES: Final = (1.5, 2.5, 3.5)
+CARD_TOTAL_LINES: Final = (3.5, 4.5, 5.5)
+CARD_TEAM_LINES: Final = (1.5, 2.5)
+STRICT_ABOVE: Final = 1.1
+LENIENT_BELOW: Final = 0.9
 _RESULT: Final = Market.match_result()
 _BTTS: Final = Market.btts()
 _NO_VALUE: Final = "—"
@@ -76,6 +88,14 @@ def _day_lines(number: int, line: ForecastLine, zone: ZoneInfo) -> list[str]:
             btts=_chance(forecast, _BTTS, Selection.YES),
         )
     )
+    cards = forecast.cards
+    if cards is not None:
+        referee = (
+            texts.CARDS_DAY_REFEREE.format(referee=escape(cards.referee)) if cards.referee else ""
+        )
+        lines.append(
+            texts.CARDS_DAY_EXTRA.format(total=f"{cards.expected_total:.1f}", referee=referee)
+        )
     return lines
 
 
@@ -140,6 +160,24 @@ def _goal_lines(forecast: MatchForecast) -> list[str]:
     return lines if len(lines) > 1 else []
 
 
+def _team_chance(forecast: MatchForecast, pick: TeamPick) -> str:
+    chance = forecast.team_chance(pick)
+    return _NO_VALUE if chance is None else percent(chance.probability)
+
+
+def _team_lines(forecast: MatchForecast, match: MatchItem) -> list[str]:
+    if not forecast.team_chances:
+        return []
+    return [
+        texts.FORECAST_SECTION_TEAMS.format(
+            home=_team(match.home),
+            home_chance=_team_chance(forecast, TeamPick.HOME_TO_SCORE),
+            away=_team(match.away),
+            away_chance=_team_chance(forecast, TeamPick.AWAY_TO_SCORE),
+        )
+    ]
+
+
 def _other_lines(forecast: MatchForecast) -> list[str]:
     lines: list[str] = []
     double = Market.double_chance()
@@ -171,6 +209,75 @@ def _other_lines(forecast: MatchForecast) -> list[str]:
     return lines
 
 
+def _strictness(ratio: float) -> str:
+    if ratio > STRICT_ABOVE:
+        kind = "strict"
+    elif ratio < LENIENT_BELOW:
+        kind = "lenient"
+    else:
+        kind = "average"
+    return texts.CARDS_STRICTNESS[kind].format(ratio=f"{ratio:.2f}")
+
+
+def _referee_line(cards: CardOutlook) -> str:
+    if not cards.referee:
+        return texts.CARDS_REFEREE_MISSING
+    name = escape(cards.referee)
+    if not cards.referee_known:
+        return texts.CARDS_REFEREE_UNKNOWN.format(referee=name)
+    return texts.CARDS_REFEREE.format(referee=name, strictness=_strictness(cards.strictness))
+
+
+def _card_chance(cards: CardOutlook, scope: CardScope, line: float, *, over: bool) -> str:
+    chance = cards.chance(scope, line, over=over)
+    return _NO_VALUE if chance is None else percent(chance.probability)
+
+
+def _card_fair(cards: CardOutlook, scope: CardScope, line: float, *, over: bool) -> str:
+    chance = cards.chance(scope, line, over=over)
+    fair = None if chance is None else chance.fair_odds
+    return _NO_VALUE if fair is None else odds(fair)
+
+
+def _card_lines(forecast: MatchForecast, match: MatchItem) -> list[str]:
+    cards = forecast.cards
+    if cards is None:
+        return [texts.CARDS_NONE]
+    lines = [
+        texts.CARDS_SECTION.format(
+            total=f"{cards.expected_total:.1f}",
+            home=f"{cards.expected_home:.1f}",
+            away=f"{cards.expected_away:.1f}",
+        ),
+        _referee_line(cards),
+    ]
+    for line in CARD_TOTAL_LINES:
+        if cards.chance(CardScope.TOTAL, line, over=True) is None:
+            continue
+        lines.append(
+            texts.CARDS_TOTAL_LINE.format(
+                line=line,
+                over=_card_chance(cards, CardScope.TOTAL, line, over=True),
+                over_fair=_card_fair(cards, CardScope.TOTAL, line, over=True),
+                under=_card_chance(cards, CardScope.TOTAL, line, over=False),
+                under_fair=_card_fair(cards, CardScope.TOTAL, line, over=False),
+            )
+        )
+    for scope, team in ((CardScope.HOME, match.home), (CardScope.AWAY, match.away)):
+        for line in CARD_TEAM_LINES:
+            if cards.chance(scope, line, over=True) is None:
+                continue
+            lines.append(
+                texts.CARDS_TEAM_LINE.format(
+                    team=_team(team),
+                    line=line,
+                    over=_card_chance(cards, scope, line, over=True),
+                    under=_card_chance(cards, scope, line, over=False),
+                )
+            )
+    return lines
+
+
 def format_match_forecast(line: ForecastLine, zone: ZoneInfo) -> str:
     """Every forecast market of one match with fair odds, likely scores and the trust level."""
     match, forecast = line.match, line.forecast
@@ -183,7 +290,13 @@ def format_match_forecast(line: ForecastLine, zone: ZoneInfo) -> str:
     if forecast.status is not ForecastStatus.READY:
         reason = texts.FORECAST_REASONS[forecast.status.value]
         return "\n".join([*text, "", texts.FORECAST_SKIPPED.format(reason=reason).strip()])
-    sections = [_result_lines(forecast), _goal_lines(forecast), _other_lines(forecast)]
+    sections = [
+        _result_lines(forecast),
+        _goal_lines(forecast),
+        _team_lines(forecast, match),
+        _other_lines(forecast),
+        _card_lines(forecast, match),
+    ]
     for section in sections:
         if section:
             text.extend(["", *section])

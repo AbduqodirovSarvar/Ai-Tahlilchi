@@ -148,8 +148,12 @@ def matches_keyboard(
         single_button(texts.BTN_MATCHES_PREV_DAY, MatchCb(action="day", d=day.toordinal() - 1)),
         single_button(texts.BTN_MATCHES_NEXT_DAY, MatchCb(action="day", d=day.toordinal() + 1)),
     ]
+    ordinal = day.toordinal()
     forecast = (
-        [single_button(texts.BTN_FORECAST_DAY, MatchCb(action="fday", d=day.toordinal()))]
+        [
+            single_button(texts.BTN_FORECAST_DAY, MatchCb(action="fday", d=ordinal)),
+            single_button(texts.BTN_TOP_PICKS, MatchCb(action="picks", d=ordinal)),
+        ]
         if items
         else []
     )

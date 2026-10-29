@@ -27,7 +27,9 @@ from app.sports.football_data_org import (
     MAX_IDS_PER_REQUEST,
     SOURCE,
     FootballDataAdapter,
+    card_counts,
     fixture_status,
+    main_referee,
     map_result,
 )
 
@@ -272,3 +274,43 @@ def test_markets_and_purpose() -> None:
     base = adapter(StubClient())
     assert base.supported_markets() == frozenset({MarketType.MATCH_RESULT})
     assert base.for_purpose(RequestPurpose.MANUAL).sport is base.sport
+
+
+def test_bookings_become_cards_and_the_referee_is_kept() -> None:
+    booked = match(
+        status="FINISHED",
+        score={"fullTime": {"home": 1, "away": 1}},
+        bookings=[
+            {"team": {"id": 57}, "card": "YELLOW"},
+            {"team": {"id": 57}, "card": "YELLOW"},
+            {"team": {"id": 61}, "card": "YELLOW"},
+            {"team": {"id": 61}, "card": "YELLOW_RED"},  # a second yellow counts as a red
+            {"team": {"id": 999}, "card": "YELLOW"},  # not a team of this match
+            {"team": None, "card": "RED"},
+            {"team": {"id": 57}, "card": "PINK"},  # an unknown card
+        ],
+        referees=[
+            {"name": "VAR Person", "type": "VIDEO_ASSISTANT_REFEREE_N1"},
+            {"name": "Michael Oliver", "type": "REFEREE"},
+        ],
+    )
+    assert card_counts(booked) == (2, 1, 0, 1)
+    assert main_referee(booked) == "Michael Oliver"
+    result = map_result(booked)
+    assert result is not None
+    assert (result.home_yellow, result.away_yellow, result.home_red, result.away_red) == (
+        2,
+        1,
+        0,
+        1,
+    )
+    assert result.referee == "Michael Oliver"
+
+
+def test_no_bookings_means_unknown_not_zero() -> None:
+    quiet = match(status="FINISHED", score={"fullTime": {"home": 0, "away": 0}})
+    assert card_counts(quiet) is None
+    assert main_referee(quiet) is None
+    result = map_result(quiet)
+    assert result is not None
+    assert result.home_yellow is None

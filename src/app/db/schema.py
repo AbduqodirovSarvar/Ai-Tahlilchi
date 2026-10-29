@@ -75,6 +75,7 @@ SOURCE_LENGTH: Final = 64
 EXTERNAL_ID_LENGTH: Final = 255
 NAME_LENGTH: Final = 255
 SHORT_TEXT_LENGTH: Final = 64
+REFEREE_LENGTH: Final = 128
 CLIENT_TOKEN_LENGTH: Final = 64
 LEDGER_JOB_LENGTH: Final = 48
 LEDGER_SUBJECT_LENGTH: Final = 96
@@ -185,6 +186,12 @@ class FixtureRow(TimestampMixin, Base):
     away_ht_score: Mapped[int | None]
     home_xg: Mapped[float | None]
     away_xg: Mapped[float | None]
+    # Cards and the referee (0011): optional match facts, NULL = not known.
+    home_yellow: Mapped[int | None]
+    away_yellow: Mapped[int | None]
+    home_red: Mapped[int | None]
+    away_red: Mapped[int | None]
+    referee: Mapped[str | None] = mapped_column(String(REFEREE_LENGTH))
 
     league: Mapped[LeagueRow] = relationship(lazy="raise")
     home_team: Mapped[TeamRow] = relationship(foreign_keys=[home_team_id], lazy="raise")

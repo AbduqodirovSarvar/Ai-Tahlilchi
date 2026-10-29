@@ -152,12 +152,18 @@ class ResultStatus(StrEnum):
     ABANDONED = "abandoned"
 
 
+_SCORE_FIELDS: Final = ("home_score", "away_score", "home_ht_score", "away_ht_score")
+CARD_FIELDS: Final = ("home_yellow", "away_yellow", "home_red", "away_red")
+"""Card counts of a result (each a non-negative int or ``None``)."""
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FixtureResult:
     """Outcome of a fixture (full-time scores exclude extra time and penalties).
 
     A finished fixture has both scores; a postponed or cancelled one has none; an abandoned
-    one may carry the score at the time it was stopped.
+    one may carry the score at the time it was stopped. Cards (yellow, red) and the referee
+    are optional match facts: sources publish them unevenly (``None`` = not known).
     """
 
     fixture: ExternalRef
@@ -168,12 +174,19 @@ class FixtureResult:
     away_ht_score: int | None = None
     home_xg: float | None = None
     away_xg: float | None = None
+    home_yellow: int | None = None
+    away_yellow: int | None = None
+    home_red: int | None = None
+    away_red: int | None = None
+    referee: str | None = None
 
     def __post_init__(self) -> None:
         """Check scores are consistent with the status and with each other."""
         self._check_scores_for_status()
-        for field in ("home_score", "away_score", "home_ht_score", "away_ht_score"):
+        for field in (*_SCORE_FIELDS, *CARD_FIELDS):
             require_non_negative_int(getattr(self, field), field)
+        referee = None if self.referee is None else " ".join(self.referee.split())
+        object.__setattr__(self, "referee", referee or None)
         self._check_half_time("home")
         self._check_half_time("away")
         for field in ("home_xg", "away_xg"):

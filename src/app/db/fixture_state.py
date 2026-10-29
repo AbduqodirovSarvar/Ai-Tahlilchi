@@ -3,9 +3,9 @@
 One pure function, :func:`merge_outcome`, decides it for every write path, so the table
 never holds a combination the domain cannot read back (``app.db.mappers.result_from_row``):
 
-- A result is authoritative: its status and all four scores are written as given. xG is
-  merged (a new value wins, a missing one keeps the stored value) because providers often
-  publish xG later than the score.
+- A result is authoritative: its status and all four scores are written as given. xG, cards
+  and the referee are merged (a new value wins, a missing one keeps the stored value)
+  because providers publish them later than the score, or not at all.
 - Without a result, a status never contradicts the scores: ``finished`` is only kept when
   scores are known (an unknown result stays in its previous state, ``scheduled`` for a new
   fixture, until a result arrives); ``scheduled``/``postponed``/``cancelled`` clear scores
@@ -36,6 +36,11 @@ class FixtureOutcome:
     away_ht_score: int | None = None
     home_xg: float | None = None
     away_xg: float | None = None
+    home_yellow: int | None = None
+    away_yellow: int | None = None
+    home_red: int | None = None
+    away_red: int | None = None
+    referee: str | None = None
 
     @property
     def has_score(self) -> bool:
@@ -52,6 +57,11 @@ class FixtureOutcome:
             "away_ht_score": self.away_ht_score,
             "home_xg": self.home_xg,
             "away_xg": self.away_xg,
+            "home_yellow": self.home_yellow,
+            "away_yellow": self.away_yellow,
+            "home_red": self.home_red,
+            "away_red": self.away_red,
+            "referee": self.referee,
         }
 
 
@@ -77,6 +87,7 @@ def merge_outcome(
 
 def _apply_result(stored: FixtureOutcome | None, result: FixtureResult) -> FixtureOutcome:
     xg_source = None if result.status in _UNPLAYED_RESULTS else stored
+    old = xg_source or FixtureOutcome(FixtureStatus.SCHEDULED)
     return FixtureOutcome(
         status=FixtureStatus(result.status.value),
         home_score=result.home_score,
@@ -85,8 +96,13 @@ def _apply_result(stored: FixtureOutcome | None, result: FixtureResult) -> Fixtu
         away_ht_score=result.away_ht_score,
         home_xg=_first_known(result.home_xg, xg_source.home_xg if xg_source else None),
         away_xg=_first_known(result.away_xg, xg_source.away_xg if xg_source else None),
+        home_yellow=_first_known(result.home_yellow, old.home_yellow),
+        away_yellow=_first_known(result.away_yellow, old.away_yellow),
+        home_red=_first_known(result.home_red, old.home_red),
+        away_red=_first_known(result.away_red, old.away_red),
+        referee=_first_known(result.referee, old.referee),
     )
 
 
-def _first_known(new: float | None, old: float | None) -> float | None:
+def _first_known[T](new: T | None, old: T | None) -> T | None:
     return old if new is None else new

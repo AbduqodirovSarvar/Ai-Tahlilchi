@@ -81,6 +81,8 @@ class ProviderConfig:
     retryable_body: BodyRetryCheck | None = None
     # The name this provider's calls are logged under in the call log.
     log_provider: Provider
+    # Sent with every request besides the key (e.g. Football-Data's ``X-Unfold-*`` switches).
+    extra_headers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +153,11 @@ def create_http_client(config: ProviderConfig, api_key: str) -> httpx.AsyncClien
     """
     return httpx.AsyncClient(
         base_url=config.base_url,
-        headers={config.auth_header: api_key, "accept": "application/json"},
+        headers={
+            **dict(config.extra_headers),
+            config.auth_header: api_key,
+            "accept": "application/json",
+        },
         timeout=config.timeout_seconds,
         verify=get_ssl_context() or True,
     )

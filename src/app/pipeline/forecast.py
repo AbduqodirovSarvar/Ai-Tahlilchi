@@ -16,7 +16,7 @@ Every match that cannot be forecast says why (:class:`ForecastSkip`) instead of 
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Final
 
@@ -33,10 +33,12 @@ from app.models import (
     team_key,
     top_scores,
 )
+from app.models.poisson import FloatArray
+from app.pipeline.card_forecast import CardModels, CardOutlook, card_outlook
 from app.pipeline.context import PipelineContext
 from app.pipeline.leagues import HISTORY_SOURCE
 from app.pipeline.matches import Match
-from app.sports.football_data_org import map_fixture
+from app.sports.football_data_org import main_referee, map_fixture
 
 logger = get_logger(__name__)
 
@@ -51,6 +53,21 @@ FORECAST_MARKETS: Final = (
 """What a forecast covers: result, double chance, goal lines and both teams to score."""
 TOP_SCORE_COUNT: Final = 3
 SECONDS_PER_DAY: Final = 86_400.0
+
+
+class TeamPick(StrEnum):
+    """Team-level selections read straight off the score matrix."""
+
+    HOME_TO_SCORE = "home_to_score"
+    AWAY_TO_SCORE = "away_to_score"
+
+
+@dataclass(frozen=True, slots=True)
+class TeamChance:
+    """The model probability of one team-level selection."""
+
+    pick: TeamPick
+    probability: float
 
 
 class ForecastSkip(StrEnum):
@@ -88,9 +105,11 @@ class Forecast:
     match_id: int
     skip: ForecastSkip | None = None
     chances: tuple[Chance, ...] = ()
+    team_chances: tuple[TeamChance, ...] = ()
     scores: tuple[LikelyScore, ...] = ()
     team_matches: int = 0
     confidence: ConfidenceLevel | None = None
+    cards: CardOutlook | None = None
 
 
 class Forecaster:
@@ -99,6 +118,7 @@ class Forecaster:
     def __init__(self, ctx: PipelineContext) -> None:
         """Use ``ctx``'s database, league directory and model cache."""
         self._ctx = ctx
+        self._cards = CardModels(ctx)
 
     async def forecast(self, matches: Sequence[Match]) -> dict[int, Forecast]:
         """A forecast (or the reason for none) for every match, keyed by provider match id."""
@@ -110,9 +130,15 @@ class Forecaster:
                 forecasts[match.id] = Forecast(match_id=match.id, skip=fixture_or_skip)
             else:
                 fixtures[match.id] = fixture_or_skip
+        referees = {match.id: main_referee(match) for match in matches}
         canonical = await self._canonical(list(fixtures.values()))
         for match_id, fixture in zip(fixtures, canonical, strict=True):
-            forecasts[match_id] = await self._forecast(match_id, fixture)
+            forecast = await self._forecast(match_id, fixture)
+            if forecast.skip is None:
+                league = self._ctx.leagues.canonical(fixture.league.ref)
+                cards = await card_outlook(self._cards, league, fixture, referees[match_id])
+                forecast = replace(forecast, cards=cards)
+            forecasts[match_id] = forecast
         return forecasts
 
     def _fixture(self, match: Match) -> Fixture | ForecastSkip:
@@ -162,6 +188,7 @@ class Forecaster:
         return Forecast(
             match_id=match_id,
             chances=chances,
+            team_chances=team_chances(matrix),
             scores=tuple(
                 LikelyScore(s.home_goals, s.away_goals, s.probability)
                 for s in top_scores(matrix, TOP_SCORE_COUNT)
@@ -192,6 +219,16 @@ class Forecaster:
             ).level
         except ModelInputError:
             return None
+
+
+def team_chances(matrix: FloatArray) -> tuple[TeamChance, ...]:
+    """Each team scoring at least once: one minus its row (home) or column (away) of zeros."""
+    home_blank = float(matrix[0, :].sum())
+    away_blank = float(matrix[:, 0].sum())
+    return (
+        TeamChance(TeamPick.HOME_TO_SCORE, min(max(1.0 - home_blank, 0.0), 1.0)),
+        TeamChance(TeamPick.AWAY_TO_SCORE, min(max(1.0 - away_blank, 0.0), 1.0)),
+    )
 
 
 def chances_of(forecast: Forecast, market: Market) -> Mapping[Selection, float]:

@@ -228,3 +228,23 @@ def test_batch_lists_distinct_leagues_and_teams_in_first_seen_order() -> None:
     assert [league.ref.external_id for league in batch.leagues] == ["E0", "E1"]
     assert [team.name for team in batch.teams] == ["A", "B", "C", "D"]
     assert HistoryBatch().teams == ()
+
+
+def test_result_cards_are_non_negative_and_the_referee_is_tidied() -> None:
+    ref = ExternalRef("football-data", "x")
+    result = FixtureResult(
+        fixture=ref,
+        status=ResultStatus.FINISHED,
+        home_score=1,
+        away_score=1,
+        home_yellow=2,
+        away_red=0,
+        referee="  M   Oliver ",
+    )
+    assert result.referee == "M Oliver"
+    assert result.away_yellow is None
+    assert FixtureResult(fixture=ref, status=ResultStatus.POSTPONED, referee="  ").referee is None
+    with pytest.raises(DomainValidationError):
+        FixtureResult(
+            fixture=ref, status=ResultStatus.FINISHED, home_score=0, away_score=0, home_red=-1
+        )

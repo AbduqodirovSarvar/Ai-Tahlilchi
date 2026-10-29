@@ -153,6 +153,11 @@ _COLUMN_ALIASES: Final[Mapping[str, tuple[str, ...]]] = {
     "away_goals": ("FTAG", "AG"),
     "home_ht_goals": ("HTHG",),
     "away_ht_goals": ("HTAG",),
+    "home_yellow": ("HY",),
+    "away_yellow": ("AY",),
+    "home_red": ("HR",),
+    "away_red": ("AR",),
+    "referee": ("Referee",),
     "date": ("Date",),
     "time": ("Time",),
     "division": ("Div",),
@@ -370,6 +375,11 @@ def _result(row: Mapping[str, str], columns: Mapping[str, str], ref: ExternalRef
         away_score=away_goals,
         home_ht_score=parse_goals(row.get(columns.get("home_ht_goals", ""), "")),
         away_ht_score=parse_goals(row.get(columns.get("away_ht_goals", ""), "")),
+        home_yellow=_optional_count(row.get(columns.get("home_yellow", ""), "")),
+        away_yellow=_optional_count(row.get(columns.get("away_yellow", ""), "")),
+        home_red=_optional_count(row.get(columns.get("home_red", ""), "")),
+        away_red=_optional_count(row.get(columns.get("away_red", ""), "")),
+        referee=row.get(columns.get("referee", ""), "").strip() or None,
     )
 
 
@@ -459,6 +469,14 @@ def parse_time(text: str) -> time | None:
     try:
         return time(hour, minute)
     except ValueError:
+        return None
+
+
+def _optional_count(text: str) -> int | None:
+    """A card count, ``None`` when empty or unreadable (a bad card cell keeps the result)."""
+    try:
+        return parse_goals(text)
+    except RowError:
         return None
 
 
