@@ -1,4 +1,4 @@
-"""``run_real``: startup order, the handicap guard and the watchdog exit path (no network)."""
+"""``run_real``: startup order and the watchdog exit path (no network)."""
 
 import asyncio
 from pathlib import Path
@@ -23,7 +23,6 @@ def real_settings(tmp_path: Path, **overrides: object) -> Settings:
         "app_services": "real",
         "telegram_bot_token": "42:TEST",
         "admin_ids": "1",
-        "handicap_convention": "home_line",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[call-arg, arg-type]
@@ -37,21 +36,6 @@ def _no_startup_greeting(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return mock
 
 
-async def test_real_services_refuse_to_start_without_an_explicit_handicap_convention(
-    tmp_path: Path,
-) -> None:
-    config = Settings(  # type: ignore[call-arg]
-        _env_file=None,
-        db_path=tmp_path / "app.db",
-        app_services="real",
-        telegram_bot_token="42:TEST",
-        admin_ids="1",
-    )
-    with pytest.raises(ConfigurationError, match="HANDICAP_CONVENTION"):
-        await main_module.run_bot(config)
-    assert not (tmp_path / "app.db").exists()  # nothing was opened before the refusal
-
-
 async def test_the_scheduler_starts_after_the_bot_is_attached_and_in_its_own_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -60,9 +44,9 @@ async def test_the_scheduler_starts_after_the_bot_is_attached_and_in_its_own_fil
     real_create = main_module.create_real_services
     real_start = PipelineScheduler.start
 
-    def spy_create(ctx: Any, notifier: Any = None, *, build: str = "") -> Any:
+    def spy_create(ctx: Any, notifier: Any = None, *, build: str = "", matches: Any = None) -> Any:
         seen["notifier"] = notifier
-        return real_create(ctx, notifier=notifier, build=build)
+        return real_create(ctx, notifier=notifier, build=build, matches=matches)
 
     def spy_start(self: PipelineScheduler) -> None:
         seen["events"].append(("scheduler_start", seen["notifier"]._bot is not None))

@@ -19,7 +19,7 @@ leaving the key claimed until its lease runs out.
 the manual quota, with a pre-flight cost check and a minimum gap between two runs.
 
 Exit codes of the CLI: 0 done (also "nothing to do"), 1 unexpected error, 2 configuration
-error (for example no ``API_FOOTBALL_KEY``: nothing is fetched and the message says why).
+error, also when no data provider is configured (nothing to refresh).
 """
 
 import asyncio
@@ -329,8 +329,10 @@ async def _cli() -> int:
     configure_logging(
         level=settings.log_level, app_env=settings.app_env, secret_values=settings.secret_values()
     )
-    settings.require_secret("api_football_key")
     async with open_runtime(settings) as runtime:
+        if not runtime.ctx.providers:
+            msg = "no data provider is configured: there is nothing to refresh"
+            raise ConfigurationError(msg)
         summary = await refresh(runtime.ctx)
     logger.info("refresh_cli_finished", already_done=summary.already_done, skipped=summary.skipped)
     return EXIT_OK

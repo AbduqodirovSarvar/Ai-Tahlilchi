@@ -27,7 +27,6 @@ from app.scheduler import (
     PipelineScheduler,
     execute_job,
 )
-from app.services.interfaces import ApiQuota
 from tests.pipeline.harness import Env, open_env
 from tests.pipeline.test_flows import USER, scripted, tune
 
@@ -283,14 +282,10 @@ async def test_one_broken_profile_does_not_stop_the_other_digests(
 
 
 # ------------------------------------------------------------------------------ status
-async def test_status_splits_the_manual_reserve_from_what_is_spent(seeded_env: Env) -> None:
+async def test_status_invents_no_quota_without_a_provider(seeded_env: Env) -> None:
     status = await seeded_env.system.services.status.system_status()
 
-    [quota] = status.quotas
-    assert isinstance(quota, ApiQuota)
-    assert quota.manual_reserve == 30
-    assert quota.manual_used == 0
-    assert quota.manual_left == 30
+    assert status.quotas == ()  # no odds provider, no usage rows: nothing to show
     assert status.llm is None  # no language model behind this reviewer
 
 

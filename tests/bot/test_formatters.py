@@ -76,7 +76,7 @@ def signal(**overrides: object) -> SignalView:
 
 def test_card_matches_plan_layout() -> None:
     assert format_signal_card(signal(), TASHKENT) == (
-        "⚽ <b>Arsenal — Chelsea</b>   🕒 20:00  🏆 Premier League\n"
+        "⚽ <b>Arsenal — Chelsea</b>   🕒 24.10.2026 20:00  🏆 Premier League\n"
         "🎯 Tanlov: <b>Total 2.5 dan ko'p</b>   @ <b>1.85</b>\n"
         "📊 Ehtimollik: 61% (adolatli koeff. 1.64)\n"
         "💹 EV: +12.9%   🛡 Ishonch: Yuqori\n"

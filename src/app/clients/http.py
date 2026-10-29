@@ -53,8 +53,6 @@ logger = get_logger(__name__)
 
 DEDUPE_TTL_SECONDS: Final = 10 * 60.0
 _MS_PER_SECOND: Final = 1000
-LOGGED_PROVIDER: Final = Provider.API_FOOTBALL
-"""The only provider this client talks to; the name its calls are logged under."""
 
 type UtcClock = Callable[[], datetime]
 type BodyRetryCheck = Callable[[JsonValue], str | None]
@@ -81,6 +79,8 @@ class ProviderConfig:
     # Some providers report a rate limit inside an HTTP 200 body; the check returns the
     # reason to retry (like a 429) or ``None`` when the body is not such a case.
     retryable_body: BodyRetryCheck | None = None
+    # The name this provider's calls are logged under in the call log.
+    log_provider: Provider
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,7 +424,7 @@ class ApiClient:
         await self._recorder.record(
             CallRecord(
                 at=self._clock(),
-                provider=LOGGED_PROVIDER,
+                provider=self._config.log_provider,
                 operation=path,
                 outcome=outcome,
                 duration_ms=duration_ms,

@@ -13,6 +13,7 @@ from app.bot.formatters import (
     clock,
     escape,
     format_loss_limit,
+    kickoff_stamp,
     odds,
     percent,
     selection_label,
@@ -122,7 +123,7 @@ def format_watch_event(event: WatchlistEvent, zone: ZoneInfo) -> str:
             title=texts.WATCH_TITLES[event.kind.value],
             icon=texts.SPORT_ICONS[fixture.sport],
             fixture=escape(fixture.label),
-            time=clock(fixture.kickoff.astimezone(zone).time()),
+            time=kickoff_stamp(fixture.kickoff, zone),
             league=escape(fixture.league),
         )
     ]

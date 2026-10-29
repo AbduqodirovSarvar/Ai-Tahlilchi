@@ -1321,6 +1321,5 @@ class SportsContract:
 class StatusContract:
     async def test_status(self, services: Services) -> None:
         status = await services.status.system_status()
-        assert status.quotas
         assert all(quota.remaining >= 0 for quota in status.quotas)
         assert all(job.name for job in status.jobs)

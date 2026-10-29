@@ -2,7 +2,6 @@
 
 import json
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import cast
 
@@ -17,7 +16,14 @@ from app.clients.quota import QuotaExceededError, RequestPurpose
 from app.db.call_log import SqlCallRecorder
 from app.db.engine import create_engine, create_session_factory
 from app.domain import CallOutcome, CallRecord, Provider
-from tests.clients.conftest import TEST_KEY, FakeTime, Harness, build_harness, load
+from tests.clients.conftest import (
+    EMPTY_BODY,
+    TEST_CONFIG,
+    TEST_KEY,
+    FakeTime,
+    Harness,
+    build_harness,
+)
 from tests.clients.test_gemini import Answer, FakeSdk, api_error, response
 
 AUTO = RequestPurpose.AUTOMATIC
@@ -46,13 +52,13 @@ async def test_a_sent_request_is_recorded_with_params_body_status_and_cost(
 ) -> None:
     recorder = ListRecorder()
     harness = harness_with(recorder, fake_time, http_client)
-    body = load("fixtures_empty.json")
+    body = EMPTY_BODY
     router.get("/fixtures").respond(json=body)
 
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
 
     (call,) = recorder.calls
-    assert call.provider is Provider.API_FOOTBALL
+    assert call.provider is TEST_CONFIG.log_provider
     assert call.operation == "fixtures"
     assert call.outcome is CallOutcome.OK
     assert json.loads(call.request) == PARAMS
@@ -72,7 +78,7 @@ async def test_the_api_key_is_never_part_of_a_record(
     recorder = ListRecorder()
     harness = harness_with(recorder, fake_time, http_client)
     router.get("/fixtures").mock(
-        side_effect=[httpx.Response(500), httpx.Response(200, json=load("fixtures_empty.json"))]
+        side_effect=[httpx.Response(500), httpx.Response(200, json=EMPTY_BODY)]
     )
 
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
@@ -87,7 +93,7 @@ async def test_a_cache_answer_is_recorded_as_cached_and_free(
 ) -> None:
     recorder = ListRecorder()
     harness = harness_with(recorder, fake_time, http_client)
-    router.get("/fixtures").respond(json=load("fixtures_empty.json"))
+    router.get("/fixtures").respond(json=EMPTY_BODY)
 
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
@@ -103,7 +109,7 @@ async def test_a_refused_request_is_recorded_as_quota_blocked(
 ) -> None:
     recorder = ListRecorder()
     harness = harness_with(recorder, fake_time, http_client, daily_limit=1)
-    route = router.get("/fixtures").respond(json=load("fixtures_empty.json"))
+    route = router.get("/fixtures").respond(json=EMPTY_BODY)
     await harness.api.get_json("fixtures", {"date": "2024-10-25"}, purpose=AUTO)
 
     with pytest.raises(QuotaExceededError):
@@ -126,7 +132,7 @@ async def test_every_attempt_of_a_retried_request_is_recorded_and_charged(
         side_effect=[
             httpx.Response(429, text="slow down"),
             httpx.Response(503),
-            httpx.Response(200, json=load("fixtures_empty.json")),
+            httpx.Response(200, json=EMPTY_BODY),
         ]
     )
 
@@ -189,7 +195,7 @@ async def test_timeouts_and_transport_errors_are_recorded_without_a_status(
         side_effect=[
             httpx.ReadTimeout("slow"),
             httpx.ConnectError("refused"),
-            httpx.Response(200, json=load("fixtures_empty.json")),
+            httpx.Response(200, json=EMPTY_BODY),
         ]
     )
 
@@ -216,18 +222,6 @@ async def test_exhausted_retries_leave_one_error_per_attempt(
     assert {c.outcome for c in recorder.calls} == {CallOutcome.ERROR}
 
 
-async def test_typed_endpoint_calls_are_logged_under_their_endpoint_path(
-    fake_time: FakeTime, http_client: httpx.AsyncClient, router: respx.MockRouter
-) -> None:
-    recorder = ListRecorder()
-    harness = harness_with(recorder, fake_time, http_client)
-    router.get("/fixtures").respond(json=load("fixtures_empty.json"))
-
-    await harness.football.fixtures_by_date(date(2024, 10, 26), purpose=AUTO)
-
-    assert [c.operation for c in recorder.calls] == ["fixtures"]
-
-
 async def test_a_broken_call_log_database_does_not_break_the_provider_call(
     fake_time: FakeTime,
     http_client: httpx.AsyncClient,
@@ -237,7 +231,7 @@ async def test_a_broken_call_log_database_does_not_break_the_provider_call(
     engine = create_engine(tmp_path / "empty.db")  # no schema: every write fails
     recorder = SqlCallRecorder(create_session_factory(engine), scrub=lambda text: text)
     harness = build_harness(fake_time, http_client, recorder=recorder)
-    router.get("/fixtures").respond(json=load("fixtures_empty.json"))
+    router.get("/fixtures").respond(json=EMPTY_BODY)
 
     result = await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
     await engine.dispose()
@@ -249,7 +243,7 @@ async def test_a_broken_call_log_database_does_not_break_the_provider_call(
 async def test_without_a_recorder_nothing_changes(
     harness: Harness, router: respx.MockRouter
 ) -> None:
-    router.get("/fixtures").respond(json=load("fixtures_empty.json"))
+    router.get("/fixtures").respond(json=EMPTY_BODY)
 
     result = await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
 

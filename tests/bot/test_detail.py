@@ -108,7 +108,7 @@ def test_detail_card_contains_every_section_of_the_plan() -> None:
     text = format_fixture_detail(make_detail(), TASHKENT)
 
     assert "📋 <b>Arsenal — Chelsea</b>" in text
-    assert "🏆 Premier League · 🕒 22.10 20:00" in text
+    assert "🏆 Premier League · 🕒 22.10.2026 20:00" in text
     assert texts.DETAIL_LINEUPS_CONFIRMED in text
     assert "Arsenal: ✅✅➖❌✅" in text
     assert "Chelsea: ❌➖✅" in text

@@ -13,7 +13,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot import texts
 from app.bot.callbacks import ResultCb
-from app.bot.formatters import clock, escape, odds, selection_label, short_date
+from app.bot.formatters import escape, kickoff_stamp, odds, selection_label
 from app.bot.keyboards import markup_of, single_button
 from app.bot.paging import pager_row, paginate
 from app.bot.result_buttons import ORIGIN_LIST, mark_row, note_button
@@ -31,14 +31,13 @@ def format_pending(signals: Sequence[SignalView], zone: ZoneInfo, page: int = 0)
     first = current.number * PENDING_PAGE_SIZE
     lines = [texts.RESULTS_PENDING_COMMAND_TITLE.format(count=len(signals)), ""]
     for offset, signal in enumerate(current.items, start=1):
-        kickoff = signal.kickoff.astimezone(zone)
         lines.append(
             texts.RESULTS_PENDING_LINE.format(
                 number=first + offset,
                 fixture=escape(signal.fixture_label),
                 selection=selection_label(signal),
                 odds=odds(signal.odds),
-                kickoff=f"{short_date(kickoff.date())} {clock(kickoff.time())}",
+                kickoff=kickoff_stamp(signal.kickoff, zone),
             )
         )
     lines.extend(["", texts.RESULTS_PENDING_HINT])

@@ -43,11 +43,10 @@ from app.bot.custom_ui import (
 from app.bot.draft import StaleDraftError
 from app.bot.flow import FlowContext, FlowContextMiddleware
 from app.bot.formatters import (
-    clock,
     escape,
     format_signal_card,
+    kickoff_stamp,
     price_lines,
-    short_date,
 )
 from app.bot.handlers.analysis_run import ProgressReporter
 from app.bot.handlers.filters import TYPED_INPUT
@@ -138,8 +137,7 @@ def _option(draft: CustomDraft, index: int) -> CustomOption:
 
 # --------------------------------------------------------------------------- searching
 def _fixture_option(fixture: FixtureOption, zone: ZoneInfo) -> CustomOption:
-    local = fixture.kickoff.astimezone(zone)
-    stamp = f"{short_date(local.date())} {clock(local.time())}"
+    stamp = kickoff_stamp(fixture.kickoff, zone)
     return CustomOption(
         option_id=fixture.fixture_id,
         label=f"{stamp} {fixture.label}",

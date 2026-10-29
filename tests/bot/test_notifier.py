@@ -112,8 +112,8 @@ async def test_digest_sends_header_then_cards_with_buttons(harness: Harness) -> 
     assert callback_data(header) == [RecalcAllCb(kind="d", ref="2026-10-22").pack()]
     assert [m.text.splitlines()[0] for m in rest] == [
         "📅 <b>Payshanba, 22.10</b> — 2 ta signal",
-        "⚽ <b>Arsenal — Chelsea</b>   🕒 20:00  🏆 Premier League",
-        "⚽ <b>Inter — Lazio</b>   🕒 20:00  🏆 Premier League",
+        "⚽ <b>Arsenal — Chelsea</b>   🕒 22.10.2026 20:00  🏆 Premier League",
+        "⚽ <b>Inter — Lazio</b>   🕒 22.10.2026 20:00  🏆 Premier League",
     ]
     assert CardCb(action="recalc", signal_id=1).pack() in callback_data(rest[1])
     assert all(m.parse_mode == "HTML" and m.chat_id == USER for m in harness.sent)
@@ -204,7 +204,7 @@ async def test_a_retry_sends_only_what_the_progress_says_is_missing(harness: Har
 
     assert ref == MessageRef(USER, 77)  # the stored header reference, nothing re-sent for it
     assert [m.text.splitlines()[0] for m in harness.sent] == [
-        "⚽ <b>Arsenal — Chelsea</b>   🕒 20:00  🏆 Premier League"
+        "⚽ <b>Arsenal — Chelsea</b>   🕒 22.10.2026 20:00  🏆 Premier League"
     ]
     assert progress.handled == {0, 1, 2}
     assert progress.header_marks == 0

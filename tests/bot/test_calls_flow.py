@@ -147,7 +147,8 @@ def test_keyboard_has_filters_numbers_pager_and_short_callbacks() -> None:
 
 
 def test_filter_codes_map_to_service_requests() -> None:
-    assert request_for("f", 2).provider is Provider.API_FOOTBALL
+    assert request_for("d", 2).provider is Provider.FOOTBALL_DATA
+    assert request_for("f", 0).provider is None  # the removed API-Football filter means "all"
     assert request_for("g", 0).provider is Provider.GEMINI
     assert request_for("e", 0).outcome is CallOutcome.ERROR
     assert request_for("a", 0).provider is None
@@ -233,8 +234,8 @@ async def test_provider_filters_count(harness: BotHarness) -> None:
     await harness.send("/sorovlar")
     await harness.press("Gemini")
     assert "Gemini — 4 ta" in harness.last_text
-    await harness.press("API-Football")
-    assert "API-Football — 10 ta" in harness.last_text
+    await harness.press("Football-Data")
+    assert "Football-Data — 2 ta" in harness.last_text
 
 
 async def test_non_admin_is_refused_on_every_entry(bot: Bot, session: RecordingSession) -> None:

@@ -31,10 +31,14 @@ from app.services.interfaces import (
 
 CALLS_PAGE_SIZE: Final = 10
 FILTER_ALL: Final = "a"
-FILTER_API: Final = "f"
+FILTER_FOOTBALL_DATA: Final = "d"
 FILTER_GEMINI: Final = "g"
 FILTER_ERRORS: Final = "e"
-FILTERS: Final = (FILTER_ALL, FILTER_API, FILTER_GEMINI, FILTER_ERRORS)
+FILTERS: Final = (FILTER_ALL, FILTER_FOOTBALL_DATA, FILTER_GEMINI, FILTER_ERRORS)
+_FILTER_PROVIDERS: Final = {
+    FILTER_FOOTBALL_DATA: Provider.FOOTBALL_DATA,
+    FILTER_GEMINI: Provider.GEMINI,
+}
 MESSAGE_BUDGET: Final = 3900
 """Characters of one detail message; below Telegram's 4096 to leave room for the escaping."""
 MS_PER_SECOND: Final = 1000
@@ -46,7 +50,7 @@ type Row = list[InlineKeyboardButton]
 
 def request_for(filter_code: str, page: int) -> CallLogRequest:
     """The service request behind a filter button (unknown codes mean "all")."""
-    provider = {FILTER_API: Provider.API_FOOTBALL, FILTER_GEMINI: Provider.GEMINI}.get(filter_code)
+    provider = _FILTER_PROVIDERS.get(filter_code)
     outcome = CallOutcome.ERROR if filter_code == FILTER_ERRORS else None
     return CallLogRequest(
         provider=provider, outcome=outcome, page=max(page, 0), page_size=CALLS_PAGE_SIZE
@@ -117,7 +121,7 @@ def filter_row(current: str | None = None) -> Row:
 
 
 def stats_keyboard() -> InlineKeyboardMarkup:
-    """Filters in two rows: provider choices and "errors only"."""
+    """Filters in two rows: "all" with Football-Data, then Gemini and "errors only"."""
     row = filter_row()
     return markup_of([row[:2], row[2:]])
 

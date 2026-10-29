@@ -99,6 +99,12 @@ class BrowseFlow(StatesGroup):
     team_query = State()
 
 
+class MatchFlow(StatesGroup):
+    """⚽ O'yinlar: waiting for a date typed by the user."""
+
+    date_query = State()
+
+
 class SettingsFlow(StatesGroup):
     """⚙️ Settings: waiting for a typed value of ``settings_field``."""
 

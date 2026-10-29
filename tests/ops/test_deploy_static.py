@@ -376,11 +376,11 @@ def test_backup_timer_is_persistent_and_runs_the_backup_script() -> None:
     assert service_section["Type"] == "oneshot"
 
 
-def test_templates_explain_the_handicap_convention_and_drop_the_dead_odds_key() -> None:
+def test_templates_name_the_match_key_and_drop_the_removed_providers() -> None:
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     bootstrap = (ROOT / "deploy" / "bootstrap.sh").read_text(encoding="utf-8")
     for template in (example, bootstrap):
-        assert "HANDICAP_CONVENTION=home_line" in template
-        assert "ODDS_API_KEY" not in template
-        assert "never change it afterwards" in template.lower()
+        assert "FOOTBALL_DATA_ORG_KEY=" in template
+        for removed in ("ODDS_API_KEY", "API_FOOTBALL_KEY", "HANDICAP_CONVENTION"):
+            assert removed not in template
     assert "WATCHDOG_STALL_MINUTES" in example

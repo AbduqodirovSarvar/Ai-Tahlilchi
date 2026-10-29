@@ -2697,6 +2697,116 @@ class CallLogService(Protocol):
         ...
 
 
+# --------------------------------------------------------------------------- live matches (v1.12)
+MAX_MATCH_DAYS: Final = 10
+"""Longest range of local days one :meth:`MatchesService.list_matches` call may cover."""
+
+
+class MatchState(StrEnum):
+    """Where a match stands, as the bot shows it."""
+
+    SCHEDULED = "scheduled"
+    LIVE = "live"
+    FINISHED = "finished"
+    POSTPONED = "postponed"
+    CANCELLED = "cancelled"
+    OTHER = "other"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MatchItem:
+    """One match as the provider has it right now (never a stored copy).
+
+    Team names are ``None`` while a cup draw has not decided them; goals are ``None`` before
+    kick-off. ``competition`` is the provider's name, ``competition_code`` e.g. ``PL``.
+    """
+
+    match_id: int
+    kickoff: datetime
+    competition: str
+    competition_code: str | None
+    home: str | None
+    away: str | None
+    state: MatchState
+    home_goals: int | None = None
+    away_goals: int | None = None
+
+    def __post_init__(self) -> None:
+        """Instants are UTC (see the module conventions)."""
+        _check_utc(self.kickoff, "kickoff")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LineupPlayer:
+    """A starter or a substitute."""
+
+    name: str
+    position: str | None = None
+    shirt_number: int | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SideLineup:
+    """One team's line-up: empty ``starters`` until it is announced (or on the free plan)."""
+
+    team: str | None
+    formation: str | None = None
+    coach: str | None = None
+    starters: tuple[LineupPlayer, ...] = ()
+    bench: tuple[LineupPlayer, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MatchSheet:
+    """A match in full: score by half, coaches and both line-ups."""
+
+    match: MatchItem
+    home_ht_goals: int | None
+    away_ht_goals: int | None
+    home: SideLineup
+    away: SideLineup
+
+    @property
+    def lineups_announced(self) -> bool:
+        """Whether both starting elevens are known."""
+        return bool(self.home.starters and self.away.starters)
+
+
+class MatchesService(Protocol):
+    """Live match list and match sheets, always asked from the provider (v1.12)."""
+
+    async def list_matches(
+        self, user_id: int, day_from: date, day_to: date
+    ) -> tuple[MatchItem, ...]:
+        """Matches on the user's local days ``day_from``..``day_to``, earliest first.
+
+        Raises:
+            ValidationFailedError: ``day_to`` before ``day_from`` or more than
+                :data:`MAX_MATCH_DAYS` days.
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+    async def get_match(self, user_id: int, match_id: int) -> MatchSheet:
+        """One match with its line-ups.
+
+        Raises:
+            NotFoundError: the provider does not know ``match_id``.
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+
+def check_match_days(day_from: date, day_to: date) -> None:
+    """Shared range rule of :meth:`MatchesService.list_matches` (real and fake services).
+
+    Raises:
+        ValidationFailedError: the range is reversed or longer than :data:`MAX_MATCH_DAYS`.
+    """
+    _check(day_to >= day_from, "day_to", "must not be before day_from")
+    _check((day_to - day_from).days < MAX_MATCH_DAYS, "day_to", f"at most {MAX_MATCH_DAYS} days")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Services:
     """Everything the bot needs, injected at startup (fake now, real services in F4)."""
@@ -2715,3 +2825,4 @@ class Services:
     learning: LearningService
     browser: DataBrowserService
     calls: CallLogService
+    matches: MatchesService

@@ -18,6 +18,7 @@ from google import genai
 from app.clients.gemini import _http_options
 from app.clients.http import ProviderConfig, create_http_client
 from app.config import Settings, get_settings
+from app.domain import Provider
 from app.errors import ConfigurationError
 from app.main import TrustedAiohttpSession, build_bot_session
 from app.sports.history.download import create_client
@@ -169,7 +170,13 @@ class TestWiring:
 
 
 def _provider(base_url: str = "https://example.invalid") -> ProviderConfig:
-    return ProviderConfig(name="t", base_url=base_url, auth_header="x-key", requests_per_minute=60)
+    return ProviderConfig(
+        name="t",
+        base_url=base_url,
+        auth_header="x-key",
+        requests_per_minute=60,
+        log_provider=Provider.FOOTBALL_DATA,
+    )
 
 
 class TestLoopback:

@@ -58,3 +58,12 @@ class DeliveryNotConfirmedError(PipelineError):
 
 class ManualResultError(PipelineError):
     """A hand-entered result is impossible (a cash-out beyond what the bet could ever pay)."""
+
+
+class MatchNotFoundError(PipelineError):
+    """The match provider does not know this match id (or the plan does not include it)."""
+
+    def __init__(self, match_id: int) -> None:
+        """``match_id`` is the provider's id."""
+        super().__init__(f"match {match_id} not found")
+        self.match_id = match_id

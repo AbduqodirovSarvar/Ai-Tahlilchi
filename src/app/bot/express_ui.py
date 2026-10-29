@@ -17,12 +17,11 @@ from app.bot import texts
 from app.bot.callbacks import ExpressCb
 from app.bot.draft import StaleDraftError
 from app.bot.formatters import (
-    clock,
     describe_selection,
     escape,
+    kickoff_stamp,
     odds,
     percent,
-    short_date,
 )
 from app.bot.keyboards import checked_label, markup_of, single_button
 from app.services.interfaces import (
@@ -136,9 +135,8 @@ def option_of(signal: SignalView, stamp: str) -> ExpressOption:
 
 
 def local_stamp(signal: SignalView, zone: ZoneInfo) -> str:
-    """``22.10 20:00`` in the user's zone."""
-    local = signal.kickoff.astimezone(zone)
-    return f"{short_date(local.date())} {clock(local.time())}"
+    """``22.10.2026 20:00`` in the user's zone."""
+    return kickoff_stamp(signal.kickoff, zone)
 
 
 def pick_text(draft: ExpressDraft) -> str:

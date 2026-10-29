@@ -11,6 +11,7 @@ import asyncio
 import os
 import ssl
 import sys
+from dataclasses import replace
 from typing import Final
 
 from aiogram import Bot, Dispatcher
@@ -30,12 +31,14 @@ from app.logging import configure_logging, get_logger, summarise_body
 from app.ops.heartbeat import Heartbeat
 from app.ops.version import get_version
 from app.ops.watchdog import EXIT_STALLED, SchedulerStalledError, Watchdog
+from app.pipeline.matches import MatchFeed
 from app.pipeline.redaction import register_secrets
-from app.pipeline.runtime import open_runtime
+from app.pipeline.runtime import open_match_feed, open_runtime
 from app.scheduler import PipelineJobs, PipelineScheduler
 from app.services.fake import create_fake_services
 from app.services.interfaces import Services
 from app.services.real import create_real_services
+from app.services.real.matches import RealMatchesService
 from app.tls import get_ssl_context
 
 # Not `__name__`: under `python -m app.main` that would be "__main__".
@@ -101,10 +104,18 @@ async def connect_bot(token: str) -> Bot:
     return bot
 
 
-def build_services(settings: Settings) -> Services:
-    """The in-memory sample services (``APP_SERVICES=fake``, the default without API keys)."""
+def build_services(settings: Settings, matches: MatchFeed | None = None) -> Services:
+    """The in-memory sample services (``APP_SERVICES=fake``, the default without API keys).
+
+    With a live ``matches`` feed the match list is real even here: sample matches that do not
+    exist must never be mistaken for real ones.
+    """
     logger.warning("services_backend", backend=settings.app_services, sample_data=True)
-    return create_fake_services()
+    services = create_fake_services()
+    if matches is None:
+        return services
+    logger.info("matches_backend", backend="football-data", sample_data=False)
+    return replace(services, matches=RealMatchesService(matches, services.settings))
 
 
 async def run_bot(settings: Settings) -> None:
@@ -118,10 +129,13 @@ async def run_bot(settings: Settings) -> None:
     if settings.app_services == "real":
         await run_real(settings, token, admin_ids)
         return
-    dispatcher = build_dispatcher(
-        admin_ids, build_services(settings), storage=SqliteStorage(fsm_db_path(settings.db_path))
-    )
-    await poll(dispatcher, token, admin_ids, settings)
+    async with open_match_feed(settings) as matches:
+        dispatcher = build_dispatcher(
+            admin_ids,
+            build_services(settings, matches),
+            storage=SqliteStorage(fsm_db_path(settings.db_path)),
+        )
+        await poll(dispatcher, token, admin_ids, settings)
 
 
 async def poll(
@@ -157,14 +171,15 @@ async def run_real(settings: Settings, token: str, admin_ids: frozenset[int]) ->
     into a restart (exit code 3).
 
     Raises:
-        ConfigurationError: ``HANDICAP_CONVENTION`` was never set explicitly.
         SchedulerStalledError: the watchdog found the scheduler no longer ticking.
     """
-    settings.require_explicit_handicap_convention()
     async with open_runtime(settings) as runtime:
         notifier = TelegramNotifier(admin_ids=admin_ids, default_zone=settings.display_timezone)
         system = create_real_services(
-            runtime.ctx, notifier=notifier, build=get_version(settings).label
+            runtime.ctx,
+            notifier=notifier,
+            build=get_version(settings).label,
+            matches=runtime.matches,
         )
         notifier.attach_settings(system.services.settings)
         logger.info("services_backend", backend="real", sample_data=False)

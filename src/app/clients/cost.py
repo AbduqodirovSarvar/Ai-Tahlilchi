@@ -1,17 +1,16 @@
 """Up-front request cost estimates (plan §9: show the expected API spend before analysis).
 
 Pure arithmetic over a :class:`FetchPlan` that the pipeline fills in from what it intends to
-fetch, *after* removing anything already in cache or in the database. Costs follow the
-API-Football endpoint rules used by :class:`~app.clients.api_football.ApiFootballClient`.
+fetch, *after* removing anything already in cache or in the database. Fixtures by id are
+fetched in batches of :data:`MAX_IDS_PER_REQUEST`.
 """
 
 from dataclasses import dataclass, fields
 from math import ceil
 from typing import Final
 
-from app.clients.api_football import MAX_IDS_PER_REQUEST
-
 DEFAULT_ODDS_PAGES_PER_LEAGUE_DAY: Final = 1
+MAX_IDS_PER_REQUEST: Final = 20
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

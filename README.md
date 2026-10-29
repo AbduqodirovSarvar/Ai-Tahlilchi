@@ -47,12 +47,12 @@ cp .env.example .env         # keyin .env ni to'ldiring
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | bot uchun | @BotFather dan |
 | `ADMIN_IDS` | bot uchun | Telegram `user_id` lar, vergul bilan: `123,456` |
-| `API_FOOTBALL_KEY` | ma'lumot yangilash uchun | api-sports.io |
+| `FOOTBALL_DATA_ORG_KEY` | barcha o'yin ma'lumotlari ("⚽ O'yinlar", ikkala rejimda) | football-data.org |
+| `FOOTBALL_DATA_REQUESTS_PER_MINUTE` | ixtiyoriy | tarifingiz limiti: bepul `10` (standart), Standard `30` |
 | `GEMINI_API_KEY` | LLM izohlari uchun | Google AI Studio |
 | `APP_ENV` | yo'q | `dev` (rangli loglar) yoki `prod` (JSON loglar) |
 | `DISPLAY_TZ` | yo'q | foydalanuvchiga vaqtni ko'rsatish mintaqasi, standart `Asia/Tashkent` (bazada doim UTC). POSIX `TZ` ishlatilmaydi |
 | `APP_SERVICES` | yo'q | `fake` (standart) yoki `real` (kalitlar tayyor bo'lgach) |
-| `HANDICAP_CONVENTION` | `real` uchun | `home_line` yoki `own_line`: API-Football Osiyo fora chiziqlarini qanday yozishi. **F0 probe natijasiga qarab birinchi haqiqiy koeffitsientdan OLDIN yozing va keyin o'zgartirmang.** `APP_SERVICES=real` bu o'zgaruvchi aniq berilmaguncha ishga tushmaydi (kod `2`); `HANDICAP_CONVENTION=home_line` ni o'zingiz yozish tasdiq hisoblanadi |
 | `STAKING_MODE` | yo'q | `flat` (standart, 1 birlik) yoki `kelly` (bankning chegaralangan chorak Kelly ulushi; bank/unit yo'q foydalanuvchida `flat`) |
 | `INGEST_EXTRA_BOOKMAKERS` | yo'q | vergul bilan ajratilgan qo'shimcha bukmekerlar (masalan `bet365,unibet`); Pinnacle va 1xBet'dan tashqari koeffitsientlari saqlanadigan kontorlar. Standart bo'sh: har bir qo'shimcha kontor baza hajmini oshiradi ([ADR 0018](docs/adr/0018-t6-fix-round-a.md)) |
 | `GEMINI_MODEL` | yo'q | standart `gemini-flash-latest` |
@@ -106,14 +106,13 @@ docker compose down              # to'xtatish
 - **Healthcheck:** `python -m app.ops.healthcheck` (baza, disk joyi, real rejimda rejalashtiruvchi tirikligi). `docker compose ps` da `healthy`/`unhealthy`. Rejalashtiruvchi to'xtab qolsa ichki qorovul (`WATCHDOG_STALL_MINUTES`) jarayonni kod `3` bilan to'xtatadi, `restart: unless-stopped` uni qayta ko'taradi.
 - **Versiya:** image'ga `APP_VERSION` va `GIT_SHA` build argumentlari bilan quriladi (deploy workflow tegdan va commit'dan beradi); ilova startda `app_started version=... sha=...` yozadi, kod ichida `app.ops.version.get_version()`.
 - **O'rganish halqasi:** `LEARNING_MODE=off|shadow|apply` (standart `shadow`: haftalik job hisoblaydi va jurnalga "nima qilgan bo'lardi" deb yozadi, lekin tahlilga ta'sir qilmaydi). `apply` ga o'tish odam qarori, paper trading davomida shadow jurnalini ko'rgandan keyin ([RUNBOOK 4.1](RUNBOOK.md), [ADR 0013](docs/adr/0013-learning-loop-math.md)).
-- **Servislar rejimi:** `APP_SERVICES=fake` (standart: namunaviy ma'lumot, kalitlarsiz sinash) yoki `real` (pipeline + rejalashtiruvchi; `TELEGRAM_BOT_TOKEN`, `API_FOOTBALL_KEY`, `GEMINI_API_KEY` kerak). `.env` ga yozing va `docker compose up -d`.
+- **Servislar rejimi:** `APP_SERVICES=fake` (standart: namunaviy ma'lumot, kalitlarsiz sinash) yoki `real` (pipeline + rejalashtiruvchi; `TELEGRAM_BOT_TOKEN`, `FOOTBALL_DATA_ORG_KEY`, `GEMINI_API_KEY` kerak). `.env` ga yozing va `docker compose up -d`.
 - Resurs chegaralari 1–2 GB VPS uchun: `mem_limit: 768m`, `cpus: 1.5`; Docker loglari 5 × 10 MB.
 - TLS'ni ushlab qoluvchi korporativ proksi ortida (build va ishga tushirish): "Korporativ proksi ortida" bo'limi (`docker-compose.proxy.yml`).
-- Qo'lda ishlatiladigan skriptlar image ichida (`/app/scripts`): `docker compose run --rm --no-deps --entrypoint python bot /app/scripts/probe_api.py --help`.
 
 ## Korporativ proksi ortida
 
-Ba'zi tarmoqlarda proksi HTTPS trafikni ushlab, o'zining (korporativ) CA sertifikati bilan qayta imzolaydi. Standart sozlamada bot `ClientConnectorCertificateError` / `CERTIFICATE_VERIFY_FAILED` beradi (Telegram, API-Football, Gemini, healthchecks.io). Ikki ixtiyoriy sozlama bor (standart: o'chiq; tekshiruv hech qachon o'chirilmaydi, [ADR 0017](docs/adr/0017-tls-trust-configuration.md)):
+Ba'zi tarmoqlarda proksi HTTPS trafikni ushlab, o'zining (korporativ) CA sertifikati bilan qayta imzolaydi. Standart sozlamada bot `ClientConnectorCertificateError` / `CERTIFICATE_VERIFY_FAILED` beradi (Telegram, Football-Data.org, Gemini, healthchecks.io). Ikki ixtiyoriy sozlama bor (standart: o'chiq; tekshiruv hech qachon o'chirilmaydi, [ADR 0017](docs/adr/0017-tls-trust-configuration.md)):
 
 | O'zgaruvchi | Ma'nosi |
 |---|---|

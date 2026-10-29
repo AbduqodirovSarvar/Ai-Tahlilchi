@@ -29,6 +29,7 @@ MENU_SETTINGS: Final = "⚙️ Sozlamalar"
 MENU_HELP: Final = "ℹ️ Holat / Yordam"
 MENU_DB: Final = "🗄 Baza"
 MENU_CALLS: Final = "📡 So'rovlar"
+MENU_MATCHES: Final = "⚽ O'yinlar"
 MENU_PLACEHOLDER_HINT: Final = "Menyudan bo'limni tanlang 👇"
 
 WELCOME: Final = (
@@ -59,7 +60,8 @@ HELP: Final = (
     "/ozgarishlar — model o'zgarishlari jurnali va orqaga qaytarish\n"
     "/holat — tizim holati: API limitlari, oxirgi yangilanish, xatolar\n"
     "/baza — bazadagi ligalar, o'yinlar, jamoalar va koeffitsientlar\n"
-    "/sorovlar — API-Football va Gemini ga yuborilgan so'rovlar (admin)\n"
+    "/oyinlar — bugungi, ertangi va istalgan sanadagi o'yinlar (Football-Data.org)\n"
+    "/sorovlar — Football-Data.org va Gemini ga yuborilgan so'rovlar (admin)\n"
     "/sozlamalar — sozlamalar\n"
     "/bekor — joriy amalni bekor qilish\n"
     "/yordam — shu yordam\n\n"
@@ -1391,8 +1393,16 @@ DATA_STALE_NEVER: Final = (
 
 # --------------------------------------------------------------------------- provider call log
 CALLS_TITLE: Final = "📡 <b>Tashqi so'rovlar</b> — so'nggi 24 soat"
-CALLS_PROVIDERS: Final[dict[str, str]] = {"api_football": "🏟 API-Football", "gemini": "🤖 Gemini"}
-CALLS_PROVIDER_ICONS: Final[dict[str, str]] = {"api_football": "🏟", "gemini": "🤖"}
+CALLS_PROVIDERS: Final[dict[str, str]] = {
+    "api_football": "🏟 API-Football (eski)",
+    "gemini": "🤖 Gemini",
+    "football_data": "⚽ Football-Data",
+}
+CALLS_PROVIDER_ICONS: Final[dict[str, str]] = {
+    "api_football": "🏟",
+    "gemini": "🤖",
+    "football_data": "⚽",
+}
 CALLS_DURATION_MS: Final = "{value} ms"
 CALLS_DURATION_S: Final = "{value} s"
 CALLS_LINE_HTTP: Final = " · HTTP {status}"
@@ -1410,7 +1420,7 @@ CALLS_STATS_EMPTY: Final = (
 CALLS_PICK_FILTER: Final = "Ro'yxatni ko'rish uchun filtrni tanlang 👇"
 BTN_CALLS_FILTERS: Final[dict[str, str]] = {
     "a": "Hammasi",
-    "f": "API-Football",
+    "d": "Football-Data",
     "g": "Gemini",
     "e": "Faqat xatolar",
 }
@@ -1468,3 +1478,44 @@ CALLS_FILE_REQUEST: Final = "=== SO'ROV ==="
 CALLS_FILE_RESPONSE: Final = "=== JAVOB ==="
 CALLS_FILE_ERROR: Final = "=== XATO ==="
 CALLS_FILE_EMPTY: Final = "(yo'q)"
+
+# --------------------------------------------------------------------------- live matches
+MATCHES_TITLE: Final = "⚽ <b>O'yinlar · {day}, {weekday}</b> — {total} ta"
+MATCHES_SOURCE: Final = "<i>Manba: Football-Data.org (jonli, bazadan emas) · vaqt: {zone}</i>"
+MATCHES_EMPTY: Final = "Bu kunda kuzatiladigan ligalarda o'yin yo'q."
+MATCHES_COMPETITION: Final = "🏆 <b>{competition}</b>"
+MATCHES_LINE: Final = "{n}. <b>{kickoff}</b> · {home} — {away} · {state}"
+MATCHES_PAGE: Final = "Sahifa {page}/{pages}"
+MATCHES_STATES: Final[dict[str, str]] = {
+    "scheduled": "⏳ kutilmoqda",
+    "live": "🔴 jonli",
+    "finished": "✅ tugagan",
+    "postponed": "⏸ qoldirilgan",
+    "cancelled": "❌ bekor qilingan",
+    "other": "❔ noma'lum",
+}
+MATCHES_STATE_SCORE: Final = "{state} {home}:{away}"
+MATCHES_TBD: Final = "Aniqlanmagan"
+MATCHES_ASK_DATE: Final = "📅 Sanani kiriting: <code>30.10</code> yoki <code>30.10.2026</code>"
+BTN_MATCHES_TODAY: Final = "📅 Bugun"
+BTN_MATCHES_TOMORROW: Final = "📅 Ertaga"
+BTN_MATCHES_PICK_DATE: Final = "🗓 Sana kiritish"
+BTN_MATCHES_PREV_DAY: Final = "◀️ Oldingi kun"
+BTN_MATCHES_NEXT_DAY: Final = "Keyingi kun ▶️"
+BTN_MATCHES_PREV_PAGE: Final = "⬅️"
+BTN_MATCHES_NEXT_PAGE: Final = "➡️"
+BTN_MATCHES_BACK: Final = "⬅️ Ro'yxatga"
+MATCH_SHEET_HEADER: Final = "⚽ <b>{home} — {away}</b>"
+MATCH_SHEET_META: Final = "🏆 {competition}\n🕒 <b>{kickoff}</b> ({zone})\n{state}"
+MATCH_SHEET_HALF_TIME: Final = "Birinchi bo'lim: {home}:{away}"
+MATCH_SIDE_HEADER: Final = "\n<b>{team}</b>{formation}"
+MATCH_SIDE_FORMATION: Final = " · {formation}"
+MATCH_SIDE_COACH: Final = "👔 Murabbiy: {coach}"
+MATCH_SIDE_STARTERS: Final = "Asosiy tarkib:"
+MATCH_SIDE_BENCH: Final = "Zaxira:"
+MATCH_PLAYER: Final = "  {number} {name}{position}"
+MATCH_PLAYER_POSITION: Final = " <i>({position})</i>"
+MATCH_NO_NUMBER: Final = "—"
+MATCH_LINEUPS_MISSING: Final = (
+    "ℹ️ Tarkiblar hali e'lon qilinmagan (odatda o'yindan ~1 soat oldin) yoki tarifda yo'q."
+)

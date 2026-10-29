@@ -231,6 +231,7 @@ forbidden_modules = [
     "app.services._fake_calls",
     "app.services._fake_world",
     "app.services._fake_learning",
+    "app.services._fake_matches",
 ]
 
 [[tool.importlinter.contracts]]

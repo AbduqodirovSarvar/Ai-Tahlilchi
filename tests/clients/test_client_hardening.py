@@ -7,13 +7,8 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 import respx
+from pydantic import JsonValue
 
-from app.clients.api_football import (
-    API_FOOTBALL_CONFIG,
-    PROVIDER,
-    QUOTA_SPORT,
-    create_api_football_client,
-)
 from app.clients.http import ProviderUnavailableError
 from app.clients.quota import (
     InMemoryUsageStore,
@@ -22,19 +17,39 @@ from app.clients.quota import (
     RequestPurpose,
     UsageCounts,
     UsageKey,
-    shared_guard,
 )
 from app.clients.rate_limit import TokenBucket
-from tests.clients.conftest import FakeTime, Harness, load
+from tests.clients.conftest import (
+    EMPTY_BODY,
+    PROVIDER,
+    TEST_CONFIG,
+    FakeTime,
+    Harness,
+    build_harness,
+)
 
 AUTO, MANUAL = RequestPurpose.AUTOMATIC, RequestPurpose.MANUAL
 PARAMS = {"date": "2024-10-26"}
-EMPTY = "fixtures_empty.json"
 LIMIT_HEADERS = {"x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "5"}
 
 
 def usage_key(day: date) -> UsageKey:
     return UsageKey(day, PROVIDER)
+
+
+def rate_limited_body(payload: JsonValue) -> str | None:
+    """A provider that reports its per-minute limit inside an HTTP 200 body."""
+    if isinstance(payload, dict) and isinstance(payload.get("errors"), dict):
+        return "rate limit reported in body"
+    return None
+
+
+@pytest.fixture
+def limited(fake_time: FakeTime, http_client: httpx.AsyncClient) -> Harness:
+    config = replace(
+        TEST_CONFIG, requests_per_minute=600, burst=100, retryable_body=rate_limited_body
+    )
+    return build_harness(fake_time, http_client, config=config)
 
 
 # --------------------------------------------------------------------------- midnight
@@ -47,7 +62,7 @@ async def test_response_after_midnight_does_not_touch_the_new_day(
 
     def slow_response(_request: httpx.Request) -> httpx.Response:
         harness.time.now = harness.time.now + timedelta(seconds=2)  # answered at 00:00:01
-        return httpx.Response(200, json=load(EMPTY), headers=LIMIT_HEADERS)
+        return httpx.Response(200, json=EMPTY_BODY, headers=LIMIT_HEADERS)
 
     router.get("/fixtures").mock(side_effect=slow_response)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
@@ -64,7 +79,7 @@ async def test_response_after_midnight_does_not_touch_the_new_day(
 async def test_reconcile_on_the_same_day_still_raises_the_floor(
     harness: Harness, router: respx.MockRouter
 ) -> None:
-    router.get("/fixtures").respond(json=load(EMPTY), headers=LIMIT_HEADERS)
+    router.get("/fixtures").respond(json=EMPTY_BODY, headers=LIMIT_HEADERS)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
     assert (await harness.quota.status()).counts.requests_used == 95
 
@@ -104,7 +119,7 @@ async def test_cancelling_one_waiter_does_not_cancel_the_shared_request(
 ) -> None:
     async def slow(_request: httpx.Request) -> httpx.Response:
         await asyncio.sleep(0.02)
-        return httpx.Response(200, json=load(EMPTY))
+        return httpx.Response(200, json=EMPTY_BODY)
 
     route = router.get("/fixtures").mock(side_effect=slow)
     first = asyncio.create_task(harness.api.get_json("fixtures", PARAMS, purpose=AUTO))
@@ -121,7 +136,7 @@ async def test_cancelling_one_waiter_does_not_cancel_the_shared_request(
 async def test_a_new_request_after_completion_is_not_joined(
     harness: Harness, router: respx.MockRouter
 ) -> None:
-    route = router.get("/fixtures").respond(json=load(EMPTY))
+    route = router.get("/fixtures").respond(json=EMPTY_BODY)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO, cache_ttl=0)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO, cache_ttl=0)
     assert route.call_count == 2
@@ -133,7 +148,7 @@ async def test_a_new_request_after_completion_is_not_joined(
 async def test_cache_ttl_zero_ignores_a_cached_body(
     harness: Harness, router: respx.MockRouter
 ) -> None:
-    route = router.get("/fixtures").respond(json=load(EMPTY))
+    route = router.get("/fixtures").respond(json=EMPTY_BODY)
     await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
     fresh = await harness.api.get_json("fixtures", PARAMS, purpose=AUTO, cache_ttl=0)
     assert not fresh.from_cache
@@ -143,7 +158,7 @@ async def test_cache_ttl_zero_ignores_a_cached_body(
 async def test_cached_responses_keep_the_time_they_were_fetched(
     harness: Harness, router: respx.MockRouter
 ) -> None:
-    router.get("/fixtures").respond(json=load(EMPTY))
+    router.get("/fixtures").respond(json=EMPTY_BODY)
     first = await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
     harness.time.now += timedelta(minutes=5)
     harness.time.seconds += 300
@@ -156,12 +171,13 @@ async def test_cached_responses_keep_the_time_they_were_fetched(
 
 
 async def test_rate_limit_inside_a_200_body_is_retried_with_backoff(
-    harness: Harness, router: respx.MockRouter
+    limited: Harness, router: respx.MockRouter
 ) -> None:
+    harness = limited
     route = router.get("/fixtures").mock(
         side_effect=[
             httpx.Response(200, json={"errors": {"rateLimit": "Too many requests"}}),
-            httpx.Response(200, json=load(EMPTY)),
+            httpx.Response(200, json=EMPTY_BODY),
         ]
     )
     response = await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
@@ -172,12 +188,13 @@ async def test_rate_limit_inside_a_200_body_is_retried_with_backoff(
 
 
 async def test_persistent_body_rate_limit_ends_as_unavailable_and_is_not_cached(
-    harness: Harness, router: respx.MockRouter
+    limited: Harness, router: respx.MockRouter
 ) -> None:
+    harness = limited
     route = router.get("/fixtures").respond(json={"errors": {"rateLimit": "Too many requests"}})
     with pytest.raises(ProviderUnavailableError):
         await harness.api.get_json("fixtures", PARAMS, purpose=AUTO)
-    assert route.call_count == API_FOOTBALL_CONFIG.max_attempts
+    assert route.call_count == TEST_CONFIG.max_attempts
     assert not harness.api.cached("fixtures", PARAMS)
 
 
@@ -235,45 +252,3 @@ async def test_a_cancelled_waiter_does_not_block_the_queue(fake_time: FakeTime) 
 
 
 # --------------------------------------------------------------------------- shared guard
-
-
-async def test_clients_over_one_store_share_a_quota_guard() -> None:
-    store = InMemoryUsageStore()
-    first, first_http = create_api_football_client("k1", store, daily_limit=10)
-    second, second_http = create_api_football_client("k1", store, daily_limit=10)
-    other, other_http = create_api_football_client("k1", store, daily_limit=20)
-    try:
-        assert first.api.quota is second.api.quota
-        assert other.api.quota is not first.api.quota
-        assert (
-            shared_guard(store, QuotaPolicy(daily_limit=10), provider=PROVIDER, sport=QUOTA_SPORT)
-            is first.api.quota
-        )
-    finally:
-        for http in (first_http, second_http, other_http):
-            await http.aclose()
-
-
-async def test_two_clients_cannot_overspend_the_daily_limit_together() -> None:
-    store = InMemoryUsageStore()
-    first, first_http = create_api_football_client("k1", store, daily_limit=10)
-    second, second_http = create_api_football_client("k1", store, daily_limit=10)
-    try:
-        guards = [first.api.quota, second.api.quota] * 10
-        outcomes = await asyncio.gather(
-            *(guard.charge(MANUAL) for guard in guards), return_exceptions=True
-        )
-        assert sum(not isinstance(outcome, Exception) for outcome in outcomes) == 10
-        assert (await first.api.quota.status()).counts.requests_used == 10
-    finally:
-        await first_http.aclose()
-        await second_http.aclose()
-
-
-def test_default_provider_config_flags_body_rate_limits() -> None:
-    check = replace(API_FOOTBALL_CONFIG).retryable_body
-    assert check is not None
-    assert check({"errors": {"rateLimit": "x"}}) is not None
-    assert check({"errors": {"token": "x"}}) is None
-    assert check({"errors": []}) is None
-    assert check([]) is None

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery
+from app.pipeline.matches import MatchFeed
 from app.services.interfaces import Notifier, Services
 from app.services.real.account import (
     RealCatalogService,
@@ -22,6 +23,7 @@ from app.services.real.browser import RealDataBrowserService
 from app.services.real.calls import RealCallLogService
 from app.services.real.core import Core
 from app.services.real.learning import RealLearningService
+from app.services.real.matches import RealMatchesService
 from app.services.real.notifier import LogOnlyNotifier, NotifierDelivery
 from app.services.real.signals import (
     RealBetService,
@@ -46,18 +48,21 @@ def create_real_services(
     *,
     build: str = "",
     admin_ids: frozenset[int] | None = None,
+    matches: MatchFeed | None = None,
 ) -> RealSystem:
     """Wire every real service over ``ctx``; without a ``notifier`` messages are only logged.
 
     ``build`` is the label of the running build, shown by ``/holat``. ``admin_ids`` limits who
     may refresh the database; ``None`` trusts the bot's whitelist (which is the admin list).
+    ``matches`` is the live match feed (``None``: ``FOOTBALL_DATA_ORG_KEY`` is not set).
     """
     core = Core(ctx, admin_ids=admin_ids)
+    settings = RealSettingsService(core)
     services = Services(
         analysis=RealAnalysisService(core),
         signals=RealSignalService(core),
         catalog=RealCatalogService(core),
-        settings=RealSettingsService(core),
+        settings=settings,
         templates=RealTemplateService(core),
         watchlist=RealWatchlistService(core),
         bets=RealBetService(core),
@@ -68,5 +73,6 @@ def create_real_services(
         learning=RealLearningService(core),
         browser=RealDataBrowserService(core),
         calls=RealCallLogService(core),
+        matches=RealMatchesService(matches, settings),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

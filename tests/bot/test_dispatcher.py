@@ -41,11 +41,12 @@ async def test_start_shows_welcome_and_main_menu(bot: Bot, session: RecordingSes
 def test_main_menu_matches_plan_layout() -> None:
     rows = [[button.text for button in row] for row in keyboards.main_menu().keyboard]
     assert rows == [
+        ["⚽ O'yinlar"],
         ["📊 Tahlil", "🔍 Maxsus tahlil"],
         ["💾 Shablonlarim", "⚡ Bugungi signallar"],
         ["⭐ Sevimlilar", "🎟 Mening stavkalarim"],
         ["📈 Hisobot", "⚙️ Sozlamalar"],
-        ["🗄 Baza", "📡 So'rovlar"],
+        ["📡 So'rovlar"],
         ["ℹ️ Holat / Yordam"],
     ]
 

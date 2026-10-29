@@ -13,6 +13,7 @@ from app.bot.formatters import (
     TELEGRAM_TEXT_LIMIT,
     clock,
     escape,
+    kickoff_stamp,
     odds,
     percent,
     short_date,
@@ -151,12 +152,11 @@ def _capped(lines: list[str], limit: int) -> list[str]:
 
 
 def _header(detail: FixtureDetail, zone: ZoneInfo) -> list[str]:
-    local = detail.kickoff.astimezone(zone)
     lines = [
         texts.DETAIL_TITLE.format(
             fixture=escape(f"{detail.home_team} — {detail.away_team}"),
             league=escape(detail.league),
-            time=f"{short_date(local.date())} {clock(local.time())}",
+            time=kickoff_stamp(detail.kickoff, zone),
         )
     ]
     if detail.home_score is not None and detail.away_score is not None:

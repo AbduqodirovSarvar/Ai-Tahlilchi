@@ -25,7 +25,7 @@ services:
       APP_ENV: prod
       DB_PATH: /data/app.db
       # fake = in-memory sample data (default until API keys exist); real = pipeline + scheduler.
-      # Set APP_SERVICES=real in .env once TELEGRAM_BOT_TOKEN, API_FOOTBALL_KEY and
+      # Set APP_SERVICES=real in .env once TELEGRAM_BOT_TOKEN, FOOTBALL_DATA_ORG_KEY and
       # GEMINI_API_KEY are configured (RUNBOOK.md).
       APP_SERVICES: ${APP_SERVICES:-fake}
     volumes:

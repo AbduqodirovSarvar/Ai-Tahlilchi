@@ -162,7 +162,7 @@ def test_watchlist_event_titles(kind: WatchNotification) -> None:
 
     assert text == (
         f"⭐ <b>Sevimli:</b> {texts.WATCH_TITLES[kind.value]}\n"
-        "⚽ <b>Arsenal — Chelsea</b>   🕒 20:00  🏆 Premier League\n"
+        "⚽ <b>Arsenal — Chelsea</b>   🕒 22.10.2026 20:00  🏆 Premier League\n"
         "2:1"
     )
 

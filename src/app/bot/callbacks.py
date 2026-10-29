@@ -251,7 +251,7 @@ class DbCb(CallbackData, prefix="db"):
 class CallsCb(CallbackData, prefix="cl"):
     """📡 So'rovlar buttons: ``stats``, ``list`` (filter ``f``, page ``p``), ``item`` and ``file``.
 
-    ``f`` is ``a`` (all), ``f`` (API-Football), ``g`` (Gemini) or ``e`` (errors only); ``i`` is the
+    ``f`` is ``a`` (all), ``d`` (Football-Data), ``g`` (Gemini) or ``e`` (errors only); ``i`` is the
     call id (an integer, so the buttons are stateless).
     """
 
@@ -308,3 +308,16 @@ class LearnCb(CallbackData, prefix="ln"):
     action: str
     id: int = 0
     page: int = 0
+
+
+class MatchCb(CallbackData, prefix="mt"):
+    """⚽ O'yinlar buttons; stateless, so they survive a restart.
+
+    ``day`` (day ordinal ``d``, page ``p``), ``ask`` (type a date) and ``item`` (match id ``i``;
+    ``d``/``p`` lead back to the list).
+    """
+
+    action: str
+    d: int = 0
+    p: int = 0
+    i: int = 0

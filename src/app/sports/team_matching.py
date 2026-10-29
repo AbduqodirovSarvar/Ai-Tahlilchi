@@ -369,7 +369,7 @@ class IdentityMap:
     """Rewrites provider teams/leagues to their history identity (one row per club).
 
     Built from confident matches only; anything unknown passes through unchanged, so an
-    unmatched team simply keeps its API-Football identity.
+    unmatched team simply keeps its provider identity.
     """
 
     teams: Mapping[ExternalRef, Team] = field(default_factory=dict)
@@ -382,7 +382,11 @@ class IdentityMap:
         """Map matched teams, and tracked leagues to their football-data league."""
         leagues: dict[ExternalRef, League] = {}
         if catalog is not None:
-            leagues = {lg.api_ref: lg.football_data_league() for lg in catalog.leagues}
+            leagues = {
+                ref: lg.football_data_league()
+                for lg in catalog.leagues
+                for ref in (lg.provider_ref, lg.api_ref)
+            }
         teams = {match.provider.ref: match.history for match in report.matched}
         return cls(teams=teams, leagues=leagues)
 

@@ -84,7 +84,7 @@ class PipelineConfig:
     """Seconds one LLM review batch may take (T6-F-6)."""
     review_total_timeout: float = DEFAULT_REVIEW_TOTAL_TIMEOUT
     """Seconds all the review batches of one analysis may take together."""
-    history_sources: tuple[str, ...] = ("api-football", "football-data")
+    history_sources: tuple[str, ...] = ("football-data-org", "api-football", "football-data")
     """Which stored copy of the same match the model fit prefers."""
     call_log_retention: timedelta = timedelta(days=30)
     """How long the log of provider calls is kept (``CALL_LOG_RETENTION_DAYS``)."""

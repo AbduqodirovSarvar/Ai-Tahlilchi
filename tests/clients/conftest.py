@@ -1,33 +1,35 @@
-"""Client test helpers: recorded API-Football bodies, fake clocks, an offline ApiClient."""
+"""Client test helpers: a neutral provider config, fake clocks and an offline ApiClient."""
 
-import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 import pytest
 import respx
 from pydantic import JsonValue
 
-from app.clients.api_football import API_FOOTBALL_CONFIG, PROVIDER, ApiFootballClient
 from app.clients.cache import TtlCache
 from app.clients.http import ApiClient, ProviderConfig
 from app.clients.quota import InMemoryUsageStore, QuotaGuard, QuotaPolicy
 from app.clients.rate_limit import TokenBucket
-from app.domain import CallRecorder
+from app.domain import CallRecorder, Provider
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "api_football"
-BASE_URL = API_FOOTBALL_CONFIG.base_url
-TEST_KEY = "test-api-key-0123456789"
-
-
-def load(name: str) -> JsonValue:
-    """A recorded/synthetic response body from ``tests/fixtures/api_football``."""
-    body: JsonValue = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
-    return body
+PROVIDER: Final = "test-provider"
+TEST_KEY: Final = "test-api-key-0123456789"
+TEST_CONFIG: Final = ProviderConfig(
+    name=PROVIDER,
+    base_url="https://api.provider.test",
+    auth_header="x-test-key",
+    requests_per_minute=10,
+    limit_header="x-ratelimit-requests-limit",
+    remaining_header="x-ratelimit-requests-remaining",
+    log_provider=Provider.FOOTBALL_DATA,
+)
+BASE_URL: Final = TEST_CONFIG.base_url
+EMPTY_BODY: Final[JsonValue] = {"results": 0, "response": []}
+"""A valid, empty provider body: what most transport tests answer with."""
 
 
 @dataclass
@@ -66,7 +68,6 @@ class Harness:
     quota: QuotaGuard
     cache: TtlCache[Any]
     api: ApiClient
-    football: ApiFootballClient
 
 
 @pytest.fixture
@@ -94,7 +95,7 @@ def build_harness(
         store, QuotaPolicy(daily_limit=daily_limit), provider=PROVIDER, clock=fake_time.utc
     )
     cache: TtlCache[Any] = TtlCache(clock=fake_time.monotonic)
-    provider = config or replace(API_FOOTBALL_CONFIG, requests_per_minute=600, burst=100)
+    provider = config or replace(TEST_CONFIG, requests_per_minute=600, burst=100)
     limiter = TokenBucket(
         provider.requests_per_minute,
         capacity=provider.burst,
@@ -112,7 +113,7 @@ def build_harness(
         clock=fake_time.utc,
         recorder=recorder,
     )
-    return Harness(fake_time, sleep, store, quota, cache, api, ApiFootballClient(api))
+    return Harness(fake_time, sleep, store, quota, cache, api)
 
 
 @pytest.fixture
@@ -120,7 +121,7 @@ async def http_client(
     router: respx.MockRouter,  # noqa: ARG001 - requested so every request is mocked
 ) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(
-        base_url=BASE_URL, headers={"x-apisports-key": TEST_KEY}
+        base_url=BASE_URL, headers={TEST_CONFIG.auth_header: TEST_KEY}
     ) as client:
         yield client
 

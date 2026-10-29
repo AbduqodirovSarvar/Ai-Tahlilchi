@@ -7,7 +7,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import select
 
-from app.clients.api_football import create_api_football_client as real_create
+from app.clients.football_data_org import create_football_data_client as real_create
 from app.config import Settings
 from app.db.engine import create_engine, create_session_factory
 from app.db.repo import count_calls, record_call
@@ -99,11 +99,11 @@ async def test_the_runtime_gives_the_football_client_a_scrubbing_recorder(
         seen["recorder"] = kwargs.get("recorder")
         return real_create(*args, **kwargs)
 
-    monkeypatch.setattr("app.pipeline.runtime.create_api_football_client", spy)
+    monkeypatch.setattr("app.pipeline.runtime.create_football_data_client", spy)
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,
         db_path=db_path,
-        api_football_key=SecretStr(KEY),
+        football_data_org_key=SecretStr(KEY),
         call_log_retention_days=12,
     )
     register_secrets([KEY])
@@ -115,11 +115,11 @@ async def test_the_runtime_gives_the_football_client_a_scrubbing_recorder(
             await recorder.record(  # type: ignore[attr-defined]
                 CallRecord(
                     at=START,
-                    provider=Provider.API_FOOTBALL,
+                    provider=Provider.FOOTBALL_DATA,
                     operation="fixtures",
                     outcome=CallOutcome.ERROR,
                     duration_ms=1,
-                    request=f"x-apisports-key: {KEY}",
+                    request=f"X-Auth-Token: {KEY}",
                     response=f"echo {KEY}",
                     error=f"url ?key={KEY}",
                 )
@@ -138,5 +138,6 @@ async def test_the_runtime_without_keys_still_opens_and_has_no_provider(tmp_path
     settings = Settings(_env_file=None, db_path=tmp_path / "bare.db")  # type: ignore[call-arg]
 
     async with open_runtime(settings) as runtime:
-        assert runtime.http is None
+        assert runtime.matches is None
+        assert not runtime.ctx.providers
         assert isinstance(runtime.ctx.config.call_log_retention, timedelta)

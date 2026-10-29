@@ -17,12 +17,11 @@ from app.bot import texts
 from app.bot.callbacks import CustomCb
 from app.bot.draft import StaleDraftError
 from app.bot.formatters import (
-    clock,
     escape,
+    kickoff_stamp,
     odds,
     percent,
     selection_label,
-    short_date,
 )
 from app.bot.keyboards import checked_label, markup_of, single_button
 from app.services.interfaces import SignalView
@@ -214,14 +213,13 @@ def format_custom_fixture(signals: Sequence[SignalView], zone: ZoneInfo) -> str:
     "Value topilmadi".
     """
     first = signals[0]
-    local = first.kickoff.astimezone(zone)
     ordered = sorted(signals, key=lambda signal: -signal.probability)
     shown = ordered[:MAX_PICK_LINES]
     lines = [
         texts.CUSTOM_FIXTURE_HEADER.format(
             icon=texts.SPORT_ICONS[first.sport],
             fixture=escape(first.fixture_label),
-            time=f"{short_date(local.date())} {clock(local.time())}",
+            time=kickoff_stamp(first.kickoff, zone),
             league=escape(first.league),
         ),
         *(_pick_line(signal) for signal in shown),

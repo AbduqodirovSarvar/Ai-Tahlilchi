@@ -483,11 +483,11 @@ class RealStatusService:
         )
 
     async def _stored_quotas(self) -> list[ApiQuota]:
-        """Usage rows of today when no provider is configured (limit = the free plan's)."""
+        """Usage rows of today when no provider is configured (none: nothing is shown)."""
         today = self._core.now().astimezone(UTC).date()
         async with self._core.ctx.sessions() as session:
             rows = await data.usage_on(session, today)
-        quotas = [
+        return [
             ApiQuota(
                 provider=row.key.provider,
                 sport=Sport.FOOTBALL if row.key.sport == "football" else None,
@@ -498,15 +498,4 @@ class RealStatusService:
                 manual_used=row.counts.manual_used,
             )
             for row in rows
-        ]
-        return quotas or [
-            ApiQuota(
-                provider="api-football",
-                sport=Sport.FOOTBALL,
-                used=0,
-                limit=DEFAULT_DAILY_LIMIT,
-                reserved_manual=0,
-                manual_reserve=DEFAULT_MANUAL_RESERVE,
-                manual_used=0,
-            )
         ]

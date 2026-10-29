@@ -15,16 +15,18 @@ from hypothesis import strategies as st
 
 from app.clients.football_data_org import (
     FOOTBALL_DATA_ORG_CONFIG,
+    FREE_PLAN_REQUESTS_PER_MINUTE,
     MAX_DAYS_PER_MATCHES_REQUEST,
-    REQUESTS_PER_MINUTE,
     HttpFootballDataClient,
     competition_path,
     create_football_data_client,
     date_windows,
 )
 from app.clients.football_data_org_models import MatchStatus
+from app.clients.football_data_org_requests import CompetitionMatchFilters, StatusFilter
 from app.clients.http import ApiClient, ProviderHttpError, ProviderUnavailableError
 from app.clients.quota import RequestPurpose
+from app.domain import CallOutcome, CallRecord, Provider
 from app.errors import ConfigurationError, ExternalServiceError
 from tests.clients.conftest import FakeTime, Harness, RecordingSleep, build_harness
 
@@ -104,24 +106,29 @@ async def test_reversed_range_is_rejected_before_any_request(
     assert route.call_count == 0
 
 
-async def test_competition_matches_defaults_to_scheduled(
+async def test_competition_matches_send_exactly_the_filters_given(
     football: Football, football_router: respx.MockRouter
 ) -> None:
     client, _ = football
     route = football_router.get("competitions/PL/matches").respond(json=load("matches_list.json"))
-    matches = await client.competition_matches("pl", purpose=AUTO)
+    scheduled = CompetitionMatchFilters(status=StatusFilter.SCHEDULED, season=2024, matchday=9)
+    matches = await client.competition_matches("pl", scheduled, purpose=AUTO)
     assert len(matches) == 2
-    assert route.calls.last.request.url.params["status"] == "SCHEDULED"
+    assert dict(route.calls.last.request.url.params) == {
+        "status": "SCHEDULED",
+        "season": "2024",
+        "matchday": "9",
+    }
     football_router.get("competitions/2021/matches").respond(json={"matches": []})
-    await client.competition_matches(2021, purpose=AUTO, status=None)
-    assert "status" not in football_router.calls.last.request.url.params
+    await client.competition_matches(2021, CompetitionMatchFilters(), purpose=AUTO)
+    assert not football_router.calls.last.request.url.params
 
 
 @pytest.mark.parametrize("bad", ["", "P/L", "../matches", "PL?x=1", "PL%2F", "TOOLONGCODE", "a b"])
 async def test_competition_code_is_validated(football: Football, bad: str) -> None:
     client, _ = football
     with pytest.raises(ValueError, match="competition"):
-        await client.competition_matches(bad, purpose=AUTO)
+        await client.competition_matches(bad, CompetitionMatchFilters(), purpose=AUTO)
 
 
 async def test_match_detail_and_lineups(
@@ -192,7 +199,7 @@ async def test_malformed_bodies_raise_and_are_not_cached(
     listing = football_router.get("competitions/PL/matches").respond(json={"matches": "nope"})
     for _ in range(2):
         with pytest.raises(ExternalServiceError, match="no 'matches' list"):
-            await client.competition_matches("PL", purpose=AUTO)
+            await client.competition_matches("PL", CompetitionMatchFilters(), purpose=AUTO)
     assert listing.call_count == 2
 
 
@@ -206,7 +213,7 @@ async def test_429_is_retried_with_retry_after_then_succeeds(
             httpx.Response(200, json=load("matches_list.json")),
         ]
     )
-    matches = await client.competition_matches("PL", purpose=AUTO)
+    matches = await client.competition_matches("PL", CompetitionMatchFilters(), purpose=AUTO)
     assert len(matches) == 2
     assert 7.0 in harness.sleep.delays
 
@@ -227,7 +234,8 @@ async def test_factory_wires_header_rate_limit_and_no_daily_quota(
     client, http = create_football_data_client(TEST_KEY)
     try:
         assert str(http.base_url) == BASE_URL
-        assert FOOTBALL_DATA_ORG_CONFIG.requests_per_minute == REQUESTS_PER_MINUTE == 30
+        assert FOOTBALL_DATA_ORG_CONFIG.requests_per_minute == FREE_PLAN_REQUESTS_PER_MINUTE
+        assert client._api.config.requests_per_minute == 10
         await client.match(1, purpose=AUTO)
         assert route.calls.last.request.headers["X-Auth-Token"] == TEST_KEY
     finally:
@@ -274,3 +282,29 @@ def test_competition_path_never_returns_unsafe_segment(text: str) -> None:
         return
     assert segment.isalnum()
     assert segment.isascii()
+
+
+class ListRecorder:
+    def __init__(self) -> None:
+        self.records: list[CallRecord] = []
+
+    async def record(self, record: CallRecord) -> None:
+        self.records.append(record)
+
+
+async def test_calls_are_logged_under_football_data(
+    football_router: respx.MockRouter,
+) -> None:
+    football_router.get("matches/1").respond(json=load("match_detail_lineups.json"))
+    recorder = ListRecorder()
+    client, http = create_football_data_client(TEST_KEY, recorder=recorder)
+    try:
+        await client.match(1, purpose=AUTO)
+        await client.match(1, purpose=AUTO)  # cache answer, logged too
+    finally:
+        await http.aclose()
+    assert [(r.provider, r.outcome) for r in recorder.records] == [
+        (Provider.FOOTBALL_DATA, CallOutcome.OK),
+        (Provider.FOOTBALL_DATA, CallOutcome.CACHED),
+    ]
+    assert all(TEST_KEY not in r.request for r in recorder.records)

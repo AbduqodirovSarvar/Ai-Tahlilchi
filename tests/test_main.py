@@ -19,8 +19,12 @@ from app import main as main_module
 from app.bot.messaging import FloodControlMiddleware
 from app.config import Settings, get_settings
 from app.errors import ConfigurationError
+from app.pipeline.matches import MatchFeed
 from app.pipeline.redaction import register_secrets, scrub_text
+from app.pipeline.runtime import open_match_feed
+from app.services._fake_matches import FakeMatchesService
 from app.services.interfaces import Services
+from app.services.real.matches import RealMatchesService
 
 TOKEN = "42:TEST-TOKEN-VALUE"
 
@@ -93,6 +97,21 @@ def test_build_services_uses_the_fake_backend() -> None:
 
     assert isinstance(services, Services)
     assert settings().app_services == "fake"
+    assert isinstance(services.matches, FakeMatchesService)
+
+
+def test_fake_backend_still_lists_real_matches_with_a_feed() -> None:
+    feed = MatchFeed(AsyncMock())
+    services = main_module.build_services(settings(), feed)
+
+    assert isinstance(services.matches, RealMatchesService)
+
+
+async def test_match_feed_needs_the_key() -> None:
+    async with open_match_feed(settings()) as feed:
+        assert feed is None
+    async with open_match_feed(settings(football_data_org_key="k" * 24)) as feed:
+        assert isinstance(feed, MatchFeed)
 
 
 @pytest.mark.parametrize(

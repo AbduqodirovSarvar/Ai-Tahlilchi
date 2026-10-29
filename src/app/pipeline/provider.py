@@ -1,7 +1,7 @@
-"""The pipeline's view of a data provider: an adapter, its quota and a few extras.
+"""The pipeline's view of a data provider: an adapter, its usage and a few extras.
 
-The football implementation wraps :class:`~app.sports.football.FootballAdapter` over the
-API-Football client. Failures are translated at this boundary (see
+The football implementation wraps :class:`~app.sports.football_data_org.FootballDataAdapter`
+over the Football-Data.org client (ADR 0025). Failures are translated at this boundary (see
 :mod:`app.pipeline.errors`), so nothing above the pipeline imports ``app.clients``.
 """
 
@@ -9,9 +9,14 @@ from collections.abc import Awaitable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
 
-from app.clients.api_football import PROVIDER as API_FOOTBALL
-from app.clients.api_football import ApiFootballClient
-from app.clients.quota import DEFAULT_MANUAL_RESERVE_SHARE, QuotaExceededError, RequestPurpose
+from app.clients.football_data_org import PROVIDER as FOOTBALL_DATA
+from app.clients.football_data_org import FootballDataClient
+from app.clients.quota import (
+    DEFAULT_MANUAL_RESERVE_SHARE,
+    QuotaExceededError,
+    QuotaGuard,
+    RequestPurpose,
+)
 from app.domain import (
     ExternalRef,
     Fixture,
@@ -26,14 +31,13 @@ from app.errors import ExternalServiceError
 from app.pipeline.clock import Clock, system_clock
 from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.sports.base import FixtureQuery, SportAdapter
-from app.sports.football import FootballAdapter
+from app.sports.football_data_org import SOURCE, SUPPORTED_MARKETS, FootballDataAdapter
 from app.sports.football_leagues import LeagueCatalog
-from app.sports.football_mapping import SOURCE, SUPPORTED_MARKETS, HandicapConvention
 
 type Purpose = RequestPurpose
 """Who asks: ``AUTOMATIC`` (scheduled jobs) or ``MANUAL`` (the user's actions)."""
 SUPPORTED_SPORT_MARKETS: Final[dict[Sport, frozenset[MarketType]]] = {
-    Sport.FOOTBALL: SUPPORTED_MARKETS
+    Sport.FOOTBALL: frozenset(MarketType)
 }
 """Markets each implemented sport can price, known without a configured provider."""
 DEFAULT_DAILY_LIMIT: Final = 100
@@ -72,7 +76,7 @@ class SportProvider(Protocol):
 
     @property
     def source(self) -> str:
-        """Source name of the provider's own fixtures (``api-football``)."""
+        """Source name of the provider's own fixtures (``ExternalRef.source``)."""
         ...
 
     def markets(self) -> frozenset[MarketType]:
@@ -144,30 +148,24 @@ class GuardedAdapter:
         return await _guarded(self._inner.refresh_history(leagues, season), self._provider)
 
 
-class FootballProvider:
-    """API-Football behind the football adapter."""
+class FootballDataProvider:
+    """Football-Data.org behind the football adapter (fixtures, results, history, 1X2 odds).
+
+    ``quota`` counts the requests of each day in ``api_usage`` (the provider has no daily
+    limit: its ceiling is what the per-minute pacing allows, so it never refuses a request).
+    """
 
     def __init__(
         self,
-        client: ApiFootballClient,
+        client: FootballDataClient,
         *,
+        quota: QuotaGuard,
         catalog: LeagueCatalog | None = None,
         clock: Clock = system_clock,
-        handicap_convention: HandicapConvention = HandicapConvention.HOME_LINE,
-        bookmakers: Collection[str] | None = None,
     ) -> None:
-        """Serve the tracked leagues of ``catalog`` through ``client``.
-
-        ``bookmakers`` limits the odds that are stored (``None`` = every bookmaker).
-        """
-        self._client = client
-        self._base = FootballAdapter(
-            client,
-            catalog=catalog,
-            clock=clock,
-            handicap_convention=handicap_convention,
-            bookmakers=bookmakers,
-        )
+        """Serve the tracked leagues of ``catalog`` through ``client``."""
+        self._quota = quota
+        self._base = FootballDataAdapter(client, catalog=catalog, clock=clock)
 
     @property
     def sport(self) -> Sport:
@@ -176,22 +174,22 @@ class FootballProvider:
 
     @property
     def source(self) -> str:
-        """``api-football``."""
+        """``football-data-org``."""
         return SOURCE
 
     def markets(self) -> frozenset[MarketType]:
-        """Markets the football adapter prices."""
-        return self._base.supported_markets()
+        """1X2 (the only market the provider prices)."""
+        return SUPPORTED_MARKETS
 
     def adapter(self, purpose: Purpose) -> SportAdapter:
-        """The football adapter charging ``purpose``, with errors translated."""
-        return GuardedAdapter(self._base.for_purpose(purpose), API_FOOTBALL)
+        """The football adapter acting for ``purpose``, with errors translated."""
+        return GuardedAdapter(self._base.for_purpose(purpose), FOOTBALL_DATA)
 
     async def quota(self) -> QuotaSnapshot:
-        """Today's API-Football usage."""
-        status = await self._client.api.quota.status()
+        """Today's Football-Data.org requests (against the per-minute ceiling of the day)."""
+        status = await self._quota.status()
         return QuotaSnapshot(
-            provider=API_FOOTBALL,
+            provider=FOOTBALL_DATA,
             sport=Sport.FOOTBALL,
             used=status.counts.requests_used,
             limit=status.policy.daily_limit,
@@ -202,15 +200,16 @@ class FootballProvider:
         )
 
     async def enrich_results(
-        self, results: Sequence[FixtureResult], *, purpose: Purpose, max_requests: int
+        self,
+        results: Sequence[FixtureResult],
+        *,
+        purpose: Purpose,  # noqa: ARG002 - port signature
+        max_requests: int,  # noqa: ARG002 - port signature
     ) -> list[FixtureResult]:
-        """Add expected goals to at most ``max_requests`` finished results (one request each)."""
-        adapter = self._base.for_purpose(purpose)
-        return await _guarded(
-            adapter.with_expected_goals(results, max_requests=max_requests), API_FOOTBALL
-        )
+        """``results`` unchanged: the provider publishes no expected goals."""
+        return list(results)
 
     async def lineups_confirmed(self, fixture: ExternalRef, *, purpose: Purpose) -> bool:
-        """True when API-Football lists line-ups for ``fixture``."""
+        """True when Football-Data.org lists both starting elevens of ``fixture``."""
         adapter = self._base.for_purpose(purpose)
-        return bool(await _guarded(adapter.fetch_lineups(fixture), API_FOOTBALL))
+        return await _guarded(adapter.lineups_confirmed(fixture), FOOTBALL_DATA)

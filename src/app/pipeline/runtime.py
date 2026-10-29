@@ -1,9 +1,10 @@
-"""Production wiring of the pipeline: engine, ledger, provider, LLM reviewer.
+"""Production wiring of the pipeline: engine, ledger, LLM reviewer and the live match feed.
 
-``open_runtime`` is an async context manager that owns the database engine and the provider's
-HTTP client and closes them on exit. Without ``API_FOOTBALL_KEY`` the runtime is
-database-only (no provider): analyses of stored data still work, anything that needs the
-provider is skipped or refused with a clear error.
+``open_runtime`` is an async context manager that owns the database engine and the
+Football-Data.org HTTP client and closes them on exit. One client (one per-minute pacer) serves
+both the live match list and the pipeline's provider, so together they never exceed the plan's
+limit. Without ``FOOTBALL_DATA_ORG_KEY`` the runtime is database-only (no provider): anything
+that needs the provider is skipped or refused with a clear error (ADR 0025).
 """
 
 from collections.abc import AsyncIterator
@@ -15,7 +16,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.clients.api_football import create_api_football_client
+from app.clients.football_data_org import create_football_data_client, usage_counter
 from app.config import Settings
 from app.db.api_usage import SqlUsageStore
 from app.db.call_log import SqlCallRecorder
@@ -24,6 +25,7 @@ from app.db.engine import (
     create_session_factory,
     create_usage_engine,
 )
+from app.domain import BOOKMAKER_MARKET_AVERAGE, CallRecorder, Sport
 from app.llm.service import LlmService, create_llm_service
 from app.logging import get_logger
 from app.pipeline.clock import Clock, system_clock
@@ -33,11 +35,11 @@ from app.pipeline.experience import DbExperience
 from app.pipeline.learning import promote_shadow_state
 from app.pipeline.learning_settings import LearningMode, LearningSettings
 from app.pipeline.ledger import Ledger
+from app.pipeline.matches import MatchFeed
 from app.pipeline.overlay import DbLearningSource, LearningSource, NoLearning
-from app.pipeline.provider import FootballProvider
+from app.pipeline.provider import FootballDataProvider, SportProvider
 from app.pipeline.redaction import scrub_text
 from app.pipeline.review import LlmCandidateReviewer, LlmPostmortemAnalyst
-from app.sports.football_mapping import HandicapConvention
 
 logger = get_logger(__name__)
 
@@ -47,7 +49,7 @@ class Runtime:
     """The wired pipeline and what must be closed with it."""
 
     ctx: PipelineContext
-    http: httpx.AsyncClient | None
+    matches: MatchFeed | None = None
 
 
 def _scrub_for_call_log(text: str) -> str:
@@ -82,6 +84,54 @@ async def _promote_on_start(ctx: PipelineContext) -> None:
 
 
 @asynccontextmanager
+async def open_match_feed(
+    settings: Settings, recorder: CallRecorder | None = None
+) -> AsyncIterator[MatchFeed | None]:
+    """The live Football-Data.org feed, or ``None`` without ``FOOTBALL_DATA_ORG_KEY``.
+
+    ``recorder`` stores every request in the call log (the only trace kept in the database).
+    """
+    key = settings.football_data_org_key
+    if key is None or not key.get_secret_value().strip():
+        logger.warning("matches_without_provider", reason="FOOTBALL_DATA_ORG_KEY is not set")
+        yield None
+        return
+    client, http = create_football_data_client(
+        key.get_secret_value(),
+        requests_per_minute=settings.football_data_requests_per_minute,
+        recorder=recorder,
+    )
+    try:
+        yield MatchFeed(client)
+    finally:
+        await http.aclose()
+
+
+@dataclass(frozen=True, slots=True)
+class _FootballData:
+    feed: MatchFeed
+    provider: FootballDataProvider
+    http: httpx.AsyncClient
+
+
+def _football_data(
+    settings: Settings, recorder: CallRecorder, store: SqlUsageStore, clock: Clock
+) -> _FootballData | None:
+    """The shared Football-Data.org client behind the match feed and the provider."""
+    key = settings.football_data_org_key
+    if key is None or not key.get_secret_value().strip():
+        logger.warning("pipeline_without_provider", reason="FOOTBALL_DATA_ORG_KEY is not set")
+        return None
+    per_minute = settings.football_data_requests_per_minute
+    quota = usage_counter(store, per_minute)
+    client, http = create_football_data_client(
+        key.get_secret_value(), requests_per_minute=per_minute, recorder=recorder, quota=quota
+    )
+    provider = FootballDataProvider(client, quota=quota, clock=clock)
+    return _FootballData(feed=MatchFeed(client), provider=provider, http=http)
+
+
+@asynccontextmanager
 async def open_runtime(
     settings: Settings, *, clock: Clock = system_clock, config: PipelineConfig | None = None
 ) -> AsyncIterator[Runtime]:
@@ -93,31 +143,20 @@ async def open_runtime(
         display_zone=settings.display_timezone,
         refresh_at=settings.refresh_at,
         manual_refresh_min_interval=timedelta(minutes=settings.manual_refresh_min_minutes),
+        # Football-Data.org's averaged 1X2 is the only price there is (ADR 0025).
+        bet_bookmaker=BOOKMAKER_MARKET_AVERAGE,
     )
     engine = create_engine_from_settings(settings)
     await Ledger.ensure_schema(engine)
     sessions = create_session_factory(engine)
     # The call log writes on the request path, so it waits for the database lock only briefly.
     log_engine = create_usage_engine(settings.db_path)
-    recorder = SqlCallRecorder(create_session_factory(log_engine), scrub=_scrub_for_call_log)
-    http: httpx.AsyncClient | None = None
-    providers = {}
-    key = settings.api_football_key
-    if key is not None and key.get_secret_value().strip():
-        client, http = create_api_football_client(
-            key.get_secret_value(),
-            SqlUsageStore(sessions),
-            recorder=recorder,
-        )
-        provider = FootballProvider(
-            client,
-            clock=clock,
-            handicap_convention=HandicapConvention(settings.handicap_convention),
-            bookmakers=config.ingest_bookmakers,
-        )
-        providers[provider.sport] = provider
-    else:
-        logger.warning("pipeline_without_provider", reason="API_FOOTBALL_KEY is not set")
+    log_sessions = create_session_factory(log_engine)
+    recorder = SqlCallRecorder(log_sessions, scrub=_scrub_for_call_log)
+    football = _football_data(settings, recorder, SqlUsageStore(log_sessions), clock)
+    providers: dict[Sport, SportProvider] = (
+        {} if football is None else {football.provider.sport: football.provider}
+    )
     # One service: reviews and post-mortems share its budget.
     llm = create_llm_service(settings, recorder=recorder)
     learning_settings = LearningSettings(
@@ -141,9 +180,9 @@ async def open_runtime(
     )
     try:
         await _promote_on_start(ctx)
-        yield Runtime(ctx=ctx, http=http)
+        yield Runtime(ctx=ctx, matches=None if football is None else football.feed)
     finally:
-        if http is not None:
-            await http.aclose()
+        if football is not None:
+            await football.http.aclose()
         await log_engine.dispose()
         await engine.dispose()

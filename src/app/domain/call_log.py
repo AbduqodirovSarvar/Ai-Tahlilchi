@@ -18,6 +18,7 @@ class Provider(StrEnum):
 
     API_FOOTBALL = "api_football"
     GEMINI = "gemini"
+    FOOTBALL_DATA = "football_data"  # api.football-data.org v4 (not football-data.co.uk)
 
 
 class CallOutcome(StrEnum):

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 PREVIEW_CHARS: Final = 200
 _API: Final = Provider.API_FOOTBALL
 _LLM: Final = Provider.GEMINI
+_MATCHES: Final = Provider.FOOTBALL_DATA
 _REACHED: Final = (CallOutcome.OK, CallOutcome.ERROR)
 _MINUTES_PER_DAY: Final = 24 * 60
 
@@ -41,9 +42,11 @@ _SAMPLE: Final[tuple[tuple[int, Provider, str, CallOutcome, int, int | None, int
     (240, _LLM, "llm_review", CallOutcome.OK, 4800, None, 1),
     (200, _API, "results", CallOutcome.ERROR, 15000, 500, 1),
     (190, _API, "results", CallOutcome.OK, 450, 200, 1),
+    (150, _MATCHES, "matches", CallOutcome.OK, 320, 200, 1),
     (120, _LLM, "post_mortem", CallOutcome.ERROR, 9000, None, 3),
     (90, _API, "fixtures", CallOutcome.QUOTA_BLOCKED, 0, None, 0),
     (60, _LLM, "llm_review", CallOutcome.OK, 6100, None, 1),
+    (45, _MATCHES, "matches/497410", CallOutcome.CACHED, 0, None, 0),
     (30, _API, "odds", CallOutcome.CACHED, 0, None, 0),
     (10, _API, "fixtures", CallOutcome.OK, 400, 200, 1),
 )

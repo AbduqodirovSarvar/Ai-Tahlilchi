@@ -21,13 +21,10 @@ JOBS_DB_NAME: Final = "jobs.db"
 
 type AppEnv = Literal["dev", "prod"]
 type ServicesBackend = Literal["fake", "real"]
-type HandicapConventionName = Literal["home_line", "own_line"]
 type StakingModeName = Literal["flat", "kelly"]
 type LearningModeName = Literal["off", "shadow", "apply"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-type SecretName = Literal[
-    "telegram_bot_token", "api_football_key", "football_data_org_key", "gemini_api_key"
-]
+type SecretName = Literal["telegram_bot_token", "football_data_org_key", "gemini_api_key"]
 
 _HTTP_URL: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
 
@@ -50,8 +47,10 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     admin_ids: Annotated[frozenset[int], NoDecode] = frozenset()
 
-    api_football_key: SecretStr | None = None
     football_data_org_key: SecretStr | None = None
+    # The plan's per-minute request limit at football-data.org (free 10, Standard 30, higher
+    # plans 60); the client paces itself to it. There is no daily limit.
+    football_data_requests_per_minute: int = Field(default=10, ge=1, le=600)
     gemini_api_key: SecretStr | None = None
     gemini_model: str = Field(default="gemini-flash-latest", min_length=1)
 
@@ -59,11 +58,6 @@ class Settings(BaseSettings):
     # changes the process clock; this one only affects how times are shown to users.
     display_tz: str = "Asia/Tashkent"
     db_path: Path = Path("data/app.db")
-    # How API-Football writes Asian handicap numbers (see docs/api_probe_report.md); set it
-    # from the F0 probe BEFORE the first real odds are stored and never change it afterwards:
-    # stored lines cannot be re-read. APP_SERVICES=real refuses to start unless it is set
-    # explicitly (see `require_explicit_handicap_convention`).
-    handicap_convention: HandicapConventionName = "home_line"
     # Which implementation of the service contract the bot talks to: the in-memory sample
     # data ("fake", the default until API keys exist) or the pipeline-backed one ("real").
     app_services: ServicesBackend = "fake"
@@ -192,25 +186,6 @@ class Settings(BaseSettings):
             msg = f"{name.upper()} is not set; add it to .env (see .env.example)"
             raise ConfigurationError(msg)
         return secret.get_secret_value()
-
-    def require_explicit_handicap_convention(self) -> None:
-        """Refuse real services while ``HANDICAP_CONVENTION`` was never chosen on purpose.
-
-        The default is only a guess; odds stored under a wrong convention are silently wrong
-        for good, so the operator must have looked at the F0 probe result and said so (setting
-        ``HANDICAP_CONVENTION=home_line`` explicitly is the escape hatch).
-
-        Raises:
-            ConfigurationError: the variable is absent from the environment and ``.env``.
-        """
-        if "handicap_convention" not in self.model_fields_set:
-            msg = (
-                "HANDICAP_CONVENTION is not set; set it from the F0 probe result "
-                "(home_line or own_line) before the first real odds are stored, "
-                "and do not change it afterwards (RUNBOOK.md). "
-                "Set HANDICAP_CONVENTION=home_line explicitly to accept the default."
-            )
-            raise ConfigurationError(msg)
 
     def require_admin_ids(self) -> frozenset[int]:
         """Return the bot whitelist, refusing to run a bot that nobody may use.

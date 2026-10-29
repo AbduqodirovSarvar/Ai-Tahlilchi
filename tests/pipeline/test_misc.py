@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,7 +120,7 @@ def test_refresh_cli_runs_the_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path:
     @asynccontextmanager
     async def runtime(_settings: Settings):  # type: ignore[no-untyped-def]
         class Holder:
-            ctx = object()
+            ctx = SimpleNamespace(providers={"football": object()})
 
         yield Holder()
 
@@ -127,9 +128,7 @@ def test_refresh_cli_runs_the_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path:
         calls.append(ctx)
         return RefreshSummary(already_done=True)
 
-    monkeypatch.setattr(
-        "app.config.get_settings", lambda: settings(tmp_path, api_football_key="k" * 20)
-    )
+    monkeypatch.setattr("app.config.get_settings", lambda: settings(tmp_path))
     monkeypatch.setattr("app.pipeline.runtime.open_runtime", runtime)
     monkeypatch.setattr(refresh_module, "refresh", fake_refresh)
 
@@ -162,7 +161,6 @@ async def test_main_runs_the_scheduler_beside_the_real_services(
         app_services="real",
         telegram_bot_token="42:TEST",
         admin_ids="1",
-        handicap_convention="home_line",  # real services refuse to start without an explicit choice
     )
 
     await main_module.run_bot(config)

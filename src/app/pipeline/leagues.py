@@ -1,7 +1,8 @@
 """Which stored leagues are the same competition, and one identity for provider fixtures.
 
-A league may be stored under two references (football-data history ``E0`` and API-Football
-``39``) until team matching unifies them; model fitting must read both. Fixtures fetched
+A league may be stored under several references (football-data history ``E0``, Football-Data.org
+``PL`` and the legacy API-Football ``39``) until team matching unifies them; model fitting must
+read all of them. Fixtures fetched
 from the provider are rewritten to the history identity (teams and league) before they are
 stored, so history and live data of a club share one row (``IdentityMap``, ADR 0007 §8).
 """
@@ -44,7 +45,7 @@ class LeagueDirectory:
         tracked = self._catalog.resolve(ref)
         if tracked is None:
             return (ref,)
-        return (tracked.football_data_ref, tracked.api_ref)
+        return (tracked.football_data_ref, tracked.provider_ref, tracked.api_ref)
 
     def canonical(self, ref: ExternalRef) -> ExternalRef:
         """The history reference of the competition (``ref`` itself when untracked)."""

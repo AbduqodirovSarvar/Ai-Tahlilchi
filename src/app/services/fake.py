@@ -25,6 +25,7 @@ from app.logging import get_logger
 from app.services._fake_browser import FakeDataBrowserService
 from app.services._fake_calls import FakeCallLogService
 from app.services._fake_learning import FakeLearningService, FakeLearningState
+from app.services._fake_matches import FakeMatchesService
 from app.services._fake_world import (
     EXPERIMENTAL_SPORTS,
     SPORT_MARKETS,
@@ -1504,11 +1505,12 @@ def create_fake_services(
     """
     state = FakeState(clock)
     bets = FakeBetService(state)
+    settings = FakeSettingsService(state)
     return Services(
         analysis=FakeAnalysisService(state),
         signals=FakeSignalService(state),
         catalog=FakeCatalogService(state),
-        settings=FakeSettingsService(state),
+        settings=settings,
         templates=FakeTemplateService(state),
         watchlist=FakeWatchlistService(state),
         bets=bets,
@@ -1519,4 +1521,5 @@ def create_fake_services(
         learning=FakeLearningService(state.learning),
         browser=FakeDataBrowserService(state, admin_ids=admin_ids),
         calls=FakeCallLogService(state, admin_ids=admin_ids),
+        matches=FakeMatchesService(settings),
     )

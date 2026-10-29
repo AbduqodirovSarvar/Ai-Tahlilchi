@@ -1,4 +1,4 @@
-"""A scripted data provider: serves the test world as if it were API-Football."""
+"""A scripted odds provider: serves the test world through the pipeline's provider port."""
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
@@ -21,11 +21,13 @@ from app.errors import ExternalServiceError
 from app.pipeline.errors import BudgetExhaustedError, ProviderUnavailableError
 from app.pipeline.provider import MANUAL, Purpose, QuotaSnapshot
 from app.sports.base import FixtureQuery
-from app.sports.football_mapping import SOURCE, SUPPORTED_MARKETS
 from tests.pipeline.world import START, World
 from tests.services.contract_suite import MutableClock
 
 API_LEAGUES = {"E0": "39", "SP1": "140"}
+# The source the stored test world was written under (league ids keep that numbering).
+SOURCE = "api-football"
+SUPPORTED_MARKETS = frozenset(MarketType)
 
 
 def _api_fixture(fixture: Fixture, number: int) -> Fixture:

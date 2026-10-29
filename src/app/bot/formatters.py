@@ -102,6 +102,11 @@ def clock(value: time) -> str:
     return value.strftime("%H:%M")
 
 
+def kickoff_stamp(moment: datetime, zone: ZoneInfo) -> str:
+    """``30.10.2026 21:00``: a kick-off (or any instant) in ``zone``, date always in full."""
+    return moment.astimezone(zone).strftime("%d.%m.%Y %H:%M")
+
+
 def short_date(day: date) -> str:
     """``25.10``."""
     return day.strftime("%d.%m")
@@ -243,12 +248,11 @@ def _note(text: str | None) -> str | None:
 
 def format_signal_card(signal: SignalView, zone: ZoneInfo) -> str:
     """The §6.2 signal card (HTML), with every flag that applies to the signal."""
-    local_kickoff = signal.kickoff.astimezone(zone)
     lines = [
         texts.CARD_HEADER.format(
             icon=texts.SPORT_ICONS[signal.sport],
             fixture=escape(signal.fixture_label),
-            time=clock(local_kickoff.time()),
+            time=kickoff_stamp(signal.kickoff, zone),
             league=escape(signal.league),
         ),
         texts.CARD_PICK.format(selection=selection_label(signal), odds=odds(signal.odds)),

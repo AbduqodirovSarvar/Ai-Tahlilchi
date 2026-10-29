@@ -22,9 +22,11 @@ async def test_run_real_wires_the_telegram_notifier(
     seen: dict[str, Any] = {}
     real_create = main_module.create_real_services
 
-    def spy_create(ctx: Any, notifier: Notifier | None = None, *, build: str = "") -> Any:
+    def spy_create(
+        ctx: Any, notifier: Notifier | None = None, *, build: str = "", matches: Any = None
+    ) -> Any:
         seen["notifier"], seen["build"] = notifier, build
-        return real_create(ctx, notifier=notifier, build=build)
+        return real_create(ctx, notifier=notifier, build=build, matches=matches)
 
     async def poll(
         dispatcher: Dispatcher, token: str, admins: frozenset[int], _s: Settings
@@ -39,7 +41,6 @@ async def test_run_real_wires_the_telegram_notifier(
         db_path=tmp_path / "wired.db",
         app_services="real",
         telegram_bot_token="42:TEST",
-        handicap_convention="home_line",
         admin_ids="1",
     )
 

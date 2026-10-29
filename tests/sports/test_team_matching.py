@@ -66,7 +66,12 @@ def test_default_leagues_are_the_ten_agreed_ones() -> None:
     epl = catalog.resolve(ExternalRef("football-data", "E0"))
     assert epl is not None
     assert epl.api_ref == ExternalRef("api-football", "39")
-    assert catalog.by_api_id(203) == TrackedLeague(203, "T1")
+    assert catalog.by_api_id(203) == TrackedLeague(203, "T1", "TSL")
+    assert epl.provider_ref == ExternalRef("football-data-org", "PL")
+    assert catalog.resolve(ExternalRef("football-data-org", "PL")) is epl
+    assert catalog.by_provider_code("PL") is epl
+    assert catalog.by_provider_code("XX") is None
+    assert catalog.by_provider_code(None) is None
     assert catalog.resolve(ExternalRef("api-football", "999")) is None
     assert catalog.by_api_id(999) is None
     assert epl.football_data_league().name == "Premier League"
@@ -74,7 +79,7 @@ def test_default_leagues_are_the_ten_agreed_ones() -> None:
 
 def test_catalog_rejects_duplicates() -> None:
     with pytest.raises(ValueError, match="unique"):
-        LeagueCatalog([*DEFAULT_LEAGUES, TrackedLeague(39, "X1")])
+        LeagueCatalog([*DEFAULT_LEAGUES, TrackedLeague(39, "X1", "X1")])
 
 
 @pytest.mark.parametrize(
