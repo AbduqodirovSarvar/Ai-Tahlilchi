@@ -7,6 +7,7 @@ returns the bot's :class:`~app.services.interfaces.Services` bundle plus the
 
 from dataclasses import dataclass
 
+from app.pipeline.analyst import Analyst
 from app.pipeline.context import PipelineContext
 from app.pipeline.delivery import Delivery
 from app.pipeline.forecast import Forecaster
@@ -58,6 +59,7 @@ def create_real_services(
     ``matches`` is the live match feed (``None``: ``FOOTBALL_DATA_ORG_KEY`` is not set).
     """
     core = Core(ctx, admin_ids=admin_ids)
+    forecaster = Forecaster(ctx)
     settings = RealSettingsService(core)
     services = Services(
         analysis=RealAnalysisService(core),
@@ -74,6 +76,6 @@ def create_real_services(
         learning=RealLearningService(core),
         browser=RealDataBrowserService(core),
         calls=RealCallLogService(core),
-        matches=RealMatchesService(matches, settings, Forecaster(ctx)),
+        matches=RealMatchesService(matches, settings, forecaster, Analyst(ctx, forecaster)),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

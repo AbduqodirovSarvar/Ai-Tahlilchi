@@ -186,9 +186,10 @@ def _clean_json(value: Json) -> Json:
     return value
 
 
-def _render(payload: dict[str, Json]) -> str:
+def render_payload(payload: dict[str, Json], instruction: str = _USER_INSTRUCTION) -> str:
+    """``instruction`` and the sanitised payload as compact JSON inside the data block."""
     body = json.dumps(_clean_json(payload), ensure_ascii=False, separators=(",", ":"))
-    return f"{_USER_INSTRUCTION}\n{DATA_OPEN}\n{body}\n{DATA_CLOSE}"
+    return f"{instruction}\n{DATA_OPEN}\n{body}\n{DATA_CLOSE}"
 
 
 def _review_payload(
@@ -238,10 +239,10 @@ def build_review_prompt(
     )
     full = plan
     prompt = load_prompt(*CONTEXT_CHECK_PROMPT)
-    text = _render(_review_payload(capped, context, plan))
+    text = render_payload(_review_payload(capped, context, plan))
     while _request_tokens(prompt, text) > token_budget and (smaller := _reduce(plan)) is not None:
         plan = smaller
-        text = _render(_review_payload(capped, context, plan))
+        text = render_payload(_review_payload(capped, context, plan))
     return BuiltPrompt(
         prompt=prompt,
         user=text,
@@ -269,7 +270,7 @@ def build_postmortem_prompt(case: PostmortemInput) -> BuiltPrompt:
         if case.original_note:
             review["note"] = case.original_note
         payload["original_review"] = review
-    text = _render(payload)
+    text = render_payload(payload)
     prompt = load_prompt(*POSTMORTEM_PROMPT)
     return BuiltPrompt(
         prompt=prompt,

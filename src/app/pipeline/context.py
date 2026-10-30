@@ -18,7 +18,14 @@ from app.pipeline.ledger import Ledger
 from app.pipeline.modeling import ModelCache
 from app.pipeline.overlay import LearningSource, NoLearning
 from app.pipeline.provider import SportProvider
-from app.pipeline.review import CandidateReviewer, NoPostmortem, NoReview, PostmortemAnalyst
+from app.pipeline.review import (
+    CandidateReviewer,
+    NoPickWriter,
+    NoPostmortem,
+    NoReview,
+    PickWriter,
+    PostmortemAnalyst,
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -38,6 +45,7 @@ class PipelineContext:
     reviewer: CandidateReviewer = field(default_factory=NoReview)
     learning: LearningSource = field(default_factory=NoLearning)
     postmortem: PostmortemAnalyst = field(default_factory=NoPostmortem)
+    pick_writer: PickWriter = field(default_factory=NoPickWriter)
     learning_settings: LearningSettings = field(default_factory=LearningSettings)
     models: ModelCache = field(init=False)
 

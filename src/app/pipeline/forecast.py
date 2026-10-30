@@ -49,8 +49,16 @@ FORECAST_MARKETS: Final = (
     Market.totals(2.5),
     Market.totals(3.5),
     Market.btts(),
+    Market.asian_handicap(0.0),
+    Market.asian_handicap(-1.0),
+    Market.asian_handicap(1.0),
 )
-"""What a forecast covers: result, double chance, goal lines and both teams to score."""
+"""What a forecast covers: result, double chance, goal lines, both teams to score, handicaps.
+
+Whole-line handicaps (0, -1, +1) refund the stake on the exact margin: their chance is the
+probability of a win, the refund is :attr:`Chance.push`.
+"""
+TEAM_GOALS_LINE: Final = 1.5
 TOP_SCORE_COUNT: Final = 3
 SECONDS_PER_DAY: Final = 86_400.0
 
@@ -60,6 +68,8 @@ class TeamPick(StrEnum):
 
     HOME_TO_SCORE = "home_to_score"
     AWAY_TO_SCORE = "away_to_score"
+    HOME_OVER_1_5 = "home_over_1_5"
+    AWAY_OVER_1_5 = "away_over_1_5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,11 +92,12 @@ class ForecastSkip(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Chance:
-    """The model probability of one selection."""
+    """The model probability of one selection (``push``: the stake comes back)."""
 
     market: Market
     selection: Selection
     probability: float
+    push: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +121,7 @@ class Forecast:
     team_matches: int = 0
     confidence: ConfidenceLevel | None = None
     cards: CardOutlook | None = None
+    fixture: Fixture | None = None  # the match in its history identity (forecasts only)
 
 
 class Forecaster:
@@ -137,7 +149,7 @@ class Forecaster:
             if forecast.skip is None:
                 league = self._ctx.leagues.canonical(fixture.league.ref)
                 cards = await card_outlook(self._cards, league, fixture, referees[match_id])
-                forecast = replace(forecast, cards=cards)
+                forecast = replace(forecast, cards=cards, fixture=fixture)
             forecasts[match_id] = forecast
         return forecasts
 
@@ -181,7 +193,12 @@ class Forecaster:
         except UnknownTeamError:
             return Forecast(match_id=match_id, skip=ForecastSkip.UNKNOWN_TEAM, team_matches=played)
         chances = tuple(
-            Chance(market, selection, probabilities.win_probability(selection))
+            Chance(
+                market,
+                selection,
+                probabilities.win_probability(selection),
+                probabilities.outcomes[selection].push,
+            )
             for market, probabilities in predicted.items()
             for selection in market.selections
         )
@@ -222,13 +239,23 @@ class Forecaster:
 
 
 def team_chances(matrix: FloatArray) -> tuple[TeamChance, ...]:
-    """Each team scoring at least once: one minus its row (home) or column (away) of zeros."""
-    home_blank = float(matrix[0, :].sum())
-    away_blank = float(matrix[:, 0].sum())
+    """Team totals: each side scoring at least once, and more than :data:`TEAM_GOALS_LINE`.
+
+    A side's goal distribution is the matrix summed over the other side (rows are home goals).
+    """
+    home_goals = matrix.sum(axis=1)
+    away_goals = matrix.sum(axis=0)
     return (
-        TeamChance(TeamPick.HOME_TO_SCORE, min(max(1.0 - home_blank, 0.0), 1.0)),
-        TeamChance(TeamPick.AWAY_TO_SCORE, min(max(1.0 - away_blank, 0.0), 1.0)),
+        TeamChance(TeamPick.HOME_TO_SCORE, _over(home_goals, 0)),
+        TeamChance(TeamPick.AWAY_TO_SCORE, _over(away_goals, 0)),
+        TeamChance(TeamPick.HOME_OVER_1_5, _over(home_goals, int(TEAM_GOALS_LINE))),
+        TeamChance(TeamPick.AWAY_OVER_1_5, _over(away_goals, int(TEAM_GOALS_LINE))),
     )
+
+
+def _over(goals: FloatArray, at_most: int) -> float:
+    """``P(goals > at_most)`` of a goal distribution, kept inside [0, 1]."""
+    return min(max(1.0 - float(goals[: at_most + 1].sum()), 0.0), 1.0)
 
 
 def chances_of(forecast: Forecast, market: Market) -> Mapping[Selection, float]:

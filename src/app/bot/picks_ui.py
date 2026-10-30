@@ -15,7 +15,7 @@ from app.bot import texts
 from app.bot.callbacks import MatchCb
 from app.bot.formatters import kickoff_stamp, odds, percent
 from app.bot.keyboards import markup_of, single_button
-from app.domain import MarketType
+from app.domain import MarketType, Selection
 from app.services.interfaces import CardChance, CardScope, MatchItem, OutcomeChance, TopPick
 
 _NO_VALUE = "—"
@@ -37,8 +37,18 @@ def _outcome_label(outcome: OutcomeChance, match: MatchItem) -> str:
             return texts.PICK_TOTALS_LABELS[selection].format(line=outcome.market.line)
         case MarketType.BTTS:
             return texts.PICK_BTTS_LABELS[selection]
-        case _:
-            return escape(f"{outcome.market.type.value} {selection}")
+        case MarketType.ASIAN_HANDICAP:
+            return _handicap_label(outcome, match)
+
+
+def _handicap_label(outcome: OutcomeChance, match: MatchItem) -> str:
+    """``Fora (-1) — Arsenal``: the market line is the home team's; the away side's is negated."""
+    home_line = outcome.market.line or 0.0
+    is_home = outcome.selection is Selection.HOME
+    line = home_line if is_home else -home_line
+    return texts.PICK_HANDICAP_LABEL.format(
+        line=f"{line:+g}" if line else "0", team=_team(match.home if is_home else match.away)
+    )
 
 
 def card_label(card: CardChance, match: MatchItem) -> str:

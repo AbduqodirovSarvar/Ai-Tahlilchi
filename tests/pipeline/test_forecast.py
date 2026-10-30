@@ -89,3 +89,24 @@ async def test_team_scoring_chances_agree_with_btts(seeded_env: Env) -> None:
     home, away = by_pick[TeamPick.HOME_TO_SCORE], by_pick[TeamPick.AWAY_TO_SCORE]
     both = chances_of(forecast, Market.btts())[Selection.YES]
     assert 0.0 < both <= min(home, away) <= max(home, away) < 1.0
+
+
+async def test_handicaps_carry_their_refund_and_team_totals_nest(seeded_env: Env) -> None:
+    [forecast] = (
+        await Forecaster(seeded_env.ctx).forecast([match(9, "Arsenal", "Chelsea")])
+    ).values()
+    by_key = {(c.market, c.selection): c for c in forecast.chances}
+    level = by_key[(Market.asian_handicap(0.0), Selection.HOME)]
+    home_win = chances_of(forecast, Market.match_result())[Selection.HOME]
+    draw = chances_of(forecast, Market.match_result())[Selection.DRAW]
+    assert level.probability == pytest.approx(home_win)
+    assert level.push == pytest.approx(draw)
+    plus_one = by_key[(Market.asian_handicap(1.0), Selection.HOME)]
+    not_lose = chances_of(forecast, Market.double_chance())[Selection.HOME_OR_DRAW]
+    assert plus_one.probability == pytest.approx(not_lose)
+    assert plus_one.push > 0.0
+    assert by_key[(Market.btts(), Selection.YES)].push == 0.0
+    team = {c.pick: c.probability for c in forecast.team_chances}
+    assert 0.0 < team[TeamPick.HOME_OVER_1_5] < team[TeamPick.HOME_TO_SCORE]
+    assert 0.0 < team[TeamPick.AWAY_OVER_1_5] < team[TeamPick.AWAY_TO_SCORE]
+    assert forecast.fixture is not None

@@ -18,6 +18,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from app.bot import texts
 from app.bot.callbacks import MatchCb
 from app.bot.draft import StaleDraftError
+from app.bot.expert_ui import format_expert_report
 from app.bot.flow import FlowContext, FlowContextMiddleware
 from app.bot.forecast_ui import (
     day_forecast_keyboard,
@@ -156,6 +157,17 @@ async def on_picks(callback: CallbackQuery, callback_data: MatchCb, flow: FlowCo
     )
 
 
+async def on_expert(callback: CallbackQuery, callback_data: MatchCb, flow: FlowContext) -> None:
+    """🧠 Ekspert tahlili of the day: 1-2 picks for every match, sent as new message(s)."""
+    await answer_callback(callback)
+    message = _message_of(callback)
+    day = await _day_of(callback_data.d, flow)
+    await edit_html(message, texts.EXPERT_PROGRESS)
+    report = await flow.services.matches.expert_picks(flow.user_id, day, day)
+    text = format_expert_report(report, day_from=day, day_to=day, zone=await flow.zone())
+    await send_html(message, text, top_picks_keyboard(day))
+
+
 def create_router() -> Router:
     """Build a fresh router (an aiogram router can be attached to only one dispatcher)."""
     router = Router(name="matches")
@@ -171,6 +183,7 @@ def create_router() -> Router:
         ("fday", on_forecast_day),
         ("fmatch", on_forecast_match),
         ("picks", on_picks),
+        ("expert", on_expert),
     ):
         router.callback_query.register(handler, MatchCb.filter(F.action == action))
     return router

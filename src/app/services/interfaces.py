@@ -2787,15 +2787,21 @@ class ForecastStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class OutcomeChance:
-    """The model probability of one selection and its fair (margin-free) odds."""
+    """The model probability of one selection and its fair (margin-free) odds.
+
+    ``push`` (v1.16) is the chance the stake comes back (a whole-line handicap on its exact
+    margin); 0 for every other market.
+    """
 
     market: Market
     selection: Selection
     probability: float
+    push: float = 0.0
 
     def __post_init__(self) -> None:
-        """A probability is within [0, 1]."""
+        """Probabilities are within [0, 1]."""
         _check_range(self.probability, "probability", 0.0, 1.0)
+        _check_range(self.push, "push", 0.0, 1.0)
 
     @property
     def fair_odds(self) -> float | None:
@@ -2804,10 +2810,12 @@ class OutcomeChance:
 
 
 class TeamPick(StrEnum):
-    """Team-level forecast selections (v1.14)."""
+    """Team-level forecast selections (v1.14; over 1.5 goals v1.16)."""
 
     HOME_TO_SCORE = "home_to_score"
     AWAY_TO_SCORE = "away_to_score"
+    HOME_OVER_1_5 = "home_over_1_5"
+    AWAY_OVER_1_5 = "away_over_1_5"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3003,6 +3011,123 @@ def rank_picks(
     return tuple(chosen[:limit])
 
 
+# ------------------------------------------------------------------ expert picks (v1.16)
+SAFE_FROM: Final = 0.70
+OPTIMAL_FROM: Final = 0.55
+RISKY_FROM: Final = 0.40
+
+
+class RiskLevel(StrEnum):
+    """How likely a pick is to pass, in the analyst's words (v1.16)."""
+
+    SAFE = "safe"  # >= 70%
+    OPTIMAL = "optimal"  # 55-69%
+    RISKY = "risky"  # 40-54%
+    LONG_SHOT = "long_shot"  # < 40%: still the best this match offers
+
+
+def risk_level(probability: float) -> RiskLevel:
+    """The band of ``probability`` (one rule for every implementation)."""
+    if probability >= SAFE_FROM:
+        return RiskLevel.SAFE
+    if probability >= OPTIMAL_FROM:
+        return RiskLevel.OPTIMAL
+    if probability >= RISKY_FROM:
+        return RiskLevel.RISKY
+    return RiskLevel.LONG_SHOT
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VenueRecord:
+    """Wins, draws, losses and goals of a side's recent home (or away) matches."""
+
+    played: int = 0
+    wins: int = 0
+    draws: int = 0
+    losses: int = 0
+    goals_for: int = 0
+    goals_against: int = 0
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TeamFacts:
+    """One side's history facts: form oldest first (``"WDLWW"``), averages over ``sample``."""
+
+    form: str
+    venue: VenueRecord
+    goals_for_avg: float
+    goals_against_avg: float
+    over_2_5_share: float
+    btts_share: float
+    sample: int
+    position: int | None = None
+    points: int | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Meeting:
+    """A previous meeting of the two sides."""
+
+    day: date
+    home: str
+    away: str
+    home_goals: int
+    away_goals: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MatchFacts:
+    """Facts of both sides and their last meetings (newest first)."""
+
+    home: TeamFacts
+    away: TeamFacts
+    meetings: tuple[Meeting, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExpertPick:
+    """A pick with the model's probability; ``reason`` is the AI's (``None``: word the facts)."""
+
+    pick: TopPick
+    reason: str | None = None
+
+    @property
+    def probability(self) -> float:
+        """The model probability that the pick passes."""
+        return self.pick.probability
+
+    @property
+    def risk(self) -> RiskLevel:
+        """The pick's risk band."""
+        return risk_level(self.probability)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExpertMatch:
+    """One match with 1-2 picks (v1.16)."""
+
+    match: MatchItem
+    picks: tuple[ExpertPick, ...]
+    facts: MatchFacts | None = None
+    by_ai: bool = False
+
+    def __post_init__(self) -> None:
+        """Every listed match has at least one pick, at most :data:`PICKS_PER_MATCH`."""
+        _check(1 <= len(self.picks) <= PICKS_PER_MATCH, "picks", "1..2 picks per match")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExpertReport:
+    """Picks of every forecastable match still to play, earliest first (v1.16).
+
+    ``without_forecast`` counts the matches of the window that have no model (untracked
+    league, thin history...), so the reader knows they were not forgotten.
+    """
+
+    matches: tuple[ExpertMatch, ...] = ()
+    without_forecast: int = 0
+
+
 class MatchesService(Protocol):
     """Live match list and match sheets, always asked from the provider (v1.12)."""
 
@@ -3048,6 +3173,18 @@ class MatchesService(Protocol):
         """The most likely picks of the user's local days, without odds (v1.14).
 
         Ranked by :func:`rank_picks` with the user's ``min_probability``.
+
+        Raises:
+            ValidationFailedError: the range breaks :func:`check_match_days`.
+            ServiceUnavailableError: the provider is down or not configured.
+        """
+        ...
+
+    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
+        """1-2 picks for every match of the user's local days still to play (v1.16).
+
+        No odds and no probability floor: each forecastable match gets its best options, with
+        the model's probability, a :class:`RiskLevel` and a reason (AI, or facts to word).
 
         Raises:
             ValidationFailedError: the range breaks :func:`check_match_days`.

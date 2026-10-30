@@ -23,6 +23,7 @@ from app.llm.inputs import (
     PostmortemInput,
     TeamForm,
 )
+from app.llm.picks import MatchPicksInput, PickChoice
 from app.llm.schemas import PostmortemResult, ReviewStatus
 from app.llm.schemas import Verdict as LlmVerdictWire
 from app.llm.service import LlmService
@@ -289,3 +290,42 @@ class LlmPostmortemAnalyst:
         except Exception as error:  # the contract says it never raises; a bug must not stop the job
             logger.warning("postmortem_failed", error=repr(error))
             return None
+
+
+class PickWriter(Protocol):
+    """Chooses 1-2 of each match's priced options and says why (the analyst's picks)."""
+
+    async def write(
+        self, matches: Sequence[MatchPicksInput]
+    ) -> Mapping[str, tuple[PickChoice, ...]]:
+        """``match_id -> choices``; a match left out is chosen by rule."""
+        ...
+
+
+class NoPickWriter:
+    """The default writer: never answers, so every match is chosen by rule."""
+
+    async def write(
+        self,
+        matches: Sequence[MatchPicksInput],  # noqa: ARG002 - protocol signature
+    ) -> Mapping[str, tuple[PickChoice, ...]]:
+        """No answer."""
+        return {}
+
+
+class LlmPickWriter:
+    """Adapts :meth:`app.llm.service.LlmService.write_picks` (which never raises) to the port."""
+
+    def __init__(self, service: LlmService) -> None:
+        """Write through ``service`` (shared with the reviewer, so is the daily budget)."""
+        self._service = service
+
+    async def write(
+        self, matches: Sequence[MatchPicksInput]
+    ) -> Mapping[str, tuple[PickChoice, ...]]:
+        """The service's choices; an unexpected failure is the same as no answer."""
+        try:
+            return await self._service.write_picks(matches)
+        except Exception as error:  # the contract says it never raises; a bug must not stop picks
+            logger.warning("pick_writer_failed", error=repr(error))
+            return {}

@@ -11,6 +11,7 @@ from datetime import date
 from typing import Final
 
 from app.logging import get_logger
+from app.pipeline.analyst import Analyst
 from app.pipeline.card_forecast import CardOutlook as PipelineCardOutlook
 from app.pipeline.errors import MatchNotFoundError, ProviderUnavailableError
 from app.pipeline.forecast import Forecast, Forecaster
@@ -21,6 +22,7 @@ from app.services.interfaces import (
     CardOutlook,
     CardScope,
     ConfidenceLevel,
+    ExpertReport,
     ForecastLine,
     ForecastStatus,
     LineupPlayer,
@@ -38,6 +40,7 @@ from app.services.interfaces import (
     check_match_days,
     rank_picks,
 )
+from app.services.real.expert import expert_report
 
 logger = get_logger(__name__)
 
@@ -69,11 +72,13 @@ class RealMatchesService:
         feed: MatchFeed | None,
         settings: SettingsService,
         forecaster: Forecaster | None = None,
+        analyst: Analyst | None = None,
     ) -> None:
-        """Wire the feed, the source of the user's time zone and the model forecasts."""
+        """Wire the feed, the user's time zone source, the forecasts and the analyst."""
         self._feed = feed
         self._settings = settings
         self._forecaster = forecaster
+        self._analyst = analyst
 
     async def list_matches(
         self, user_id: int, day_from: date, day_to: date
@@ -96,6 +101,19 @@ class RealMatchesService:
         settings = await self._settings.get_settings(user_id)
         lines = await self._lines(user_id, day_from, day_to)
         return rank_picks(lines, min_probability=settings.min_probability)
+
+    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
+        """See :meth:`app.services.interfaces.MatchesService.expert_picks`."""
+        check_match_days(day_from, day_to)
+        upcoming = [
+            match
+            for match in await self._day(user_id, day_from, day_to)
+            if _STATES.get(match.status) is MatchState.SCHEDULED
+        ]
+        items = [match_item(match) for match in upcoming]
+        if self._analyst is None or not upcoming:
+            return ExpertReport(without_forecast=len(items))
+        return expert_report(items, await self._analyst.analyse(upcoming))
 
     async def _lines(self, user_id: int, day_from: date, day_to: date) -> tuple[ForecastLine, ...]:
         matches = await self._day(user_id, day_from, day_to)
@@ -204,7 +222,12 @@ def match_forecast(forecast: Forecast) -> MatchForecast:
         match_id=forecast.match_id,
         status=ForecastStatus.READY,
         chances=tuple(
-            OutcomeChance(market=c.market, selection=c.selection, probability=_unit(c.probability))
+            OutcomeChance(
+                market=c.market,
+                selection=c.selection,
+                probability=_unit(c.probability),
+                push=_unit(c.push),
+            )
             for c in forecast.chances
         ),
         scores=tuple(

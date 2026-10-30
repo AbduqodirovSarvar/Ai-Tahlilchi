@@ -39,6 +39,14 @@ from app.llm.builder import (
 )
 from app.llm.guard import unknown_names
 from app.llm.inputs import CandidateInput, ExperienceContext, PostmortemInput
+from app.llm.picks import (
+    MAX_MATCHES_PER_REQUEST,
+    MAX_PICKS_PER_MATCH,
+    MatchPicksInput,
+    PickChoice,
+    PicksResponse,
+    build_picks_prompt,
+)
 from app.llm.schemas import (
     FLAG_NOTE_SUSPICIOUS,
     FLAG_NOTE_TOO_LONG,
@@ -61,10 +69,12 @@ MAX_NOTE_CHARS: Final = 400
 # Output tokens the budget guard reserves per candidate before the real usage is known.
 EXPECTED_OUTPUT_TOKENS_PER_CANDIDATE: Final = 120
 EXPECTED_OUTPUT_TOKENS_POSTMORTEM: Final = 150
+EXPECTED_OUTPUT_TOKENS_PER_MATCH: Final = 160
 
 # Task names the provider call log shows for each request (instead of the schema class name).
 OPERATION_REVIEW: Final = "llm_review"
 OPERATION_POSTMORTEM: Final = "post_mortem"
+OPERATION_PICKS: Final = "match_picks"
 
 REASON_DISABLED: Final = "llm_disabled"
 REASON_BUDGET: Final = "budget_exhausted"
@@ -153,6 +163,51 @@ class LlmService:
             input_tokens=outcome.input_tokens,
             output_tokens=outcome.output_tokens,
         )
+
+    async def write_picks(
+        self, matches: Sequence[MatchPicksInput]
+    ) -> dict[str, tuple[PickChoice, ...]]:
+        """``match_id -> 1..2 chosen options`` in batches; never raises.
+
+        A match missing from the answer (LLM off, over budget, down, or a bad answer) is the
+        caller's to decide without the LLM. Only option ids of that match are accepted.
+        """
+        chosen: dict[str, tuple[PickChoice, ...]] = {}
+        for start in range(0, len(matches), MAX_MATCHES_PER_REQUEST):
+            batch = tuple(matches[start : start + MAX_MATCHES_PER_REQUEST])
+            try:
+                chosen.update(await self._picks(batch))
+            except Exception:
+                # Optional enhancement: the picks still go out, chosen by rule instead.
+                logger.warning("llm_picks_unexpected_error", exc_info=True)
+        return chosen
+
+    async def _picks(self, batch: tuple[MatchPicksInput, ...]) -> dict[str, tuple[PickChoice, ...]]:
+        built = build_picks_prompt(batch)
+        outcome = await self._ask(
+            built,
+            PicksResponse,
+            expected_output=EXPECTED_OUTPUT_TOKENS_PER_MATCH * len(batch),
+            operation=OPERATION_PICKS,
+        )
+        if outcome.parsed is None:
+            logger.info("llm_picks_skipped", reason=outcome.reason, matches=len(batch))
+            return {}
+        allowed = {match.match_id: {o.option_id for o in match.options} for match in batch}
+        chosen: dict[str, tuple[PickChoice, ...]] = {}
+        for answer in outcome.parsed.matches:
+            options = allowed.get(answer.match_id)
+            if options is None or answer.match_id in chosen:
+                continue
+            picks: dict[str, PickChoice] = {}
+            for item in answer.picks:
+                if item.option_id in options and item.option_id not in picks:
+                    reason, _flags = _guard_note(item.reason, built.data_text)
+                    picks[item.option_id] = PickChoice(item.option_id, reason)
+            if picks:
+                chosen[answer.match_id] = tuple(picks.values())[:MAX_PICKS_PER_MATCH]
+        logger.info("llm_picks_done", asked=len(batch), answered=len(chosen))
+        return chosen
 
     async def _review(
         self, candidates: Sequence[CandidateInput], context: ExperienceContext | None

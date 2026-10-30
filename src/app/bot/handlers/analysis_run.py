@@ -16,6 +16,7 @@ from aiogram.types import Message
 
 from app.bot import keyboards, texts
 from app.bot.draft import WizardDraft
+from app.bot.expert_ui import format_expert_report
 from app.bot.formatters import (
     format_results_summary,
     ordered_for_display,
@@ -25,7 +26,6 @@ from app.bot.formatters import (
 from app.bot.jobs import BackgroundJobs
 from app.bot.messaging import edit_html, send_html
 from app.bot.middleware import ErrorReply, error_reply
-from app.bot.picks_ui import format_top_picks
 from app.bot.session import WizardSession
 from app.bot.states import AnalysisFlow, drop_draft, load_draft, next_results
 from app.bot.wizard import render, summary_fields
@@ -166,11 +166,11 @@ async def _deliver(run: _Run, result: AnalysisResult, reporter: ProgressReporter
     await send_html(run.wizard_message, format_results_summary(result), markup)
     await send_result_page(run.wizard_message, ordered, session.ctx.zone, 0, stored.token)
     if not result.signals and result.skipped_no_price and not result.retro:
-        await _send_top_picks(run, result.window)
+        await _send_expert_picks(run, result.window)
 
 
-async def _send_top_picks(run: _Run, window: DateWindow) -> None:
-    """No signal for want of prices: send the model's most likely picks of the same days.
+async def _send_expert_picks(run: _Run, window: DateWindow) -> None:
+    """No signal for want of prices: send 1-2 picks for every match of the same days.
 
     A failure here only says so: the analysis result above is already delivered.
     """
@@ -179,20 +179,13 @@ async def _send_top_picks(run: _Run, window: DateWindow) -> None:
     day_to = min(window.date_to, day_from + timedelta(days=MAX_MATCH_DAYS - 1))
     try:
         check_match_days(day_from, day_to)
-        picks = await ctx.services.matches.top_picks(ctx.user_id, day_from, day_to)
-        settings = await ctx.services.settings.get_settings(ctx.user_id)
+        report = await ctx.services.matches.expert_picks(ctx.user_id, day_from, day_to)
     except ServiceError as error:
-        logger.warning("top_picks_after_analysis_failed", user_id=ctx.user_id, error=str(error))
-        await send_html(run.wizard_message, texts.TOP_PICKS_UNAVAILABLE.format(reason=str(error)))
+        logger.warning("expert_after_analysis_failed", user_id=ctx.user_id, error=str(error))
+        await send_html(run.wizard_message, texts.EXPERT_UNAVAILABLE.format(reason=str(error)))
         return
-    text = format_top_picks(
-        picks,
-        day_from=day_from,
-        day_to=day_to,
-        min_probability=settings.min_probability,
-        zone=ctx.zone,
-    )
-    await send_html(run.wizard_message, f"{texts.TOP_PICKS_AFTER_ANALYSIS}\n\n{text}")
+    text = format_expert_report(report, day_from=day_from, day_to=day_to, zone=ctx.zone)
+    await send_html(run.wizard_message, f"{texts.EXPERT_AFTER_ANALYSIS}\n\n{text}")
 
 
 async def _abort(run: _Run, reply: ErrorReply, *, progress_text: str) -> None:

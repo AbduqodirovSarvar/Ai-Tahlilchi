@@ -17,9 +17,13 @@ from app.services.interfaces import (
     CardOutlook,
     CardScope,
     ConfidenceLevel,
+    ExpertMatch,
+    ExpertPick,
+    ExpertReport,
     ForecastLine,
     ForecastStatus,
     LineupPlayer,
+    MatchFacts,
     MatchForecast,
     MatchItem,
     MatchSheet,
@@ -29,8 +33,10 @@ from app.services.interfaces import (
     SettingsService,
     SideLineup,
     TeamChance,
+    TeamFacts,
     TeamPick,
     TopPick,
+    VenueRecord,
     check_match_days,
     rank_picks,
 )
@@ -111,6 +117,21 @@ class FakeMatchesService:
         settings = await self._settings.get_settings(user_id)
         return rank_picks(lines, min_probability=settings.min_probability)
 
+    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
+        """See :meth:`app.services.interfaces.MatchesService.expert_picks`."""
+        items = await self.list_matches(user_id, day_from, day_to)
+        upcoming = [item for item in items if item.state is MatchState.SCHEDULED]
+        matches = tuple(
+            ExpertMatch(
+                match=item,
+                picks=sample_expert_picks(item, with_reason=index == 0),
+                facts=SAMPLE_FACTS,
+                by_ai=index == 0,
+            )
+            for index, item in enumerate(upcoming)
+        )
+        return ExpertReport(matches=matches)
+
     async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:
         """See :meth:`app.services.interfaces.MatchesService.forecast_match`."""
         sheet = await self.get_match(user_id, match_id)
@@ -157,3 +178,40 @@ def sample_forecast(match_id: int) -> MatchForecast:
             ),
         ),
     )
+
+
+SAMPLE_FACTS: Final = MatchFacts(
+    home=TeamFacts(
+        form="WWDWL",
+        venue=VenueRecord(played=5, wins=4, draws=1, goals_for=11, goals_against=4),
+        goals_for_avg=2.1,
+        goals_against_avg=0.9,
+        over_2_5_share=0.6,
+        btts_share=0.5,
+        sample=10,
+        position=2,
+        points=21,
+    ),
+    away=TeamFacts(
+        form="LDWLL",
+        venue=VenueRecord(played=5, wins=1, draws=1, losses=3, goals_for=5, goals_against=9),
+        goals_for_avg=1.1,
+        goals_against_avg=1.7,
+        over_2_5_share=0.5,
+        btts_share=0.6,
+        sample=10,
+        position=14,
+        points=9,
+    ),
+)
+SAMPLE_REASON: Final = (
+    "Mezbon uyda so'nggi 5 o'yinda 4 marta yutgan, mehmon safarda 5 o'yindan 3 tasida yutqazgan."
+)
+
+
+def sample_expert_picks(item: MatchItem, *, with_reason: bool) -> tuple[ExpertPick, ...]:
+    """The two likeliest sample picks of a match; only the first carries an AI reason."""
+    line = ForecastLine(match=item, forecast=sample_forecast(item.match_id))
+    picks = rank_picks([line], min_probability=0.0)
+    reason = SAMPLE_REASON if with_reason else None
+    return tuple(ExpertPick(pick=pick, reason=reason) for pick in picks)

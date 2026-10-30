@@ -28,6 +28,9 @@ from app.services.interfaces import (
     CardOutlook,
     CardScope,
     ConfidenceLevel,
+    ExpertMatch,
+    ExpertPick,
+    ExpertReport,
     ForecastLine,
     ForecastStatus,
     LineupPlayer,
@@ -175,6 +178,18 @@ class StubMatches:
                 team=TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.81),
                 confidence=ConfidenceLevel.MEDIUM,
             ),
+        )
+
+    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:  # noqa: ARG002 - protocol signature
+        self.days.append((day_from, day_to))
+        pick = ExpertPick(
+            pick=TopPick(
+                match=item(1), team=TeamChance(pick=TeamPick.HOME_TO_SCORE, probability=0.81)
+            ),
+            reason="Uyda kuchli <b>.",
+        )
+        return ExpertReport(
+            matches=(ExpertMatch(match=item(1), picks=(pick,)),), without_forecast=1
         )
 
     async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:  # noqa: ARG002 - protocol signature
@@ -442,3 +457,16 @@ def test_day_forecast_mentions_cards() -> None:
 )
 def test_card_pick_labels(card: CardChance, label: str) -> None:
     assert pick_label(TopPick(match=item(1), card=card)) == label
+
+
+async def test_expert_button_sends_the_report(harness: BotHarness, stub: StubMatches) -> None:
+    await harness.send(texts.MENU_MATCHES)
+    await harness.press(texts.BTN_EXPERT)
+    text = harness.last_text
+    assert "🧠 <b>Ekspert tahlili · 21.10.2026</b> — 1 ta o'yin" in text
+    assert "📊 <b>O'tish ehtimoli:</b> 81% (🟢 Ishonchli)" in text
+    assert "Uyda kuchli &lt;b&gt;." in text
+    assert texts.EXPERT_WITHOUT_FORECAST.format(count=1) in text
+    assert stub.days[-1] == (TODAY, TODAY)
+    await harness.press(texts.BTN_FORECAST_BACK)
+    assert "⚽ <b>O'yinlar" in harness.last_text

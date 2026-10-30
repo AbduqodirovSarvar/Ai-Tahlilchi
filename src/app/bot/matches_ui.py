@@ -153,6 +153,7 @@ def matches_keyboard(
         [
             single_button(texts.BTN_FORECAST_DAY, MatchCb(action="fday", d=ordinal)),
             single_button(texts.BTN_TOP_PICKS, MatchCb(action="picks", d=ordinal)),
+            single_button(texts.BTN_EXPERT, MatchCb(action="expert", d=ordinal)),
         ]
         if items
         else []

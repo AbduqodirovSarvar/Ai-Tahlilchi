@@ -1586,11 +1586,6 @@ TOP_PICKS_EMPTY: Final = (
 )
 TOP_PICK_LINE: Final = "{n}. <b>{probability}</b> · {label} · adolatli koeff. {fair}{confidence}"
 TOP_PICK_MATCH: Final = "   {kickoff} · {home} — {away} · {competition}"
-TOP_PICKS_AFTER_ANALYSIS: Final = (
-    "💡 Koeffitsient bo'lmagani uchun signal chiqmadi. Quyida o'sha kunlar uchun model "
-    "bashorati: o'tish ehtimoli eng yuqori tanlovlar."
-)
-TOP_PICKS_UNAVAILABLE: Final = "ℹ️ Koeffitsientsiz tanlovlarni hozir olib bo'lmadi: {reason}"
 PICK_RESULT_LABELS: Final[dict[str, str]] = {
     "home": "1 — {home} yutadi",
     "draw": "X — durang",
@@ -1612,7 +1607,11 @@ PICK_BTTS_LABELS: Final[dict[str, str]] = {
 PICK_TEAM_LABELS: Final[dict[str, str]] = {
     "home_to_score": "{home} gol uradi",
     "away_to_score": "{away} gol uradi",
+    "home_over_1_5": "{home} 1.5 dan ko'p gol uradi",
+    "away_over_1_5": "{away} 1.5 dan ko'p gol uradi",
 }
+# Whole-line handicap on the named team; {line} carries its sign ("+1", "-1", "0").
+PICK_HANDICAP_LABEL: Final = "Fora ({line}) — {team}"
 FORECAST_SECTION_TEAMS: Final = "<b>Gol uradi</b>: {home} {home_chance} · {away} {away_chance}"
 
 # --------------------------------------------------------------------------- yellow cards
@@ -1638,3 +1637,53 @@ PICK_CARD_TEAM: Final[dict[bool, str]] = {
     True: "{team} {line} dan ko'p sariq kartochka oladi",
     False: "{team} {line} dan kam sariq kartochka oladi",
 }
+
+
+# --------------------------------------------------------------------------- expert picks (v1.16)
+BTN_EXPERT: Final = "🧠 Ekspert tahlili"
+EXPERT_TITLE: Final = "🧠 <b>Ekspert tahlili · {window}</b> — {count} ta o'yin"
+EXPERT_NOTE: Final = (
+    "<i>Koeffitsientsiz. Ehtimollik modelniki (tarixiy natijalar), tanlov va sabab {source}.</i>"
+)
+EXPERT_SOURCE_AI: Final = "AI tahlilchiniki"
+EXPERT_SOURCE_RULE: Final = "faktlardan"
+EXPERT_EMPTY: Final = "Bu kunlarda tahlil qilinadigan, hali boshlanmagan o'yin yo'q."
+EXPERT_WITHOUT_FORECAST: Final = (
+    "ℹ️ Yana {count} ta o'yin uchun bashorat yo'q (liga kuzatilmaydi yoki tarix yetarli emas)."
+)
+EXPERT_MATCH: Final = "⚽ <b>{home} — {away}</b>"
+EXPERT_META: Final = "🏆 Liga: {league} | ⏰ Vaqt: {kickoff}"
+EXPERT_PICK: Final = "🎯 <b>Tavsiya:</b> {label}"
+EXPERT_PROBABILITY: Final = "📊 <b>O'tish ehtimoli:</b> {probability} ({risk}){push}"
+EXPERT_PUSH: Final = " · qaytish {push}"
+EXPERT_REASON: Final = "📝 <b>Qisqa sabab:</b> {reason}"
+EXPERT_AFTER_ANALYSIS: Final = (
+    "💡 Koeffitsient bo'lmagani uchun signal chiqmadi. Quyida o'sha kunlar uchun ekspert "
+    "tahlili: har bir o'yinga o'tish ehtimoli eng yuqori 1–2 ta tanlov."
+)
+EXPERT_PROGRESS: Final = "⏳ Ekspert tahlili tayyorlanmoqda, AI bilan biroz vaqt olishi mumkin…"
+EXPERT_UNAVAILABLE: Final = "⚠️ Ekspert tahlilini olib bo'lmadi: {reason}"
+PICK_RISK_LABELS: Final[dict[str, str]] = {
+    "safe": "🟢 Ishonchli",
+    "optimal": "🟡 O'rtacha",
+    "risky": "🔴 Tavakkal",
+    "long_shot": "⚪ Juda tavakkal",
+}
+# Reasons worded from the history facts when the AI gave none.
+EXPERT_REASON_RESULT: Final = (
+    "{team} formasi {form}, {venue} so'nggi {played} o'yinda {wins} g'alaba, {draws} durang, "
+    "{losses} mag'lubiyat; {other} formasi {other_form}."
+)
+EXPERT_REASON_TABLE: Final = " Jadvalda {home_position}- va {away_position}-o'rinlar."
+EXPERT_VENUE: Final[dict[bool, str]] = {True: "uyda", False: "safarda"}
+EXPERT_REASON_GOALS: Final = (
+    "{home} o'rtacha {home_for} gol uradi va {home_against} o'tkazadi, {away}: {away_for} / "
+    "{away_against}; Total 2.5 dan ko'p {home_over} va {away_over} o'yinlarda."
+)
+EXPERT_REASON_BTTS: Final = (
+    "Ikkala jamoa gol urgan o'yinlar: {home} {home_btts}, {away} {away_btts}; o'rtacha "
+    "urilgan gollar {home_for} va {away_for}."
+)
+EXPERT_REASON_H2H: Final = " O'zaro so'nggi o'yin: {home} {home_goals}-{away_goals} {away} ({day})."
+EXPERT_REASON_MODEL: Final = "Model baholashi: jamoalarning tarixiy natijalari asosida."
+FORM_LETTERS: Final[dict[str, str]] = {"W": "G", "D": "D", "L": "M"}

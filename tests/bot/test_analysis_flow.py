@@ -363,7 +363,7 @@ async def test_progress_message_is_edited(harness: BotHarness) -> None:
     assert edits[-1].text.startswith("✅")
 
 
-async def test_no_price_analysis_is_followed_by_the_most_likely_picks(harness: BotHarness) -> None:
+async def test_no_price_analysis_is_followed_by_expert_picks(harness: BotHarness) -> None:
     window = DateWindow(TODAY, TODAY)
     no_price = AnalysisResult(
         query_id="q1",
@@ -382,9 +382,10 @@ async def test_no_price_analysis_is_followed_by_the_most_likely_picks(harness: B
 
     shown = sent_texts(methods)
     assert any(texts.RESULTS_NO_PRICE.format(count=4) in text for text in shown)
-    picks = [text for text in shown if text.startswith(texts.TOP_PICKS_AFTER_ANALYSIS)]
+    picks = [text for text in shown if text.startswith(texts.EXPERT_AFTER_ANALYSIS)]
     assert len(picks) == 1
-    assert "🎯 <b>Eng ehtimolli tanlovlar" in picks[0]
+    assert "🧠 <b>Ekspert tahlili" in picks[0]
+    assert "🎯 <b>Tavsiya:</b>" in picks[0]
 
 
 async def test_failed_picks_after_analysis_only_say_so(harness: BotHarness) -> None:
@@ -399,13 +400,11 @@ async def test_failed_picks_after_analysis_only_say_so(harness: BotHarness) -> N
         skipped_no_price=1,
     )
     harness.services.analysis.analyze = AsyncMock(return_value=no_price)  # type: ignore[method-assign]
-    harness.services.matches.top_picks = AsyncMock(  # type: ignore[method-assign]
+    harness.services.matches.expert_picks = AsyncMock(  # type: ignore[method-assign]
         side_effect=ServiceUnavailableError("football-data", "HTTP 503")
     )
     await run_to_confirm(harness)
 
     shown = sent_texts(await harness.press(texts.BTN_START))
 
-    assert any(
-        text.startswith("ℹ️ Koeffitsientsiz tanlovlarni hozir olib bo'lmadi") for text in shown
-    )
+    assert any(text.startswith("⚠️ Ekspert tahlilini olib bo'lmadi") for text in shown)
