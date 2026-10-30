@@ -117,10 +117,18 @@ async def download_season(
     Raises:
         ExternalServiceError: network/TLS failure, HTTP error or a non-CSV response.
     """
-    url = season_url(league_code, season)
+    return await download_file(client, season_url(league_code, season), destination)
+
+
+async def download_file(client: httpx.AsyncClient, url: str, destination: Path) -> bool:
+    """Download one football-data CSV to ``destination``; ``False`` on 404.
+
+    Raises:
+        ExternalServiceError: network/TLS failure, HTTP error or a non-CSV response.
+    """
     response = await _get(client, url)
     if response.status_code == HTTP_NOT_FOUND:
-        logger.info("season_file_not_published", url=url)
+        logger.info("csv_file_not_published", url=url)
         return False
     if response.is_error:
         msg = f"{url} answered HTTP {response.status_code}"
@@ -129,7 +137,7 @@ async def download_season(
         msg = f"{url} did not return a CSV (blocked by a proxy or web filter?)"
         raise ExternalServiceError(msg)
     await asyncio.to_thread(write_atomically, destination, response.content)
-    logger.info("season_file_downloaded", url=url, bytes=len(response.content))
+    logger.info("csv_file_downloaded", url=url, bytes=len(response.content))
     return True
 
 

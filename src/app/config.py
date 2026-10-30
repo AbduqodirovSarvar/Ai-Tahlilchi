@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # changes the process clock; this one only affects how times are shown to users.
     display_tz: str = "Asia/Tashkent"
     db_path: Path = Path("data/app.db")
+    # Cached football-data.co.uk CSVs (season files and fixtures.csv), shared with the
+    # history import so one download serves both.
+    odds_csv_cache_dir: Path = Path("data/history")
     # Which implementation of the service contract the bot talks to: the in-memory sample
     # data ("fake", the default until API keys exist) or the pipeline-backed one ("real").
     app_services: ServicesBackend = "fake"
