@@ -1639,51 +1639,140 @@ PICK_CARD_TEAM: Final[dict[bool, str]] = {
 }
 
 
-# --------------------------------------------------------------------------- expert picks (v1.16)
-BTN_EXPERT: Final = "🧠 Ekspert tahlili"
-EXPERT_TITLE: Final = "🧠 <b>Ekspert tahlili · {window}</b> — {count} ta o'yin"
-EXPERT_NOTE: Final = (
-    "<i>Koeffitsientsiz. Ehtimollik modelniki (tarixiy natijalar), tanlov va sabab {source}.</i>"
+# --------------------------------------------------------------------- analytics bot (v1.16)
+MENU_GAMES_TODAY: Final = "📅 Bugungi o'yinlar"
+MENU_GAMES_TOMORROW: Final = "🗓 Ertangi o'yinlar"
+MENU_TOP_LEAGUES: Final = "🏆 Top Ligalar tahlili"
+MENU_ABOUT: Final = "ℹ️ Yordam / Bot haqida"
+MENU_HINT: Final = "O'yinni tanlang va tahlilni oling 👇"
+
+ABOUT: Final = (
+    "ℹ️ <b>AI Tahlilchi — futbol tahlil markazi</b>\n\n"
+    "Bot o'yinlarni xolis va chuqur tahlil qiladi. Stavka tavsiya qilmaydi.\n\n"
+    "<b>Qanday ishlatiladi</b>\n"
+    "📅 <b>Bugungi o'yinlar</b> va 🗓 <b>Ertangi o'yinlar</b>: kun o'yinlari ro'yxati.\n"
+    "🏆 <b>Top Ligalar tahlili</b>: ligani tanlang, keyingi 7 kundagi o'yinlari chiqadi.\n"
+    "O'yin tugmasini bosing: to'liq tahlil chiqadi. 🔄 <b>Yangilash</b> tahlilni yangilaydi "
+    "(masalan, tarkiblar e'lon qilingach).\n\n"
+    "<b>Tahlil bo'limlari</b>\n"
+    "📈 Jamoalarning joriy holati: so'nggi 5 o'yin, urilgan va o'tkazilgan gollar.\n"
+    "🏟 Uy va safar omili.\n"
+    "👥 Tarkib va yo'qotishlar.\n"
+    "♟ Taktik qarama-qarshilik.\n"
+    "🧾 Xulosa va asosiy tendensiya.\n\n"
+    "<b>Manbalar</b>: o'yinlar va tarkiblar Football-Data.org dan, tarixiy natijalar bazadan, "
+    "raqamlar statistik modeldan, matn esa sun'iy intellektdan (Gemini). AI ishlamasa, matn "
+    "faktlardan tuziladi.\n\n"
+    "<b>Buyruqlar</b>: /start — bosh menyu, /yordam — shu matn."
 )
-EXPERT_SOURCE_AI: Final = "AI tahlilchiniki"
-EXPERT_SOURCE_RULE: Final = "faktlardan"
-EXPERT_EMPTY: Final = "Bu kunlarda tahlil qilinadigan, hali boshlanmagan o'yin yo'q."
-EXPERT_WITHOUT_FORECAST: Final = (
-    "ℹ️ Yana {count} ta o'yin uchun bashorat yo'q (liga kuzatilmaydi yoki tarix yetarli emas)."
+WELCOME_ANALYTICS: Final = (
+    "👋 <b>AI Tahlilchi</b> ga xush kelibsiz!\n\n"
+    "Men futbol o'yinlarini chuqur va xolis tahlil qilaman: forma, uy va safar omili, "
+    "tarkiblar, taktika va asosiy tendensiya.\n\n"
+    "Pastdagi menyudan o'yinlar ro'yxatini oching va o'yinni tanlang 👇"
 )
-EXPERT_MATCH: Final = "⚽ <b>{home} — {away}</b>"
-EXPERT_META: Final = "🏆 Liga: {league} | ⏰ Vaqt: {kickoff}"
-EXPERT_PICK: Final = "🎯 <b>Tavsiya:</b> {label}"
-EXPERT_PROBABILITY: Final = "📊 <b>O'tish ehtimoli:</b> {probability} ({risk}){push}"
-EXPERT_PUSH: Final = " · qaytish {push}"
-EXPERT_REASON: Final = "📝 <b>Qisqa sabab:</b> {reason}"
-EXPERT_AFTER_ANALYSIS: Final = (
-    "💡 Koeffitsient bo'lmagani uchun signal chiqmadi. Quyida o'sha kunlar uchun ekspert "
-    "tahlili: har bir o'yinga o'tish ehtimoli eng yuqori 1–2 ta tanlov."
+
+DAY_TITLE: Final = "📅 <b>{day}, {weekday}</b> — {total} ta o'yin"
+DAY_EMPTY: Final = "Bu kunda kuzatiladigan ligalarda o'yin yo'q."
+LIST_HINT: Final = "Tahlil uchun o'yinni tanlang 👇"
+LIST_PAGE: Final = "Sahifa {page}/{pages}"
+LEAGUES_TITLE: Final = (
+    "🏆 <b>Top ligalar</b>\nLigani tanlang: keyingi {days} kundagi o'yinlari chiqadi."
 )
-EXPERT_PROGRESS: Final = "⏳ Ekspert tahlili tayyorlanmoqda, AI bilan biroz vaqt olishi mumkin…"
-EXPERT_UNAVAILABLE: Final = "⚠️ Ekspert tahlilini olib bo'lmadi: {reason}"
-PICK_RISK_LABELS: Final[dict[str, str]] = {
-    "safe": "🟢 Ishonchli",
-    "optimal": "🟡 O'rtacha",
-    "risky": "🔴 Tavakkal",
-    "long_shot": "⚪ Juda tavakkal",
+LEAGUE_TITLE: Final = "{league}\nKeyingi {days} kun: {total} ta o'yin"
+LEAGUE_EMPTY: Final = "Bu ligada keyingi {days} kunda o'yin yo'q."
+GAME_BUTTON: Final = "{flag} {home} vs {away} | {when}"
+GAME_BUTTON_SCORE: Final = "{home_goals}:{away_goals}"
+TEAM_UNKNOWN: Final = "?"
+DEFAULT_FLAG: Final = "⚽"
+COMPETITION_FLAGS: Final[dict[str, str]] = {
+    "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "ELC": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "PD": "🇪🇸",
+    "SA": "🇮🇹",
+    "BL1": "🇩🇪",
+    "FL1": "🇫🇷",
+    "DED": "🇳🇱",
+    "PPL": "🇵🇹",
+    "BSA": "🇧🇷",
+    "CL": "🇪🇺",
+    "EC": "🇪🇺",
+    "WC": "🌍",
 }
-# Reasons worded from the history facts when the AI gave none.
-EXPERT_REASON_RESULT: Final = (
-    "{team} formasi {form}, {venue} so'nggi {played} o'yinda {wins} g'alaba, {draws} durang, "
-    "{losses} mag'lubiyat; {other} formasi {other_form}."
+TOP_LEAGUES: Final = (
+    ("PL", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League"),
+    ("PD", "🇪🇸 La Liga"),
+    ("SA", "🇮🇹 Serie A"),
+    ("BL1", "🇩🇪 Bundesliga"),
+    ("FL1", "🇫🇷 Ligue 1"),
+    ("DED", "🇳🇱 Eredivisie"),
+    ("PPL", "🇵🇹 Primeira Liga"),
+    ("ELC", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship"),
 )
-EXPERT_REASON_TABLE: Final = " Jadvalda {home_position}- va {away_position}-o'rinlar."
-EXPERT_VENUE: Final[dict[bool, str]] = {True: "uyda", False: "safarda"}
-EXPERT_REASON_GOALS: Final = (
-    "{home} o'rtacha {home_for} gol uradi va {home_against} o'tkazadi, {away}: {away_for} / "
-    "{away_against}; Total 2.5 dan ko'p {home_over} va {away_over} o'yinlarda."
+BTN_REFRESH: Final = "🔄 Yangilash"
+BTN_BACK_TO_LIST: Final = "⬅️ O'yinlar ro'yxatiga qaytish"
+BTN_BACK_TO_LEAGUES: Final = "⬅️ Ligalar"
+BTN_PAGE_PREV: Final = "◀️"
+BTN_PAGE_NEXT: Final = "▶️"
+
+ANALYSIS_PROGRESS: Final = "⏳ O'yin tahlil qilinmoqda…"
+ANALYSIS_TITLE: Final = "⚽ <b>{home} — {away}</b>"
+ANALYSIS_META: Final = "🏆 {league} | ⏰ {kickoff}"
+ANALYSIS_STATE: Final = "📍 {state}"
+ANALYSIS_SECTIONS: Final[dict[str, str]] = {
+    "form": "📈 <b>Jamoalarning joriy holati</b>",
+    "venue": "🏟 <b>Uy va safar omili</b>",
+    "squads": "👥 <b>Tarkib va yo'qotishlar</b>",
+    "tactics": "♟ <b>Taktik qarama-qarshilik</b>",
+    "summary": "🧾 <b>Xulosa va asosiy tendensiya</b>",
+}
+ANALYSIS_MODEL: Final = (
+    "📊 <b>Model ko'rsatkichlari</b> <i>(ma'lumot uchun)</i>\n"
+    "{home}: {home_win} · Durang: {draw} · {away}: {away_win}\n"
+    "Total 2.5 dan ko'p: {over} · Ikkala jamoa gol uradi: {btts}\n"
+    "Kutilayotgan gollar: {expected_home} — {expected_away}"
 )
-EXPERT_REASON_BTTS: Final = (
-    "Ikkala jamoa gol urgan o'yinlar: {home} {home_btts}, {away} {away_btts}; o'rtacha "
-    "urilgan gollar {home_for} va {away_for}."
+ANALYSIS_SOURCE_AI: Final = "🤖 Matn: AI (Gemini) · raqamlar: statistik model va bazadagi tarix"
+ANALYSIS_SOURCE_FACTS: Final = "📐 Matn faktlardan tuzildi (AI bu safar javob bermadi)"
+ANALYSIS_UPDATED: Final = "🕒 Yangilangan: {at}"
+ANALYSIS_DISCLAIMER: Final = "<i>Bu xolis tahlil, stavka tavsiyasi emas.</i>"
+
+FACT_FORM_LINE: Final = "• {team}: {form} — o'rtacha {scored} gol uradi, {conceded} gol o'tkazadi"
+FACT_FORM_LEGEND: Final = "<i>G — g'alaba, D — durang, M — mag'lubiyat (eskidan yangiga)</i>"
+FORM_WORD_LETTERS: Final[dict[str, str]] = {"W": "G", "D": "D", "L": "M"}
+FACT_VENUE_LINE: Final = (
+    "• {team} {where} so'nggi {played} o'yinda: {wins} g'alaba, {draws} durang, "
+    "{losses} mag'lubiyat (gollar {goals_for}:{goals_against})"
 )
-EXPERT_REASON_H2H: Final = " O'zaro so'nggi o'yin: {home} {home_goals}-{away_goals} {away} ({day})."
-EXPERT_REASON_MODEL: Final = "Model baholashi: jamoalarning tarixiy natijalari asosida."
-FORM_LETTERS: Final[dict[str, str]] = {"W": "G", "D": "D", "L": "M"}
+FACT_WHERE: Final[dict[bool, str]] = {True: "uyda", False: "safarda"}
+FACT_TABLE: Final = (
+    "• Jadvalda: {home} — {home_position}-o'rin ({home_points} ochko), "
+    "{away} — {away_position}-o'rin ({away_points} ochko)"
+)
+FACT_H2H: Final = "• O'zaro so'nggi o'yinlar: {meetings}"
+FACT_MEETING: Final = "{home} {home_goals}:{away_goals} {away} ({day})"
+FACT_NO_HISTORY: Final = (
+    "Bu o'yin uchun bazada yetarli tarix yo'q (liga kuzatilmaydi yoki o'yinlar kam)."
+)
+FACT_SQUAD_LINE: Final = "• {team}{formation}: {players}"
+FACT_SQUAD_FORMATION: Final = " ({formation})"
+FACT_SQUAD_COACH: Final = "  Murabbiy: {coach}"
+FACT_SQUADS_PENDING: Final = (
+    "Tarkiblar hali e'lon qilinmagan (odatda o'yindan taxminan 1 soat oldin chiqadi). "
+    "Jarohatlar haqida manbada ma'lumot yo'q."
+)
+FACT_TACTICS: Final[dict[str, str]] = {
+    "open": "Ikkala jamoa o'yinlarida gol ko'p: ochiq, hujumkor futbol kutilmoqda.",
+    "cagey": "Gollar kam kutilmoqda: ehtiyotkor, himoyaviy kurash ehtimoli yuqori.",
+    "balanced": "Muvozanatli o'yin kutilmoqda: ikkala tomon ham imkoniyat yaratishi mumkin.",
+    "unknown": "Taktik baho uchun ma'lumot yetarli emas.",
+}
+FACT_SUMMARY: Final = "{side}. {goals}"
+FACT_SUMMARY_FAVOURITE: Final = "{team} ustunroq ko'rinadi"
+FACT_SUMMARY_EVEN: Final = "Kuchlar teng ko'rinadi"
+FACT_SUMMARY_GOALS: Final[dict[str, str]] = {
+    "many": "Ko'p gollar kutilmoqda.",
+    "few": "Kam gollar kutilmoqda.",
+    "middle": "O'rtacha miqdorda gol kutilmoqda.",
+}
+FACT_SUMMARY_UNKNOWN: Final = "Aniq ssenariy uchun ma'lumot yetarli emas."

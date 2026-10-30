@@ -143,13 +143,9 @@ def _checked(label: str, *, on: bool) -> str:
 
 # --------------------------------------------------------------------------- main menu
 MAIN_MENU_LAYOUT: Final = (
-    (texts.MENU_MATCHES,),
-    (texts.MENU_ANALYSIS, texts.MENU_CUSTOM),
-    (texts.MENU_TEMPLATES, texts.MENU_TODAY),
-    (texts.MENU_WATCHLIST, texts.MENU_BETS),
-    (texts.MENU_REPORT, texts.MENU_SETTINGS),
-    (texts.MENU_CALLS,),
-    (texts.MENU_HELP,),
+    (texts.MENU_GAMES_TODAY, texts.MENU_GAMES_TOMORROW),
+    (texts.MENU_TOP_LEAGUES,),
+    (texts.MENU_ABOUT,),
 )
 
 
@@ -158,12 +154,12 @@ MENU_TEXTS: Final = frozenset(label for row in MAIN_MENU_LAYOUT for label in row
 
 
 def main_menu() -> ReplyKeyboardMarkup:
-    """Persistent reply keyboard of plan §6.1."""
+    """Persistent reply keyboard of the analytics bot (v1.16): four buttons, no settings."""
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=label) for label in row] for row in MAIN_MENU_LAYOUT],
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder=texts.MENU_PLACEHOLDER_HINT,
+        input_field_placeholder=texts.MENU_HINT,
     )
 
 

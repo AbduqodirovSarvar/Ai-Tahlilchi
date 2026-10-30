@@ -39,7 +39,7 @@ from app.pipeline.matches import MatchFeed
 from app.pipeline.overlay import DbLearningSource, LearningSource, NoLearning
 from app.pipeline.provider import FootballDataProvider, SportProvider
 from app.pipeline.redaction import scrub_text
-from app.pipeline.review import LlmCandidateReviewer, LlmPickWriter, LlmPostmortemAnalyst
+from app.pipeline.review import LlmAnalysisWriter, LlmCandidateReviewer, LlmPostmortemAnalyst
 
 logger = get_logger(__name__)
 
@@ -177,7 +177,7 @@ async def open_runtime(
         learning=learning,
         learning_settings=learning_settings,
         postmortem=LlmPostmortemAnalyst(llm),
-        pick_writer=LlmPickWriter(llm),
+        analysis_writer=LlmAnalysisWriter(llm),
     )
     try:
         await _promote_on_start(ctx)

@@ -33,7 +33,7 @@ async def test_start_shows_welcome_and_main_menu(bot: Bot, session: RecordingSes
     request = session.requests[0]
     assert isinstance(request, SendMessage)
     assert request.chat_id == ADMIN_ID
-    assert request.text == texts.WELCOME
+    assert request.text == texts.WELCOME_ANALYTICS
     assert request.parse_mode == "HTML"
     assert isinstance(request.reply_markup, ReplyKeyboardMarkup)
 
@@ -41,13 +41,9 @@ async def test_start_shows_welcome_and_main_menu(bot: Bot, session: RecordingSes
 def test_main_menu_matches_plan_layout() -> None:
     rows = [[button.text for button in row] for row in keyboards.main_menu().keyboard]
     assert rows == [
-        ["⚽ O'yinlar"],
-        ["📊 Tahlil", "🔍 Maxsus tahlil"],
-        ["💾 Shablonlarim", "⚡ Bugungi signallar"],
-        ["⭐ Sevimlilar", "🎟 Mening stavkalarim"],
-        ["📈 Hisobot", "⚙️ Sozlamalar"],
-        ["📡 So'rovlar"],
-        ["ℹ️ Holat / Yordam"],
+        ["📅 Bugungi o'yinlar", "🗓 Ertangi o'yinlar"],
+        ["🏆 Top Ligalar tahlili"],
+        ["ℹ️ Yordam / Bot haqida"],
     ]
 
 
@@ -60,12 +56,15 @@ async def test_start_from_stranger_gets_no_reply(bot: Bot, session: RecordingSes
 
 
 @pytest.mark.parametrize("command", ["/yordam", "/help"])
-async def test_help_lists_commands_and_glossary(harness: BotHarness, command: str) -> None:
+async def test_help_describes_the_analytics_bot(harness: BotHarness, command: str) -> None:
     methods = await harness.send(command)
 
     text = sent_texts(methods)[0]
-    for term in ("/tahlil", "/sozlamalar", "/bekor", "EV", "CLV", "Unit"):
+    assert text == texts.ABOUT
+    for term in ("/start", "Yangilash", "Stavka tavsiya qilmaydi"):
         assert term in text
+    for gone in ("EV", "/sozlamalar", "/tahlil"):
+        assert gone not in text
 
 
 async def test_unknown_text_gets_a_hint(harness: BotHarness) -> None:
@@ -74,13 +73,8 @@ async def test_unknown_text_gets_a_hint(harness: BotHarness) -> None:
     assert sent_texts(methods) == [texts.UNKNOWN_TEXT]
 
 
-async def test_cancel_without_flow_and_inside_flow(harness: BotHarness) -> None:
+async def test_cancel_without_a_flow(harness: BotHarness) -> None:
     assert sent_texts(await harness.send("/bekor")) == [texts.NOTHING_TO_CANCEL]
-
-    await harness.send(texts.MENU_ANALYSIS)
-    message_id, _ = harness.find_button(texts.BTN_TODAY)
-    assert sent_texts(await harness.send("/bekor")) == [texts.CANCELLED]
-    assert harness.markups[message_id] is None
 
 
 async def test_start_inside_a_flow_closes_it(harness: BotHarness) -> None:

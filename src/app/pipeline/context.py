@@ -19,11 +19,11 @@ from app.pipeline.modeling import ModelCache
 from app.pipeline.overlay import LearningSource, NoLearning
 from app.pipeline.provider import SportProvider
 from app.pipeline.review import (
+    AnalysisWriter,
     CandidateReviewer,
-    NoPickWriter,
+    NoAnalysisWriter,
     NoPostmortem,
     NoReview,
-    PickWriter,
     PostmortemAnalyst,
 )
 
@@ -45,7 +45,7 @@ class PipelineContext:
     reviewer: CandidateReviewer = field(default_factory=NoReview)
     learning: LearningSource = field(default_factory=NoLearning)
     postmortem: PostmortemAnalyst = field(default_factory=NoPostmortem)
-    pick_writer: PickWriter = field(default_factory=NoPickWriter)
+    analysis_writer: AnalysisWriter = field(default_factory=NoAnalysisWriter)
     learning_settings: LearningSettings = field(default_factory=LearningSettings)
     models: ModelCache = field(init=False)
 

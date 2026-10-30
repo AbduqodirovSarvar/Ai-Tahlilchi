@@ -15,6 +15,7 @@ from typing import Final, Protocol
 
 from app.db.enums import Confidence, LlmVerdict
 from app.domain import Market, Selection
+from app.llm.analysis import AnalysisText, MatchAnalysisInput
 from app.llm.inputs import (
     MAX_CANDIDATES,
     Absence,
@@ -23,7 +24,6 @@ from app.llm.inputs import (
     PostmortemInput,
     TeamForm,
 )
-from app.llm.picks import MatchPicksInput, PickChoice
 from app.llm.schemas import PostmortemResult, ReviewStatus
 from app.llm.schemas import Verdict as LlmVerdictWire
 from app.llm.service import LlmService
@@ -292,40 +292,33 @@ class LlmPostmortemAnalyst:
             return None
 
 
-class PickWriter(Protocol):
-    """Chooses 1-2 of each match's priced options and says why (the analyst's picks)."""
+class AnalysisWriter(Protocol):
+    """Writes the five sections of a match analysis from the facts it is given."""
 
-    async def write(
-        self, matches: Sequence[MatchPicksInput]
-    ) -> Mapping[str, tuple[PickChoice, ...]]:
-        """``match_id -> choices``; a match left out is chosen by rule."""
+    async def write(self, match: MatchAnalysisInput) -> AnalysisText | None:
+        """The sections, or ``None`` (the analysis is then worded from the facts)."""
         ...
 
 
-class NoPickWriter:
-    """The default writer: never answers, so every match is chosen by rule."""
+class NoAnalysisWriter:
+    """The default writer: never answers, so every analysis is worded from the facts."""
 
-    async def write(
-        self,
-        matches: Sequence[MatchPicksInput],  # noqa: ARG002 - protocol signature
-    ) -> Mapping[str, tuple[PickChoice, ...]]:
+    async def write(self, match: MatchAnalysisInput) -> AnalysisText | None:  # noqa: ARG002 - protocol signature
         """No answer."""
-        return {}
+        return None
 
 
-class LlmPickWriter:
-    """Adapts :meth:`app.llm.service.LlmService.write_picks` (which never raises) to the port."""
+class LlmAnalysisWriter:
+    """Adapts :meth:`app.llm.service.LlmService.write_analysis` (which never raises)."""
 
     def __init__(self, service: LlmService) -> None:
         """Write through ``service`` (shared with the reviewer, so is the daily budget)."""
         self._service = service
 
-    async def write(
-        self, matches: Sequence[MatchPicksInput]
-    ) -> Mapping[str, tuple[PickChoice, ...]]:
-        """The service's choices; an unexpected failure is the same as no answer."""
+    async def write(self, match: MatchAnalysisInput) -> AnalysisText | None:
+        """The service's sections; an unexpected failure is the same as no answer."""
         try:
-            return await self._service.write_picks(matches)
-        except Exception as error:  # the contract says it never raises; a bug must not stop picks
-            logger.warning("pick_writer_failed", error=repr(error))
-            return {}
+            return await self._service.write_analysis(match)
+        except Exception as error:  # the contract says it never raises; a bug must not stop it
+            logger.warning("analysis_writer_failed", error=repr(error))
+            return None

@@ -13,19 +13,19 @@ from zoneinfo import ZoneInfo
 from app.domain import Market, Selection
 from app.services.errors import NotFoundError
 from app.services.interfaces import (
+    AnalysisSections,
     CardChance,
     CardOutlook,
     CardScope,
     ConfidenceLevel,
-    ExpertMatch,
-    ExpertPick,
-    ExpertReport,
     ForecastLine,
     ForecastStatus,
     LineupPlayer,
+    MatchAnalysis,
     MatchFacts,
     MatchForecast,
     MatchItem,
+    MatchOutlook,
     MatchSheet,
     MatchState,
     OutcomeChance,
@@ -117,20 +117,25 @@ class FakeMatchesService:
         settings = await self._settings.get_settings(user_id)
         return rank_picks(lines, min_probability=settings.min_probability)
 
-    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
-        """See :meth:`app.services.interfaces.MatchesService.expert_picks`."""
-        items = await self.list_matches(user_id, day_from, day_to)
-        upcoming = [item for item in items if item.state is MatchState.SCHEDULED]
-        matches = tuple(
-            ExpertMatch(
-                match=item,
-                picks=sample_expert_picks(item, with_reason=index == 0),
-                facts=SAMPLE_FACTS,
-                by_ai=index == 0,
-            )
-            for index, item in enumerate(upcoming)
+    async def analyse_match(
+        self,
+        user_id: int,
+        match_id: int,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - the sample never goes stale
+    ) -> MatchAnalysis:
+        """See :meth:`app.services.interfaces.MatchesService.analyse_match`.
+
+        The first match of a day carries sample AI sections; the second is worded from facts.
+        """
+        sheet = await self.get_match(user_id, match_id)
+        return MatchAnalysis(
+            sheet=sheet,
+            facts=SAMPLE_FACTS,
+            outlook=SAMPLE_OUTLOOK,
+            sections=SAMPLE_SECTIONS if match_id % _IDS_PER_DAY == 0 else None,
+            generated_at=sheet.match.kickoff - timedelta(hours=1),
         )
-        return ExpertReport(matches=matches)
 
     async def forecast_match(self, user_id: int, match_id: int) -> ForecastLine:
         """See :meth:`app.services.interfaces.MatchesService.forecast_match`."""
@@ -204,14 +209,19 @@ SAMPLE_FACTS: Final = MatchFacts(
         points=9,
     ),
 )
-SAMPLE_REASON: Final = (
-    "Mezbon uyda so'nggi 5 o'yinda 4 marta yutgan, mehmon safarda 5 o'yindan 3 tasida yutqazgan."
+SAMPLE_OUTLOOK: Final = MatchOutlook(
+    home_win=0.52,
+    draw=0.26,
+    away_win=0.22,
+    over_2_5=0.55,
+    btts=0.51,
+    expected_home_goals=1.7,
+    expected_away_goals=1.1,
 )
-
-
-def sample_expert_picks(item: MatchItem, *, with_reason: bool) -> tuple[ExpertPick, ...]:
-    """The two likeliest sample picks of a match; only the first carries an AI reason."""
-    line = ForecastLine(match=item, forecast=sample_forecast(item.match_id))
-    picks = rank_picks([line], min_probability=0.0)
-    reason = SAMPLE_REASON if with_reason else None
-    return tuple(ExpertPick(pick=pick, reason=reason) for pick in picks)
+SAMPLE_SECTIONS: Final = AnalysisSections(
+    form="Mezbon so'nggi 5 o'yinda 3 marta yutgan va o'rtacha 2.1 gol uradi.",
+    venue="Mezbon uyda so'nggi 5 o'yinda 4 g'alaba qozongan, mehmon safarda 3 marta yutqazgan.",
+    squads="Tarkiblar hali e'lon qilinmagan.",
+    tactics="Mezbonning hujumkor uslubi va mehmonning zaif himoyasi ochiq o'yin va'da qiladi.",
+    summary="Mezbon ustunligi va ko'p gollar kutilmoqda.",
+)

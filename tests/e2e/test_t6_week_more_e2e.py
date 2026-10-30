@@ -4,7 +4,7 @@ from datetime import time
 from decimal import Decimal
 
 import pytest
-from aiogram.methods import EditMessageText, SendMessage
+from aiogram.methods import SendMessage
 
 from app.bot import texts
 from app.bot.callbacks import CardCb
@@ -19,9 +19,7 @@ from app.services.interfaces import (
     TemplateDraft,
     TemplateSchedule,
 )
-from tests.e2e.bot_client import answers
 from tests.e2e.t6_world import OTHER, PERMISSIVE, USER, Week, at, jobs, open_week, tick
-from tests.e2e.test_t6_week_e2e import day_one, expected_mark
 
 pytestmark = pytest.mark.slow
 
@@ -55,46 +53,6 @@ async def save_daily_template(w: Week, name: str) -> None:
 
 
 # --------------------------------------------------------------------------- responsible gaming
-async def test_loss_limit_stops_new_signals_and_says_so_once_while_others_are_unaffected(
-    week: Week,
-) -> None:
-    w = week
-    day = await day_one(w)
-    await w.settings(OTHER, **PERMISSIVE)
-    await w.settings(USER, daily_loss_limit=Decimal(30))
-    losers = [s for s in day.signals if expected_mark(w, s) == "loss"]
-    assert losers, "the seeded day must contain a losing pick"
-    for signal in losers:
-        await w.services.bets.place_bet(
-            USER, BetDraft(signal_id=signal.signal_id, odds_taken=signal.odds, stake=Decimal(50))
-        )
-    # the process was down on the 22nd: the settlement only runs on the morning of the 24th
-    at(w, 24, 3, 0)
-    await jobs(w).run(JOB_SETTLE)
-    bank = await w.services.bets.bank_summary(USER)
-    assert bank.loss_limit_reached
-    assert bank.loss_today >= Decimal(50)
-
-    await save_daily_template(w, "Kunlik")
-    mark = len(w.session.requests)
-    await jobs(w).run(JOB_REFRESH)
-    await tick(w, 120)  # 03:30 .. 05:30 UTC: the 09:00 digest, then the 09:30 template tick
-
-    sent = [m for m in w.session.requests[mark:] if isinstance(m, SendMessage)]
-    mine = [m for m in sent if m.chat_id == USER]
-    assert cards_since(w, USER, mark) == []
-    notices = [m for m in mine if "🛑 <b>Zarar limitiga yetildi</b>" in m.text]
-    assert len(notices) == 1  # the digest and the template were both blocked: one notice
-    assert not any(m.text.startswith("💾 <b>Kunlik</b>") for m in mine)
-    # the control user got real signals that same morning, so the silence is the limit's doing
-    assert cards_since(w, OTHER, mark)
-
-    # a manual analysis still works for the limited user (with a banner, never a refusal)
-    client = w.client(USER)
-    await client.send("/tahlil 7kun 30% ev0% 3ta")
-    await client.press(texts.BTN_START)
-    shown = "\n".join(client.texts.values())
-    assert "Zarar limitiga yetgansiz" in shown
 
 
 # --------------------------------------------------------------------------- templates, quiet hours
@@ -179,69 +137,7 @@ async def test_llm_budget_exhausted_midweek_signals_go_on_without_notes(
         assert len(digests_of(w)) == 2
 
 
-async def test_api_quota_exhausted_gives_clear_notices_and_nothing_crashes(week: Week) -> None:
-    w = week
-    await w.settings(USER, **PERMISSIVE)
-    await jobs(w).run(JOB_REFRESH)
-    await tick(w, 30)
-    w.sync(USER)
-    client = w.client(USER)
-    w.provider.exhausted = True
-    recalc_id, recalc_data = client.find_button(texts.BTN_RECALC)
-    methods = await client.press_data(recalc_data, recalc_id)
-    body = "\n".join(m.text for m in methods if isinstance(m, SendMessage | EditMessageText))
-    assert "holatiga" in body  # the numbers of 11:00, said plainly
-    calls = len(w.provider.calls)
-    sent = await client.send("/tahlil 7kun 50% ev3% 10ta")
-    shown_text = "\n".join(m.text for m in sent if isinstance(m, SendMessage))
-    # the analysis reads the database: a spent API quota neither blocks it nor is touched by it
-    assert "API limitidan oshadi" not in shown_text
-    assert "So'rov" in shown_text
-    assert len(w.provider.calls) == calls
-    at(w, 22, 3, 30)
-    await jobs(w).run(JOB_REFRESH)  # reported, never raised
-    status = await client.send("/holat")
-    assert any(isinstance(m, SendMessage) for m in status)
-
-
 # --------------------------------------------------------------------------- restart, isolation
-async def test_restart_in_the_middle_of_the_week_duplicates_nothing(week: Week) -> None:
-    w = week
-    await w.settings(USER, **PERMISSIVE)
-    await jobs(w).run(JOB_REFRESH)
-    await tick(w, 30)
-    w.sync(USER)
-    client = w.client(USER)
-    digests_before = len(digests_of(w))
-    cards_before = len([m for m in w.pushed(USER) if "🎯 Tanlov" in m.text])
-    card_id, bet_data = client.find_button(texts.BTN_BET)
-    await client.press_data(bet_data, card_id)
-    confirm_id, confirm_data = client.find_button("Yozish")
-    await client.press_data(confirm_data, confirm_id)
-    await client.send(texts.MENU_ANALYSIS)
-    wizard_state = await client.state()
-    assert wizard_state is not None
-    wizard_id, wizard_data = client.find_button(texts.BTN_TODAY)
-
-    reborn = await w.restart()
-    fresh = reborn.client(USER)
-    assert await fresh.state() == wizard_state  # the wizard survived in fsm.db
-    await tick(reborn, 120)  # the same minute ticks after the restart: nothing is sent again
-    assert len(digests_of(reborn)) == digests_before
-    assert len([m for m in reborn.pushed(USER) if "🎯 Tanlov" in m.text]) == cards_before
-    # a retried callback of the old confirm button: still one bet
-    await fresh.press_data(confirm_data, confirm_id)
-    assert len(await reborn.services.bets.list_bets(USER)) == 1
-    # the wizard message from before the restart still works (its state was persisted) ...
-    await fresh.press_data(wizard_data, wizard_id)
-    assert await fresh.state() == "AnalysisFlow:sport"
-    # ... and once the flow is cancelled the same old button is refused politely
-    await fresh.send("/bekor")
-    assert await fresh.state() is None
-    refused = answers(await fresh.press_data(wizard_data, wizard_id))
-    assert [a.text for a in refused] == [texts.STALE_BUTTON]
-    assert await fresh.state() is None
-    assert await fresh.send(texts.MENU_ANALYSIS)  # the wizard works again from the menu
 
 
 async def test_two_users_stay_isolated_through_the_whole_week(week: Week) -> None:

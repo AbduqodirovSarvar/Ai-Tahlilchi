@@ -26,6 +26,12 @@ from app.clients.gemini import GeminiError, GeminiUsage, JsonGenerator, create_g
 from app.config import Settings
 from app.domain import CallRecorder
 from app.errors import ConfigurationError, DataError
+from app.llm.analysis import (
+    AnalysisResponse,
+    AnalysisText,
+    MatchAnalysisInput,
+    build_analysis_prompt,
+)
 from app.llm.budget import CallOutcome, JournalEntry, LlmBudget, Reservation
 from app.llm.builder import (
     DATA_CLOSE,
@@ -39,14 +45,6 @@ from app.llm.builder import (
 )
 from app.llm.guard import unknown_names
 from app.llm.inputs import CandidateInput, ExperienceContext, PostmortemInput
-from app.llm.picks import (
-    MAX_MATCHES_PER_REQUEST,
-    MAX_PICKS_PER_MATCH,
-    MatchPicksInput,
-    PickChoice,
-    PicksResponse,
-    build_picks_prompt,
-)
 from app.llm.schemas import (
     FLAG_NOTE_SUSPICIOUS,
     FLAG_NOTE_TOO_LONG,
@@ -69,12 +67,15 @@ MAX_NOTE_CHARS: Final = 400
 # Output tokens the budget guard reserves per candidate before the real usage is known.
 EXPECTED_OUTPUT_TOKENS_PER_CANDIDATE: Final = 120
 EXPECTED_OUTPUT_TOKENS_POSTMORTEM: Final = 150
-EXPECTED_OUTPUT_TOKENS_PER_MATCH: Final = 160
+EXPECTED_OUTPUT_TOKENS_ANALYSIS: Final = 900
+# A written analysis section is longer than a review note.
+MAX_SECTION_SENTENCES: Final = 3
+MAX_SECTION_CHARS: Final = 500
 
 # Task names the provider call log shows for each request (instead of the schema class name).
 OPERATION_REVIEW: Final = "llm_review"
 OPERATION_POSTMORTEM: Final = "post_mortem"
-OPERATION_PICKS: Final = "match_picks"
+OPERATION_ANALYSIS: Final = "match_analysis"
 
 REASON_DISABLED: Final = "llm_disabled"
 REASON_BUDGET: Final = "budget_exhausted"
@@ -164,50 +165,38 @@ class LlmService:
             output_tokens=outcome.output_tokens,
         )
 
-    async def write_picks(
-        self, matches: Sequence[MatchPicksInput]
-    ) -> dict[str, tuple[PickChoice, ...]]:
-        """``match_id -> 1..2 chosen options`` in batches; never raises.
+    async def write_analysis(self, match: MatchAnalysisInput) -> AnalysisText | None:
+        """The five written sections of one match; ``None`` when there is no usable answer.
 
-        A match missing from the answer (LLM off, over budget, down, or a bad answer) is the
-        caller's to decide without the LLM. Only option ids of that match are accepted.
+        Never raises: the LLM off, over budget, down or answering garbage all give ``None``,
+        and the caller words the analysis from the facts instead. A section that breaks the
+        note rules (length, markup, names not in the input) is dropped on its own.
         """
-        chosen: dict[str, tuple[PickChoice, ...]] = {}
-        for start in range(0, len(matches), MAX_MATCHES_PER_REQUEST):
-            batch = tuple(matches[start : start + MAX_MATCHES_PER_REQUEST])
-            try:
-                chosen.update(await self._picks(batch))
-            except Exception:
-                # Optional enhancement: the picks still go out, chosen by rule instead.
-                logger.warning("llm_picks_unexpected_error", exc_info=True)
-        return chosen
-
-    async def _picks(self, batch: tuple[MatchPicksInput, ...]) -> dict[str, tuple[PickChoice, ...]]:
-        built = build_picks_prompt(batch)
-        outcome = await self._ask(
-            built,
-            PicksResponse,
-            expected_output=EXPECTED_OUTPUT_TOKENS_PER_MATCH * len(batch),
-            operation=OPERATION_PICKS,
-        )
+        try:
+            built = build_analysis_prompt(match)
+            outcome = await self._ask(
+                built,
+                AnalysisResponse,
+                expected_output=EXPECTED_OUTPUT_TOKENS_ANALYSIS,
+                operation=OPERATION_ANALYSIS,
+            )
+        except Exception:
+            # Optional enhancement: the analysis still goes out, worded from the facts.
+            logger.warning("llm_analysis_unexpected_error", exc_info=True)
+            return None
         if outcome.parsed is None:
-            logger.info("llm_picks_skipped", reason=outcome.reason, matches=len(batch))
-            return {}
-        allowed = {match.match_id: {o.option_id for o in match.options} for match in batch}
-        chosen: dict[str, tuple[PickChoice, ...]] = {}
-        for answer in outcome.parsed.matches:
-            options = allowed.get(answer.match_id)
-            if options is None or answer.match_id in chosen:
-                continue
-            picks: dict[str, PickChoice] = {}
-            for item in answer.picks:
-                if item.option_id in options and item.option_id not in picks:
-                    reason, _flags = _guard_note(item.reason, built.data_text)
-                    picks[item.option_id] = PickChoice(item.option_id, reason)
-            if picks:
-                chosen[answer.match_id] = tuple(picks.values())[:MAX_PICKS_PER_MATCH]
-        logger.info("llm_picks_done", asked=len(batch), answered=len(chosen))
-        return chosen
+            logger.info("llm_analysis_skipped", reason=outcome.reason)
+            return None
+        answer, grounding = outcome.parsed, built.data_text
+        text = AnalysisText(
+            form=_guard_section(answer.form, grounding),
+            venue=_guard_section(answer.venue, grounding),
+            squads=_guard_section(answer.squads, grounding),
+            tactics=_guard_section(answer.tactics, grounding),
+            summary=_guard_section(answer.summary, grounding),
+        )
+        logger.info("llm_analysis_done", sections=text.count())
+        return text if text.count() else None
 
     async def _review(
         self, candidates: Sequence[CandidateInput], context: ExperienceContext | None
@@ -393,11 +382,11 @@ def _attribute_tokens(
     return (first, *reviews[1:])
 
 
-def _clean_note(text: str) -> str:
-    """Collapse whitespace and keep at most two sentences."""
+def _clean_note(text: str, max_sentences: int = MAX_NOTE_SENTENCES) -> str:
+    """Collapse whitespace and keep at most ``max_sentences`` sentences."""
     collapsed = _WHITESPACE.sub(" ", text).strip()
     sentences = _SENTENCE_SPLIT.split(collapsed)
-    return " ".join(sentences[:MAX_NOTE_SENTENCES])
+    return " ".join(sentences[:max_sentences])
 
 
 def _map_candidate(
@@ -425,9 +414,9 @@ def _map_candidate(
     )
 
 
-def _note_violation(note: str, grounding: str) -> str | None:
+def _note_violation(note: str, grounding: str, max_chars: int = MAX_NOTE_CHARS) -> str | None:
     """The flag for the first rule a cleaned, non-empty note breaks, if any."""
-    if len(note) > MAX_NOTE_CHARS:
+    if len(note) > max_chars:
         return FLAG_NOTE_TOO_LONG
     if _SUSPICIOUS_MARKUP.search(note) or DATA_OPEN in note or DATA_CLOSE in note:
         return FLAG_NOTE_SUSPICIOUS
@@ -436,6 +425,14 @@ def _note_violation(note: str, grounding: str) -> str | None:
         logger.warning("llm_note_dropped_unknown_names", names=list(invented))
         return FLAG_UNKNOWN_NAME
     return None
+
+
+def _guard_section(raw: str, grounding: str) -> str | None:
+    """An analysis section after the note rules (longer limits); ``None`` when it breaks one."""
+    section = _clean_note(raw, MAX_SECTION_SENTENCES)
+    if not section or _note_violation(section, grounding, MAX_SECTION_CHARS):
+        return None
+    return section
 
 
 def _guard_note(raw: str, grounding: str) -> tuple[str | None, tuple[str, ...]]:

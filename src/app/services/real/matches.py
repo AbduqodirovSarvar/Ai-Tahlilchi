@@ -6,8 +6,8 @@ also need the stored history, so they come from a :class:`~app.pipeline.forecast
 over the real pipeline; without one (the sample backend) a forecast says it is unavailable.
 """
 
-from collections.abc import Awaitable
-from datetime import date
+from collections.abc import Awaitable, Callable
+from datetime import UTC, date, datetime
 from typing import Final
 
 from app.logging import get_logger
@@ -22,10 +22,10 @@ from app.services.interfaces import (
     CardOutlook,
     CardScope,
     ConfidenceLevel,
-    ExpertReport,
     ForecastLine,
     ForecastStatus,
     LineupPlayer,
+    MatchAnalysis,
     MatchForecast,
     MatchItem,
     MatchSheet,
@@ -40,7 +40,7 @@ from app.services.interfaces import (
     check_match_days,
     rank_picks,
 )
-from app.services.real.expert import expert_report
+from app.services.real.match_analysis import AnalysisCache, match_analysis
 
 logger = get_logger(__name__)
 
@@ -73,12 +73,15 @@ class RealMatchesService:
         settings: SettingsService,
         forecaster: Forecaster | None = None,
         analyst: Analyst | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         """Wire the feed, the user's time zone source, the forecasts and the analyst."""
         self._feed = feed
         self._settings = settings
         self._forecaster = forecaster
         self._analyst = analyst
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._analyses = AnalysisCache(self._clock)
 
     async def list_matches(
         self, user_id: int, day_from: date, day_to: date
@@ -102,18 +105,23 @@ class RealMatchesService:
         lines = await self._lines(user_id, day_from, day_to)
         return rank_picks(lines, min_probability=settings.min_probability)
 
-    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
-        """See :meth:`app.services.interfaces.MatchesService.expert_picks`."""
-        check_match_days(day_from, day_to)
-        upcoming = [
-            match
-            for match in await self._day(user_id, day_from, day_to)
-            if _STATES.get(match.status) is MatchState.SCHEDULED
-        ]
-        items = [match_item(match) for match in upcoming]
-        if self._analyst is None or not upcoming:
-            return ExpertReport(without_forecast=len(items))
-        return expert_report(items, await self._analyst.analyse(upcoming))
+    async def analyse_match(
+        self, user_id: int, match_id: int, *, refresh: bool = False
+    ) -> MatchAnalysis:
+        """See :meth:`app.services.interfaces.MatchesService.analyse_match`."""
+        cached = self._analyses.get(match_id, refresh=refresh)
+        if cached is not None:
+            return cached
+        match = await self._match(user_id, match_id)
+        sheet = match_sheet(match)
+        if self._analyst is None:
+            analysis = MatchAnalysis(sheet=sheet, generated_at=self._clock())
+        else:
+            study = await self._analyst.study(match)
+            analysis = match_analysis(sheet, study, self._clock())
+        self._analyses.put(analysis)
+        logger.info("match_analysed", user_id=user_id, match_id=match_id, by_ai=analysis.by_ai)
+        return analysis
 
     async def _lines(self, user_id: int, day_from: date, day_to: date) -> tuple[ForecastLine, ...]:
         matches = await self._day(user_id, day_from, day_to)

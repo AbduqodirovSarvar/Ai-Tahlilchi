@@ -20,6 +20,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Final
 
+import numpy as np
+
 from app.db.repo import league_teams
 from app.domain import DomainValidationError, ExternalRef, Fixture, Market, Selection, Team
 from app.logging import get_logger
@@ -122,6 +124,7 @@ class Forecast:
     confidence: ConfidenceLevel | None = None
     cards: CardOutlook | None = None
     fixture: Fixture | None = None  # the match in its history identity (forecasts only)
+    expected_goals: tuple[float, float] | None = None  # home, away: the matrix means
 
 
 class Forecaster:
@@ -206,6 +209,7 @@ class Forecaster:
             match_id=match_id,
             chances=chances,
             team_chances=team_chances(matrix),
+            expected_goals=expected_goals(matrix),
             scores=tuple(
                 LikelyScore(s.home_goals, s.away_goals, s.probability)
                 for s in top_scores(matrix, TOP_SCORE_COUNT)
@@ -250,6 +254,16 @@ def team_chances(matrix: FloatArray) -> tuple[TeamChance, ...]:
         TeamChance(TeamPick.AWAY_TO_SCORE, _over(away_goals, 0)),
         TeamChance(TeamPick.HOME_OVER_1_5, _over(home_goals, int(TEAM_GOALS_LINE))),
         TeamChance(TeamPick.AWAY_OVER_1_5, _over(away_goals, int(TEAM_GOALS_LINE))),
+    )
+
+
+def expected_goals(matrix: FloatArray) -> tuple[float, float]:
+    """Mean goals of each side under the score matrix (rows are home goals)."""
+    home_goals = matrix.sum(axis=1)
+    away_goals = matrix.sum(axis=0)
+    return (
+        float(home_goals @ np.arange(len(home_goals))),
+        float(away_goals @ np.arange(len(away_goals))),
     )
 
 

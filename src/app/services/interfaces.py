@@ -3011,30 +3011,11 @@ def rank_picks(
     return tuple(chosen[:limit])
 
 
-# ------------------------------------------------------------------ expert picks (v1.16)
-SAFE_FROM: Final = 0.70
-OPTIMAL_FROM: Final = 0.55
-RISKY_FROM: Final = 0.40
-
-
-class RiskLevel(StrEnum):
-    """How likely a pick is to pass, in the analyst's words (v1.16)."""
-
-    SAFE = "safe"  # >= 70%
-    OPTIMAL = "optimal"  # 55-69%
-    RISKY = "risky"  # 40-54%
-    LONG_SHOT = "long_shot"  # < 40%: still the best this match offers
-
-
-def risk_level(probability: float) -> RiskLevel:
-    """The band of ``probability`` (one rule for every implementation)."""
-    if probability >= SAFE_FROM:
-        return RiskLevel.SAFE
-    if probability >= OPTIMAL_FROM:
-        return RiskLevel.OPTIMAL
-    if probability >= RISKY_FROM:
-        return RiskLevel.RISKY
-    return RiskLevel.LONG_SHOT
+# ------------------------------------------------------------------ match analysis (v1.16)
+ANALYSIS_TTL_SECONDS: Final = 30 * 60
+"""How long an analysis is reused before it is made again."""
+ANALYSIS_REFRESH_SECONDS: Final = 2 * 60
+"""A newer analysis than this is reused even when a refresh is asked for."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3085,47 +3066,61 @@ class MatchFacts:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ExpertPick:
-    """A pick with the model's probability; ``reason`` is the AI's (``None``: word the facts)."""
+class MatchOutlook:
+    """The model's main probabilities and expected goals: background of an analysis."""
 
-    pick: TopPick
-    reason: str | None = None
-
-    @property
-    def probability(self) -> float:
-        """The model probability that the pick passes."""
-        return self.pick.probability
-
-    @property
-    def risk(self) -> RiskLevel:
-        """The pick's risk band."""
-        return risk_level(self.probability)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ExpertMatch:
-    """One match with 1-2 picks (v1.16)."""
-
-    match: MatchItem
-    picks: tuple[ExpertPick, ...]
-    facts: MatchFacts | None = None
-    by_ai: bool = False
+    home_win: float
+    draw: float
+    away_win: float
+    over_2_5: float
+    btts: float
+    expected_home_goals: float
+    expected_away_goals: float
 
     def __post_init__(self) -> None:
-        """Every listed match has at least one pick, at most :data:`PICKS_PER_MATCH`."""
-        _check(1 <= len(self.picks) <= PICKS_PER_MATCH, "picks", "1..2 picks per match")
+        """Probabilities are in [0, 1], expected goals are not negative."""
+        for name in ("home_win", "draw", "away_win", "over_2_5", "btts"):
+            _check_range(getattr(self, name), name, 0.0, 1.0)
+        _check(self.expected_home_goals >= 0, "expected_home_goals", "must not be negative")
+        _check(self.expected_away_goals >= 0, "expected_away_goals", "must not be negative")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ExpertReport:
-    """Picks of every forecastable match still to play, earliest first (v1.16).
+class AnalysisSections:
+    """The AI's written sections; ``None`` sections are worded from the facts by the bot."""
 
-    ``without_forecast`` counts the matches of the window that have no model (untracked
-    league, thin history...), so the reader knows they were not forgotten.
+    form: str | None = None
+    venue: str | None = None
+    squads: str | None = None
+    tactics: str | None = None
+    summary: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MatchAnalysis:
+    """A deep, neutral analysis of one match (v1.16): never a betting tip.
+
+    ``facts`` and ``outlook`` are ``None`` when the stored history does not cover the match
+    (untracked league, thin history); ``sections`` is ``None`` when the AI did not answer.
     """
 
-    matches: tuple[ExpertMatch, ...] = ()
-    without_forecast: int = 0
+    sheet: MatchSheet
+    facts: MatchFacts | None = None
+    outlook: MatchOutlook | None = None
+    sections: AnalysisSections | None = None
+    generated_at: datetime
+
+    def __post_init__(self) -> None:
+        """Instants are UTC (see the module conventions)."""
+        _check_utc(self.generated_at, "generated_at")
+
+    @property
+    def by_ai(self) -> bool:
+        """True when at least one section is the AI's."""
+        sections = self.sections
+        return sections is not None and any(
+            (sections.form, sections.venue, sections.squads, sections.tactics, sections.summary)
+        )
 
 
 class MatchesService(Protocol):
@@ -3180,14 +3175,16 @@ class MatchesService(Protocol):
         """
         ...
 
-    async def expert_picks(self, user_id: int, day_from: date, day_to: date) -> ExpertReport:
-        """1-2 picks for every match of the user's local days still to play (v1.16).
+    async def analyse_match(
+        self, user_id: int, match_id: int, *, refresh: bool = False
+    ) -> MatchAnalysis:
+        """The deep analysis of one match (v1.16).
 
-        No odds and no probability floor: each forecastable match gets its best options, with
-        the model's probability, a :class:`RiskLevel` and a reason (AI, or facts to word).
+        A recent analysis is reused; ``refresh`` asks for a new one (still at most one per
+        :data:`ANALYSIS_REFRESH_SECONDS`, so a tapping user cannot spend the AI budget).
 
         Raises:
-            ValidationFailedError: the range breaks :func:`check_match_days`.
+            NotFoundError: the provider does not know ``match_id``.
             ServiceUnavailableError: the provider is down or not configured.
         """
         ...

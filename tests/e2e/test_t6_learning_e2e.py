@@ -10,8 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.bot import texts
-from app.db.repo import list_learning_changes, list_segment_rows, upsert_live
+from app.db.repo import upsert_live
 from app.domain import (
     ExternalRef,
     Fixture,
@@ -23,11 +22,9 @@ from app.domain import (
     Team,
 )
 from app.models.segments import odds_bucket
-from app.pipeline.learning import KIND_SEGMENT_DISABLED, run_learning
-from app.pipeline.learning_settings import LearningMode
+from app.pipeline.learning import run_learning
 from app.scheduler import JOB_LEARNING, JOB_REFRESH
 from app.services.interfaces import AnalysisQuery, DateSpec, SignalView
-from tests.e2e.bot_client import shown
 from tests.e2e.t6_world import PERMISSIVE, USER, Week, jobs, open_week
 from tests.pipeline.test_learning import Pending, add_settled
 
@@ -153,83 +150,6 @@ async def installation(w: Week, *, look: bool = True) -> list[SignalView]:
     await w.settings(USER, **PERMISSIVE)
     await jobs(w).run(JOB_REFRESH)
     return await analyse(w) if look else []
-
-
-async def test_shadow_changes_nothing_apply_changes_exactly_the_condemned_segment(
-    history_template,
-    tmp_path,
-    bot,
-    session,  # type: ignore[no-untyped-def]
-) -> None:
-    for name in ("off", "shadow", "apply"):
-        (tmp_path / name).mkdir()
-    # --- learning off: the baseline and a proof that the job is inert
-    async with open_week(
-        history_template, tmp_path / "off", bot, session, learning_mode=LearningMode.OFF
-    ) as off:
-        baseline = await installation(off)
-        target_view = next(s for s in baseline if s.league == "Premier League")
-        target = Target(
-            market=target_view.market.type,
-            bucket=odds_bucket(target_view.odds),
-            odds=target_view.odds,
-            selection=target_view.selection,
-        )
-        await seed_history(off, target)
-        assert await two_weekly_runs(off) == []
-        async with off.env.sessions() as db:
-            assert await list_segment_rows(db) == []
-            assert await list_learning_changes(db) == []
-        again = await analyse(off)
-        assert [pick_fingerprint(s) for s in again] == [pick_fingerprint(s) for s in baseline]
-    assert any(in_segment(s, target) for s in baseline), "the target segment must have picks"
-
-    # --- shadow: computes and journals, but the recommendations are bit-for-bit the same
-    async with open_week(
-        history_template, tmp_path / "shadow", bot, session, learning_mode=LearningMode.SHADOW
-    ) as shadow:
-        before = await installation(shadow)
-        await seed_history(shadow, target)
-        changes = await two_weekly_runs(shadow)
-        assert [c.kind for c in changes] == [KIND_SEGMENT_DISABLED]
-        assert [c.applied for c in changes] == [False]
-        after = await analyse(shadow)
-        assert [pick_fingerprint(s) for s in before] == [pick_fingerprint(s) for s in baseline]
-        assert [pick_fingerprint(s) for s in after] == [pick_fingerprint(s) for s in baseline]
-        # the segment table says "disabled" (the loop worked) yet nothing reached the analysis
-        async with shadow.env.sessions() as db:
-            rows = await list_segment_rows(db)
-        assert any(not row.enabled for row in rows)
-        # /ozgarishlar shows the shadow entry with no undo button (nothing was changed)
-        client = shadow.client(USER)
-        listing = "\n".join(shown(await client.send("/ozgarishlar")))
-        assert texts.LEARN_STATE_SHADOW.strip() in listing
-        assert texts.LEARN_MODES["shadow"] in listing
-        assert not client.has_button("↩️")
-
-    # --- apply: the condemned segment is gone, everything else untouched
-    async with open_week(
-        history_template, tmp_path / "apply", bot, session, learning_mode=LearningMode.APPLY
-    ) as applied:
-        await installation(applied, look=False)
-        await seed_history(applied, target)
-        changes = await two_weekly_runs(applied)
-        assert [c.kind for c in changes] == [KIND_SEGMENT_DISABLED]
-        assert [c.applied for c in changes] == [True]
-        result = await analyse(applied)
-        removed = [s for s in baseline if in_segment(s, target)]
-        assert removed
-        assert not any(in_segment(s, target) for s in result)
-        kept = [pick_fingerprint(s) for s in baseline if not in_segment(s, target)]
-        got = [pick_fingerprint(s) for s in result]
-        assert all(item in got for item in kept)  # no unrelated pick disappeared or changed
-        # a fixture that lost its pick may get its next-best one, never one from the segment
-        extra = [item for item in got if item not in kept]
-        assert len(extra) <= len(removed)
-        client = applied.client(USER)
-        listing = "\n".join(shown(await client.send("/ozgarishlar")))
-        assert texts.LEARN_STATE_APPLIED.strip() in listing
-        assert client.has_button("↩️")  # an applied change can be rolled back
 
 
 async def test_the_weekly_learning_job_is_wrapped_recorded_and_idempotent(

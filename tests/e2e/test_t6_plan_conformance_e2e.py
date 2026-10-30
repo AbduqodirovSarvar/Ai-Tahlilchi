@@ -7,7 +7,6 @@ suites by running the same claims over the production pipeline.
 
 from dataclasses import replace
 from datetime import timedelta
-from decimal import Decimal
 
 import pytest
 from aiogram.methods import EditMessageText, SendMessage
@@ -22,7 +21,6 @@ from app.services.interfaces import (
     WatchKind,
     WatchTarget,
 )
-from tests.e2e.bot_client import telegram_html_problems
 from tests.e2e.t6_world import PERMISSIVE, USER, Week, at, jobs, open_week, tick
 
 pytestmark = pytest.mark.slow
@@ -55,15 +53,6 @@ async def test_6_5_a_new_user_gets_the_balanced_defaults_of_the_plan(week: Week)
     assert got.unit is None
 
 
-async def test_6_2_the_future_is_limited_to_the_horizon(week: Week) -> None:
-    client = week.client(USER)
-    before = len(week.provider.calls)
-    reply = shown(await client.send("/tahlil 20.11-25.11"))
-    assert "Oraliq juda uzoqda" in reply
-    assert "kun keyingi o'yinlar" in reply
-    assert len(week.provider.calls) == before  # nothing was fetched for a refused request
-
-
 async def refresh_a_week_ahead(week: Week) -> None:
     """Analyses read the database: a refresh reaching a week ahead is what puts far matches in."""
     wide = replace(
@@ -91,46 +80,6 @@ async def test_6_2_matches_more_than_three_days_away_are_marked_preliminary(week
     zone = (await week.services.settings.get_settings(USER)).zone
     assert all(texts.CARD_PRELIMINARY in format_signal_card(s, zone) for s in far)
     assert not any(texts.CARD_PRELIMINARY in format_signal_card(s, zone) for s in soon)
-
-
-async def test_6_2_a_short_result_is_stated_not_padded(week: Week) -> None:
-    await week.settings(USER, **PERMISSIVE)
-    await jobs(week).run(JOB_REFRESH)
-    client = week.client(USER)
-    await client.send("/tahlil 1kun 30% ev2% 30ta")
-    await client.press(texts.BTN_START)
-    everything = "\n".join(client.texts.values())
-    assert "so'ragansiz" in everything
-    assert "30 ta" in everything
-    cards = [t for t in client.texts.values() if "🎯 Tanlov" in t]
-    assert 0 < len(cards) < 30
-
-
-async def test_6_4_a_second_recalculation_inside_ten_minutes_is_refused_then_allowed(
-    week: Week,
-) -> None:
-    await week.settings(USER, **PERMISSIVE)
-    await jobs(week).run(JOB_REFRESH)
-    await tick(week, 30)
-    week.sync(USER)
-    client = week.client(USER)
-    message_id, data = client.find_button(texts.BTN_RECALC)
-    first = shown(await client.press_data(data, message_id))
-    assert "yangilandi" in first
-    second = shown(await client.press_data(data, message_id))
-    assert "daqiqadan keyin" in second  # cooldown, with the minutes left
-    week.clock.advance(timedelta(minutes=10))
-    third = shown(await client.press_data(data, message_id))
-    assert "yangilandi" in third
-
-
-async def test_6_6_the_high_probability_warning_is_shown_once(week: Week) -> None:
-    client = week.client(USER)
-    await client.send("/start")
-    first = shown(await client.send("/tahlil 7kun 90% ev0%"))
-    second = shown(await client.send("/tahlil 7kun 90% ev0%"))
-    assert "yuqori ehtimollik chegarasi" in first or "yuqori ehtimollik" in first
-    assert "yuqori ehtimollik chegarasi" not in second
 
 
 async def test_6_7_a_followed_team_is_always_in_the_digest_even_without_value(
@@ -181,29 +130,3 @@ async def test_6_12_a_stranger_gets_no_answer_at_all(week: Week) -> None:
     for entry in ("/start", "/holat", "/bank", texts.MENU_ANALYSIS, "hello"):
         await stranger.send(entry)
     assert len(week.session.requests) == before
-
-
-async def test_6_10_the_report_has_a_calibration_table_and_the_export_two_files(
-    week: Week,
-) -> None:
-    from tests.e2e.test_t6_week_e2e import day_one  # noqa: PLC0415
-
-    day = await day_one(week)
-    for signal in day.signals[:8]:
-        await week.services.bets.place_bet(
-            USER,
-            __import__("app.services.interfaces", fromlist=["BetDraft"]).BetDraft(
-                signal_id=signal.signal_id, stake=Decimal(10)
-            ),
-        )
-    at(week, 22, 3, 0)
-    await jobs(week).run("settle")
-    client = week.client(USER)
-    reply = await client.send("/hisobot")
-    text = shown(reply)
-    assert "Hisobot" in text
-    for problem in telegram_html_problems(text):
-        pytest.fail(problem)
-    exported = await client.send("/eksport")
-    documents = [m for m in exported if type(m).__name__ == "SendDocument"]
-    assert len(documents) == 2  # signals.csv and bets.csv

@@ -76,6 +76,8 @@ def create_real_services(
         learning=RealLearningService(core),
         browser=RealDataBrowserService(core),
         calls=RealCallLogService(core),
-        matches=RealMatchesService(matches, settings, forecaster, Analyst(ctx, forecaster)),
+        matches=RealMatchesService(
+            matches, settings, forecaster, Analyst(ctx, forecaster), clock=ctx.clock
+        ),
     )
     return RealSystem(services, NotifierDelivery(core, notifier or LogOnlyNotifier()))

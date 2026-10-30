@@ -322,3 +322,18 @@ class MatchCb(CallbackData, prefix="mt"):
     d: int = 0
     p: int = 0
     i: int = 0
+
+
+class GameCb(CallbackData, prefix="g"):
+    """Analytics buttons (v1.16); stateless, so they survive a restart.
+
+    ``day`` (day ordinal ``d``, page ``p``), ``leagues`` (the league menu), ``league`` (league
+    code ``c``, page ``p``), ``an`` (analyse match ``i``) and ``re`` (refresh it). An ``an``/``re``
+    button carries its list (``d`` or ``c`` and ``p``) so "back" returns to it.
+    """
+
+    action: str
+    d: int = 0
+    c: str = ""
+    p: int = 0
+    i: int = 0

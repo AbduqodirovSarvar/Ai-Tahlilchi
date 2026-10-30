@@ -53,6 +53,9 @@ SENTENCE_STARTERS: Final = frozenset(
     kubok liga chempionat mavsum uchrashuv raqib raqiblar hisob gol goller
     yaxshi yomon kuchli zaif barqaror birinchi ikkinchi uchinchi
     over under btts
+    taktik taktika temp pressing kontrhujum ehtiyotkor ochiq hujumkor himoyaviy uslub
+    uyda safarda mezbonning mehmonning tarkiblar sxema xulosa tendensiya ssenariy kutilmoqda
+    statistik gollar uy safar formasi jadvalda ozaro
     """.split()  # noqa: SIM905 - a word list reads better than a 100-item literal
 )
 

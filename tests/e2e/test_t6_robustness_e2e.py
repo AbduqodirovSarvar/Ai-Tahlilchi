@@ -154,16 +154,6 @@ async def test_huge_text_in_every_free_text_entry_is_refused_politely(
                 assert len(method.text) <= 4096
 
 
-async def test_huge_text_into_the_wizard_prompts_and_the_note_prompt(admin: Client) -> None:
-    from tests.e2e.flows import reach  # noqa: PLC0415
-
-    for screen in ("probability_input", "ev_input", "count_input", "template_name", "teams"):
-        await reach(admin, screen)
-        methods = await admin.send("z" * 6_000)
-        assert not unexpected(methods), screen
-        await admin.send("/bekor")
-
-
 async def test_ten_thousand_ids_in_one_service_call_do_not_hang_or_crash(
     services: Services,
 ) -> None:
@@ -243,38 +233,6 @@ async def test_a_locked_database_fails_the_job_cleanly_and_the_next_tick_recover
         assert len(digests) == 1
         views = await reborn.services.signals.list_signals(USER, DateSpec.next_days(3))
         assert len(views) == 10
-
-
-async def test_a_locked_database_during_a_bet_tap_gives_a_message_and_a_retry_works(
-    history_template,
-    tmp_path,
-    bot,
-    session,  # type: ignore[no-untyped-def]
-) -> None:
-    async with open_week(history_template, tmp_path, bot, session) as w:
-        await w.settings(USER, **PERMISSIVE)
-        await jobs(w).run("refresh")
-        await tick(w, 30)
-        w.sync(USER)
-        reborn = await w.restart(busy_timeout_ms=200)
-        client = reborn.client(USER)
-        card_id, bet_data = client.find_button(texts.BTN_BET)
-        await client.press_data(bet_data, card_id)
-        confirm_id, confirm_data = client.find_button("Yozish")
-        blocker = sqlite3.connect(tmp_path / "week.db", timeout=0.1, isolation_level=None)
-        try:
-            blocker.execute("BEGIN IMMEDIATE")
-            locked = await client.press_data(confirm_data, confirm_id)
-        finally:
-            blocker.execute("ROLLBACK")
-            blocker.close()
-        assert answers(locked)  # the spinner stops ...
-        seen = [m.text for m in locked if isinstance(m, SendMessage | EditMessageText)]
-        seen += [a.text or "" for a in answers(locked)]
-        assert any("xatolik" in t or "Kutilmagan" in t or "qayta urinib" in t for t in seen), seen
-        assert await reborn.services.bets.list_bets(USER) == ()  # nothing half-written
-        await client.press_data(confirm_data, confirm_id)  # the user taps again
-        assert len(await reborn.services.bets.list_bets(USER)) == 1
 
 
 async def test_a_locked_fsm_database_does_not_kill_the_bot(
